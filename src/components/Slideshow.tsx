@@ -18,7 +18,9 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
     );
   }
 
-  const imageUrl = getImageUrl(image.path);
+  // 4K最適化された画像がある場合はそれを使用、なければ元の画像を使用
+  const imagePath = image.optimizedPath || image.path;
+  const imageUrl = getImageUrl(imagePath);
 
   return (
     <div className="w-screen h-screen bg-black overflow-hidden">

@@ -1,8 +1,9 @@
 use crate::database::Database;
-use crate::image_processor::{get_exif_info, get_image_dimensions, ImageInfo};
+use crate::image_processor::{get_exif_info, get_image_dimensions, optimize_image_for_4k, ImageInfo};
 use crate::playlist::Playlist;
 use crate::scanner::ImageScanner;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
@@ -12,6 +13,7 @@ pub struct AppState {
     pub db: Mutex<Database>,
     pub playlist: Mutex<Option<Playlist>>,
     pub folder_path: Mutex<Option<PathBuf>>,
+    pub cache_dir: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -156,6 +158,11 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
     let mut playlist_lock = state.playlist.lock().unwrap();
 
     if let Some(ref mut playlist) = *playlist_lock {
+        // プレイリストが空の場合はエラー
+        if playlist.is_empty() {
+            return Err("Playlist is empty".to_string());
+        }
+
         if let Some(image_path) = playlist.advance() {
             let path_str = image_path.clone();
             drop(playlist_lock);
@@ -181,6 +188,11 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
     let mut playlist_lock = state.playlist.lock().unwrap();
 
     if let Some(ref mut playlist) = *playlist_lock {
+        // プレイリストが空の場合はエラー
+        if playlist.is_empty() {
+            return Err("Playlist is empty".to_string());
+        }
+
         if !playlist.can_go_back() {
             return Ok(None);
         }
@@ -215,6 +227,36 @@ fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<
     // 画像サイズ
     let (width, height) = get_image_dimensions(path).unwrap_or((0, 0));
 
+    // 4K最適化：画像が4K(3840x2160)を超える場合はリサイズしてキャッシュ
+    let optimized_path = if width > 3840 || height > 2160 {
+        // キャッシュファイル名を生成（元のファイル名のハッシュを使用）
+        let hash = format!("{:x}", md5::compute(image_path));
+        let cache_file = state.cache_dir.join(format!("{}.jpg", hash));
+
+        // キャッシュが存在しない場合は作成
+        if !cache_file.exists() {
+            match optimize_image_for_4k(path) {
+                Ok(optimized_data) => {
+                    if let Err(e) = fs::write(&cache_file, optimized_data) {
+                        eprintln!("Failed to write optimized image: {}", e);
+                        None
+                    } else {
+                        println!("Created optimized image: {:?}", cache_file);
+                        Some(cache_file.to_string_lossy().to_string())
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to optimize image: {}", e);
+                    None
+                }
+            }
+        } else {
+            Some(cache_file.to_string_lossy().to_string())
+        }
+    } else {
+        None
+    };
+
     // EXIF情報
     let exif = get_exif_info(path).ok();
 
@@ -225,6 +267,7 @@ fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<
 
     Ok(Some(ImageInfo {
         path: image_path.to_string(),
+        optimized_path,
         width,
         height,
         file_size,
@@ -302,13 +345,17 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
     })
 }
 
-/// 現在のプレイリスト状態を取得
+/// 現在のプレイリスト状態を取得 (position, total, canGoBack)
 #[tauri::command]
-pub async fn get_playlist_info(state: State<'_, AppState>) -> Result<Option<(usize, usize)>, String> {
+pub async fn get_playlist_info(state: State<'_, AppState>) -> Result<Option<(usize, usize, bool)>, String> {
     let playlist_lock = state.playlist.lock().unwrap();
 
     if let Some(ref playlist) = *playlist_lock {
-        Ok(Some((playlist.current_position(), playlist.total_count())))
+        Ok(Some((
+            playlist.current_position(),
+            playlist.total_count(),
+            playlist.can_go_back()
+        )))
     } else {
         Ok(None)
     }

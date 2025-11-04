@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/tauri';
 import { open } from '@tauri-apps/api/dialog';
 import { convertFileSrc } from '@tauri-apps/api/tauri';
-import type { ImageInfo, ScanProgress, Stats, PlaylistInfo } from '../types';
+import type { ImageInfo, ScanProgress, Stats } from '../types';
 
 /**
  * フォルダ選択ダイアログを開く
@@ -63,10 +63,10 @@ export async function getStats(): Promise<Stats> {
 }
 
 /**
- * プレイリスト情報を取得
+ * プレイリスト情報を取得 (position, total, canGoBack)
  */
-export async function getPlaylistInfo(): Promise<[number, number] | null> {
-  return await invoke<[number, number] | null>('get_playlist_info');
+export async function getPlaylistInfo(): Promise<[number, number, boolean] | null> {
+  return await invoke<[number, number, boolean] | null>('get_playlist_info');
 }
 
 /**

@@ -5,9 +5,7 @@ use std::io::BufReader;
 use std::path::Path;
 
 /// 4K解像度用の最大サイズ
-#[allow(dead_code)]
 const MAX_WIDTH_4K: u32 = 3840;
-#[allow(dead_code)]
 const MAX_HEIGHT_4K: u32 = 2160;
 
 /// EXIF情報
@@ -29,6 +27,7 @@ pub struct ExifInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ImageInfo {
     pub path: String,
+    pub optimized_path: Option<String>,  // 4K最適化された画像のパス（ある場合）
     pub width: u32,
     pub height: u32,
     pub file_size: u64,
@@ -38,7 +37,6 @@ pub struct ImageInfo {
 }
 
 /// 画像を最適化（4K用にリサイズ）
-#[allow(dead_code)]
 pub fn optimize_image_for_4k(image_path: &Path) -> Result<Vec<u8>, String> {
     // 画像を読み込む
     let img = image::open(image_path)

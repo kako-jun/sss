@@ -45,6 +45,42 @@
         "isDefault": true
       },
       "problemMatcher": []
+    },
+    {
+      "label": "build:frontend",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "label": "build:rust",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build", "--manifest-path=./src-tauri/Cargo.toml"],
+      "group": "build",
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "label": "build:rust-release",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build", "--release", "--manifest-path=./src-tauri/Cargo.toml"],
+      "group": "build",
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
     }
   ]
 }
