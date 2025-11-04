@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { X, FolderOpen, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
-import { selectFolder, scanFolder, getStats } from '../lib/tauri';
+import { useState, useEffect } from 'react';
+import { selectFolder, scanFolder, getStats, getLastFolderPath } from '../lib/tauri';
 import type { ScanProgress, Stats } from '../types';
 
 interface SettingsProps {
@@ -67,12 +67,21 @@ export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
     }
   };
 
-  // 設定画面が開かれたら統計情報をロード
-  useState(() => {
+  // 設定画面が開かれたら統計情報と最後のフォルダをロード
+  useEffect(() => {
     if (isOpen) {
       loadStats();
+
+      // 最後に選択したフォルダを読み込む
+      getLastFolderPath().then((path) => {
+        if (path) {
+          setSelectedFolder(path);
+        }
+      }).catch((err) => {
+        console.error('Failed to load last folder:', err);
+      });
     }
-  });
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

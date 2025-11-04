@@ -75,3 +75,10 @@ export async function getPlaylistInfo(): Promise<[number, number] | null> {
 export function getImageUrl(imagePath: string): string {
   return convertFileSrc(imagePath);
 }
+
+/**
+ * 最後に選択したフォルダパスを取得
+ */
+export async function getLastFolderPath(): Promise<string | null> {
+  return await invoke<string | null>('get_last_folder_path');
+}
