@@ -1,5 +1,4 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { getImageUrl } from '../lib/tauri';
 import type { ImageInfo } from '../types';
 
 interface SlideshowProps {
@@ -18,15 +17,12 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
     );
   }
 
-  // 4K最適化された画像がある場合はそれを使用、なければ元の画像を使用
-  const imagePath = image.optimizedPath || image.path;
-  const imageUrl = getImageUrl(imagePath);
-
+  // base64エンコードされた画像データを直接使用
   console.log('Displaying image:', {
     originalPath: image.path,
     optimizedPath: image.optimizedPath,
-    usedPath: imagePath,
-    convertedUrl: imageUrl
+    hasImageData: !!image.imageData,
+    imageDataLength: image.imageData?.length || 0
   });
 
   return (
@@ -34,7 +30,7 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
       <AnimatePresence mode="wait">
         <motion.img
           key={image.path}
-          src={imageUrl}
+          src={image.imageData}
           alt={image.path}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -46,11 +42,11 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
           }}
           draggable={false}
           onError={(e) => {
-            console.error('Failed to load image:', imageUrl);
+            console.error('Failed to load image:', image.path);
             console.error('Error event:', e);
           }}
           onLoad={() => {
-            console.log('Image loaded successfully:', imageUrl);
+            console.log('Image loaded successfully:', image.path);
           }}
         />
       </AnimatePresence>

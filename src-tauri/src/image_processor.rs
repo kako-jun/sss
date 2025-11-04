@@ -1,8 +1,9 @@
 use image::{imageops::FilterType, GenericImageView, ImageFormat};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
 use std::path::Path;
+use base64::{Engine as _, engine::general_purpose};
 
 /// 4K解像度用の最大サイズ
 const MAX_WIDTH_4K: u32 = 3840;
@@ -28,6 +29,7 @@ pub struct ExifInfo {
 pub struct ImageInfo {
     pub path: String,
     pub optimized_path: Option<String>,  // 4K最適化された画像のパス（ある場合）
+    pub image_data: String,  // base64エンコードされた画像データ
     pub width: u32,
     pub height: u32,
     pub file_size: u64,
@@ -70,6 +72,37 @@ pub fn get_image_dimensions(image_path: &Path) -> Result<(u32, u32), String> {
         .map_err(|e| format!("Failed to open image: {}", e))?;
 
     Ok(img.dimensions())
+}
+
+/// 画像ファイルをbase64エンコードされた文字列として読み込む
+pub fn read_image_as_base64(image_path: &Path) -> Result<String, String> {
+    let mut file = File::open(image_path)
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    // MIMEタイプを推定
+    let mime_type = infer_mime_type(image_path);
+
+    // base64エンコード
+    let encoded = general_purpose::STANDARD.encode(&buffer);
+
+    // data URLとして返す
+    Ok(format!("data:{};base64,{}", mime_type, encoded))
+}
+
+/// ファイル拡張子からMIMEタイプを推定
+fn infer_mime_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|s| s.to_str()) {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("gif") => "image/gif",
+        Some("bmp") => "image/bmp",
+        Some("webp") => "image/webp",
+        _ => "image/jpeg", // デフォルト
+    }
 }
 
 /// EXIF情報を取得

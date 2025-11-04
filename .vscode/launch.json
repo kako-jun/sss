@@ -10,19 +10,6 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**"]
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Tauri Debug (Rust)",
-      "cargo": {
-        "args": [
-          "build",
-          "--manifest-path=./src-tauri/Cargo.toml",
-          "--no-default-features"
-        ]
-      },
-      "preLaunchTask": "ui:dev"
     }
   ]
 }

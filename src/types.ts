@@ -2,6 +2,7 @@
 export interface ImageInfo {
   path: string;
   optimizedPath: string | null;  // 4K最適化された画像のパス
+  imageData: string;  // base64エンコードされた画像データ
   width: number;
   height: number;
   fileSize: number;

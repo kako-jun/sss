@@ -1,5 +1,5 @@
 use crate::database::Database;
-use crate::image_processor::{get_exif_info, get_image_dimensions, optimize_image_for_4k, ImageInfo};
+use crate::image_processor::{get_exif_info, get_image_dimensions, optimize_image_for_4k, read_image_as_base64, ImageInfo};
 use crate::playlist::Playlist;
 use crate::scanner::ImageScanner;
 use serde::{Deserialize, Serialize};
@@ -44,8 +44,17 @@ pub async fn scan_folder(
         return Err(format!("Folder does not exist: {}", folder_path));
     }
 
-    // .sssignoreのパス
-    let sssignore_path = folder.join(".sssignore");
+    // .sssignoreのパス（ユーザーホームディレクトリに保存）
+    let home_dir = if cfg!(windows) {
+        std::env::var("USERPROFILE")
+            .map(PathBuf::from)
+            .map_err(|_| "Failed to get home directory")?
+    } else {
+        std::env::var("HOME")
+            .map(PathBuf::from)
+            .map_err(|_| "Failed to get home directory")?
+    };
+    let sssignore_path = home_dir.join(".sssignore");
 
     // .sssignoreファイルが存在しない場合はデフォルトルールを作成
     if !sssignore_path.exists() {
@@ -312,9 +321,24 @@ fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<
     let (display_count, last_displayed) = db.get_image_stats(image_path).unwrap_or((0, None));
     drop(db);
 
+    // 画像データをbase64エンコード
+    // 最適化版がある場合はそれを使用、ない場合またはキャッシュ読み込み失敗時は元の画像を使用
+    let image_data = if let Some(ref opt_path) = optimized_path {
+        let opt_result = read_image_as_base64(Path::new(opt_path));
+        if let Ok(data) = opt_result {
+            data
+        } else {
+            eprintln!("Optimized cache not found or corrupted, falling back to original");
+            read_image_as_base64(path)?
+        }
+    } else {
+        read_image_as_base64(path)?
+    };
+
     Ok(Some(ImageInfo {
         path: image_path.to_string(),
         optimized_path,
+        image_data,
         width,
         height,
         file_size,

@@ -105,9 +105,23 @@ function App() {
     }
   }, [isIdle, isPlaying, isInitialized, pause, play]);
 
-  // ESCキーでアプリ終了（どの画面でも）
+  const handlePrevious = async () => {
+    await loadPreviousImage();
+  };
+
+  const handleNext = () => {
+    console.log('handleNext called, isPlaying:', isPlaying);
+    // オーバーレイを非表示にしてスライドショーを再開
+    forceIdle();
+    if (!isPlaying) {
+      play();
+    }
+  };
+
+  // キーボードショートカット
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
+      // ESCキーでアプリ終了
       if (e.key === 'Escape') {
         console.log('ESC key pressed, exiting app...');
         e.preventDefault();
@@ -119,6 +133,20 @@ function App() {
           console.error('Failed to exit app:', err);
         }
       }
+
+      // 左矢印キーで前の画像へ
+      if (e.key === 'ArrowLeft' && canGoBack && !isSettingsOpen) {
+        console.log('Left arrow key pressed, going to previous image');
+        e.preventDefault();
+        await handlePrevious();
+      }
+
+      // 右矢印キーで次の画像へ
+      if (e.key === 'ArrowRight' && !isSettingsOpen) {
+        console.log('Right arrow key pressed, going to next image');
+        e.preventDefault();
+        handleNext();
+      }
     };
 
     // captureフェーズで最優先でキャッチ
@@ -127,15 +155,15 @@ function App() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, []);
-
-  const handlePrevious = async () => {
-    await loadPreviousImage();
-  };
+  }, [canGoBack, isSettingsOpen, isPlaying, play]);
 
   const handleSettings = () => {
     pause();
     setIsSettingsOpen(true);
+  };
+
+  const handleHideOverlay = () => {
+    forceIdle();
   };
 
   const handleScanComplete = async () => {
@@ -191,7 +219,9 @@ function App() {
         currentPosition={currentPosition}
         totalImages={totalImages}
         onPrevious={handlePrevious}
+        onNext={handleNext}
         onSettings={handleSettings}
+        onHide={handleHideOverlay}
       />
 
       {/* 設定画面 */}
