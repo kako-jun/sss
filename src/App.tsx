@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { exit } from '@tauri-apps/api/process';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
@@ -20,7 +21,6 @@ function App() {
     error,
     play,
     pause,
-    loadNextImage,
     loadPreviousImage,
     initialize,
   } = useSlideshow(10000); // 10秒間隔
@@ -32,9 +32,10 @@ function App() {
     try {
       const info = await getPlaylistInfo();
       if (info) {
-        const [position, total] = info;
+        const [position, total, canGoBackValue] = info;
         setCurrentPosition(position);
         setTotalImages(total);
+        setCanGoBack(canGoBackValue);
       }
     } catch (err) {
       console.error('Failed to get playlist info:', err);
@@ -100,7 +101,7 @@ function App() {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        window.__TAURI__.process.exit(0);
+        exit(0);
       }
     };
 

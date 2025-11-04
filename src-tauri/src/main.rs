@@ -28,6 +28,11 @@ fn main() {
             let db_path = app_data_dir.join("sss.db");
             println!("Database path: {:?}", db_path);
 
+            // キャッシュディレクトリを作成
+            let cache_dir = app_data_dir.join("cache");
+            std::fs::create_dir_all(&cache_dir).expect("failed to create cache directory");
+            println!("Cache directory: {:?}", cache_dir);
+
             // データベースを初期化
             let db = Database::new(db_path).expect("failed to initialize database");
 
@@ -36,6 +41,7 @@ fn main() {
                 db: Mutex::new(db),
                 playlist: Mutex::new(None),
                 folder_path: Mutex::new(None),
+                cache_dir,
             });
 
             Ok(())

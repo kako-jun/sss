@@ -85,8 +85,8 @@ impl IgnoreFilter {
         }
     }
 
-    /// パターンが設定されているかチェック
-    #[allow(dead_code)]
+    /// パターンが設定されているかチェック（テスト用）
+    #[cfg(test)]
     pub fn has_patterns(&self) -> bool {
         self.globset.is_some()
     }
