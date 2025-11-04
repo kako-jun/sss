@@ -2,7 +2,7 @@ use crate::ignore::IgnoreFilter;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 use walkdir::WalkDir;
 

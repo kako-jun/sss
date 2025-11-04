@@ -80,6 +80,18 @@ function App() {
     }
   }, [isIdle, isPlaying, pause]);
 
+  // ESCキーでアプリ終了
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        window.__TAURI__.process.exit(0);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const handlePlay = () => {
     play();
   };
@@ -123,7 +135,12 @@ function App() {
   if (!isInitialized && !isSettingsOpen) {
     return (
       <div className="w-screen h-screen bg-black flex items-center justify-center">
-        <div className="text-white text-2xl">初期化中...</div>
+        <div className="text-white text-center">
+          <div className="text-2xl mb-4">プレイリストを読み込んでいます...</div>
+          <div className="text-gray-400 text-sm">
+            しばらくお待ちください
+          </div>
+        </div>
       </div>
     );
   }

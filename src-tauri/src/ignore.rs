@@ -1,6 +1,6 @@
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub struct IgnoreFilter {
     globset: Option<GlobSet>,
@@ -86,6 +86,7 @@ impl IgnoreFilter {
     }
 
     /// パターンが設定されているかチェック
+    #[allow(dead_code)]
     pub fn has_patterns(&self) -> bool {
         self.globset.is_some()
     }
