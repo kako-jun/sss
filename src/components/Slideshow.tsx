@@ -18,10 +18,15 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
     );
   }
 
+  // 表示するファイルのパス（最適化版があればそれを使用）
+  const displayPath = image.optimizedPath || image.path;
+  const srcUrl = convertFileSrc(displayPath);
+
   console.log('Displaying:', {
     path: image.path,
     isVideo: image.isVideo,
-    hasImageData: !!image.imageData,
+    optimizedPath: image.optimizedPath,
+    srcUrl,
   });
 
   return (
@@ -31,7 +36,7 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
           // 動画の場合
           <motion.video
             key={image.path}
-            src={convertFileSrc(image.path)}
+            src={srcUrl}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -55,7 +60,7 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
           // 画像の場合
           <motion.img
             key={image.path}
-            src={image.imageData}
+            src={srcUrl}
             alt={image.path}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

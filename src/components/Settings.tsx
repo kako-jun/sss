@@ -8,9 +8,10 @@ interface SettingsProps {
   isOpen: boolean;
   onClose: () => void;
   onScanComplete: () => void;
+  onIntervalChange?: (interval: number) => void;
 }
 
-export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
+export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: SettingsProps) {
   const [selectedFolder, setSelectedFolder] = useState<string>('');
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
@@ -73,6 +74,10 @@ export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
     setDisplayInterval(value);
     try {
       await saveSetting('display_interval', value.toString());
+      // 親コンポーネントに通知
+      if (onIntervalChange) {
+        onIntervalChange(value);
+      }
     } catch (err) {
       console.error('Failed to save display interval:', err);
     }
@@ -159,40 +164,6 @@ export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
           </div>
         </div>
 
-        {/* 表示間隔設定 */}
-        <div className="mb-6">
-          <label className="block text-gray-300 font-medium mb-2">
-            表示間隔 (秒)
-          </label>
-          <div className="flex items-center gap-4">
-            <input
-              type="range"
-              min="1"
-              max="60"
-              value={displayInterval / 1000}
-              onChange={(e) => handleIntervalChange(parseInt(e.target.value) * 1000)}
-              className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
-            />
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="1"
-                max="60"
-                value={displayInterval / 1000}
-                onChange={(e) => {
-                  const value = Math.max(1, Math.min(60, parseInt(e.target.value) || 1));
-                  handleIntervalChange(value * 1000);
-                }}
-                className="w-20 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-center focus:outline-none focus:border-blue-500"
-              />
-              <span className="text-gray-400 text-sm">秒</span>
-            </div>
-          </div>
-          <div className="mt-2 text-sm text-gray-400">
-            各画像の表示時間を設定します（1〜60秒）
-          </div>
-        </div>
-
         {/* スキャンボタン */}
         <div className="mb-6">
           <button
@@ -263,7 +234,7 @@ export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
 
         {/* 統計情報 */}
         {stats && (
-          <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <div className="mb-6 p-4 bg-gray-800 rounded-lg border border-gray-700">
             <h3 className="text-white font-semibold mb-3">統計</h3>
             <div className="space-y-2 text-gray-300">
               <div className="flex justify-between">
@@ -277,6 +248,37 @@ export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
             </div>
           </div>
         )}
+
+        {/* 表示間隔設定 */}
+        <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <label className="block text-white font-semibold mb-3">
+            表示間隔
+          </label>
+          <div className="flex items-center gap-4">
+            <input
+              type="range"
+              min="1"
+              max="60"
+              value={displayInterval / 1000}
+              onChange={(e) => handleIntervalChange(parseInt(e.target.value) * 1000)}
+              className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1"
+                max="60"
+                value={displayInterval / 1000}
+                onChange={(e) => {
+                  const value = Math.max(1, Math.min(60, parseInt(e.target.value) || 1));
+                  handleIntervalChange(value * 1000);
+                }}
+                className="w-20 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-center focus:outline-none focus:border-blue-500"
+              />
+              <span className="text-gray-400 text-sm">秒</span>
+            </div>
+          </div>
+        </div>
       </motion.div>
     </motion.div>
   );

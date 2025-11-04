@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
@@ -14,6 +14,7 @@ function App() {
   const [canGoBack, setCanGoBack] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [displayInterval, setDisplayInterval] = useState<number>(10000); // デフォルト10秒
+  const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
 
   const {
     currentImage,
@@ -44,10 +45,16 @@ function App() {
     }
   };
 
-  // 初期化
+  // 初期化（React Strict Modeで2回実行されるのを防ぐ）
   useEffect(() => {
+    if (initRef.current) {
+      return; // 既に初期化済み
+    }
+
     const init = async () => {
       try {
+        initRef.current = true; // 初期化開始をマーク
+
         // 表示間隔を読み込む
         const intervalSetting = await getSetting('display_interval');
         if (intervalSetting) {
@@ -55,9 +62,9 @@ function App() {
         }
 
         // 保存されたプレイリストを復元
-        const savedImage = await initPlaylist();
+        const savedImagePath = await initPlaylist();
 
-        if (savedImage) {
+        if (savedImagePath) {
           // 既存のプレイリストがあれば初期化
           await initialize(true);
           setIsInitialized(true);
@@ -87,6 +94,7 @@ function App() {
     };
 
     init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 画像が変わったらプレイリスト情報を更新
@@ -181,6 +189,10 @@ function App() {
     await updatePlaylistInfo();
   };
 
+  const handleIntervalChange = (newInterval: number) => {
+    setDisplayInterval(newInterval);
+  };
+
   // エラー表示
   if (error && !isSettingsOpen) {
     return (
@@ -236,6 +248,7 @@ function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onScanComplete={handleScanComplete}
+        onIntervalChange={handleIntervalChange}
       />
     </div>
   );
