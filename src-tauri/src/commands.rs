@@ -1,5 +1,5 @@
 use crate::database::Database;
-use crate::image_processor::{get_exif_info, get_image_dimensions, optimize_image_for_4k, read_image_as_base64, is_video_file, ImageInfo};
+use crate::image_processor::{get_exif_info, get_image_dimensions, optimize_image_for_4k, is_video_file, ImageInfo};
 use crate::playlist::Playlist;
 use crate::scanner::ImageScanner;
 use serde::{Deserialize, Serialize};
@@ -331,29 +331,9 @@ fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<
     let (display_count, last_displayed) = db.get_image_stats(image_path).unwrap_or((0, None));
     drop(db);
 
-    // 画像データをbase64エンコード（動画はスキップ）
-    let image_data = if !is_video {
-        // 最適化版がある場合はそれを使用、ない場合またはキャッシュ読み込み失敗時は元の画像を使用
-        if let Some(ref opt_path) = optimized_path {
-            let opt_result = read_image_as_base64(Path::new(opt_path));
-            if let Ok(data) = opt_result {
-                data
-            } else {
-                eprintln!("Optimized cache not found or corrupted, falling back to original");
-                read_image_as_base64(path)?
-            }
-        } else {
-            read_image_as_base64(path)?
-        }
-    } else {
-        // 動画の場合は空文字列
-        String::new()
-    };
-
     Ok(Some(ImageInfo {
         path: image_path.to_string(),
         optimized_path,
-        image_data,
         is_video,
         width,
         height,

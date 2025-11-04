@@ -2,7 +2,6 @@
 export interface ImageInfo {
   path: string;
   optimizedPath: string | null;  // 4K最適化された画像のパス
-  imageData: string;  // base64エンコードされた画像データ（画像のみ）
   isVideo: boolean;  // 動画ファイルかどうか
   width: number;
   height: number;
