@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{Manager, State};
 
 pub struct AppState {
     pub db: Mutex<Database>,
@@ -38,6 +38,7 @@ pub struct Stats {
 pub async fn scan_folder(
     folder_path: String,
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<ScanProgress, String> {
     let folder = PathBuf::from(&folder_path);
 
@@ -97,8 +98,21 @@ pub async fn scan_folder(
     let previous_files = db.get_all_file_metadata().unwrap_or_default();
     drop(db);
 
-    // 差分スキャンを実行
-    let scan_result = scanner.scan_folder_incremental(&folder, previous_files)?;
+    // 差分スキャンを実行（進捗イベント付き）
+    let scan_result = scanner.scan_folder_incremental_with_progress(
+        &folder,
+        previous_files,
+        |current, total| {
+            // 進捗イベントを発行
+            let _ = app.emit_all(
+                "scan-progress",
+                serde_json::json!({
+                    "current": current,
+                    "total": total
+                }),
+            );
+        },
+    )?;
 
     // データベースを更新
     let db = state.db.lock().unwrap();
@@ -227,6 +241,20 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             let _ = db.increment_display_count(&path_str);
             drop(db);
 
+            // プレイリスト状態を保存
+            let playlist_lock = state.playlist.lock().unwrap();
+            if let Some(ref playlist) = *playlist_lock {
+                let state_data = playlist.get_state();
+                let db = state.db.lock().unwrap();
+                let _ = db.save_playlist_state(
+                    state_data.current_index as i32,
+                    &serde_json::to_string(&state_data.shuffled_list).unwrap(),
+                    false,
+                );
+                drop(db);
+            }
+            drop(playlist_lock);
+
             // 画像情報を取得
             get_image_info_internal(&path_str, &state)
         } else {
@@ -254,7 +282,18 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
 
         if let Some(image_path) = playlist.go_back() {
             let path_str = image_path.clone();
+
+            // プレイリスト状態を保存
+            let state_data = playlist.get_state();
             drop(playlist_lock);
+
+            let db = state.db.lock().unwrap();
+            let _ = db.save_playlist_state(
+                state_data.current_index as i32,
+                &serde_json::to_string(&state_data.shuffled_list).unwrap(),
+                false,
+            );
+            drop(db);
 
             // 画像情報を取得（カウントは増やさない）
             get_image_info_internal(&path_str, &state)

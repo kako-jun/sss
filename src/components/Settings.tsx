@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { X, FolderOpen, RefreshCw } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { selectFolder, scanFolder, getStats, getLastFolderPath, getSetting, saveSetting } from '../lib/tauri';
 import type { ScanProgress, Stats } from '../types';
 
@@ -15,6 +16,7 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
   const [selectedFolder, setSelectedFolder] = useState<string>('');
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
+  const [realtimeProgress, setRealtimeProgress] = useState<{ current: number; total: number } | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [displayInterval, setDisplayInterval] = useState<number>(10000); // ミリ秒単位
@@ -38,13 +40,23 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
       return;
     }
 
+    let unlisten: UnlistenFn | null = null;
+
     try {
       setIsScanning(true);
       setError(null);
       setScanProgress(null);
+      setRealtimeProgress(null);
+
+      // リアルタイム進捗イベントをリッスン
+      unlisten = await listen<{ current: number; total: number }>('scan-progress', (event) => {
+        console.log('Received scan progress:', event.payload);
+        setRealtimeProgress(event.payload);
+      });
 
       const progress = await scanFolder(selectedFolder);
       setScanProgress(progress);
+      setRealtimeProgress(null); // スキャン完了後はリアルタイム進捗をクリア
 
       // 統計情報を更新
       const updatedStats = await getStats();
@@ -57,6 +69,10 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
       setError(err instanceof Error ? err.message : 'Failed to scan folder');
     } finally {
       setIsScanning(false);
+      // リスナーをクリーンアップ
+      if (unlisten) {
+        unlisten();
+      }
     }
   };
 
@@ -187,6 +203,14 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
                   <RefreshCw size={16} className="animate-spin" />
                   ファイルをスキャンしています...
                 </div>
+
+                {/* リアルタイム進捗表示 */}
+                {realtimeProgress && (
+                  <div className="text-lg font-mono text-blue-100 bg-blue-800/40 px-4 py-2 rounded-lg">
+                    {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()} ファイル処理中
+                  </div>
+                )}
+
                 <div className="text-sm text-blue-300/80">
                   • 10万枚以上の写真でも数分で完了します
                 </div>

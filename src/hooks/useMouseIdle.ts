@@ -16,6 +16,10 @@ export function useMouseIdle(idleTimeout: number = 3000) {
     setIsIdle(true);
   }, []);
 
+  const toggleIdle = useCallback(() => {
+    setIsIdle(prev => !prev);
+  }, []);
+
   useEffect(() => {
     let timeoutId: number | undefined;
 
@@ -60,5 +64,5 @@ export function useMouseIdle(idleTimeout: number = 3000) {
     };
   }, [idleTimeout]);
 
-  return { isIdle, resetIdle, forceIdle };
+  return { isIdle, resetIdle, forceIdle, toggleIdle };
 }
