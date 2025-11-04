@@ -207,21 +207,19 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
         if let Some(image_path) = playlist.advance() {
             let path_str = image_path.clone();
 
-            // 次の画像と2つ先の画像のパスを取得（先読み用）
-            let next_image_path = playlist.peek_next().map(|s| s.clone());
-            let next_next_image_path = playlist.peek_next_n(2).map(|s| s.clone());
+            // 5枚先までのパスを取得（先読み用）
+            let mut prefetch_paths = Vec::new();
+            for i in 1..=5 {
+                if let Some(path) = playlist.peek_next_n(i) {
+                    prefetch_paths.push(path.clone());
+                }
+            }
 
             drop(playlist_lock);
 
-            // 次の画像と2つ先の画像を先読みキャッシュ（バックグラウンド）
+            // 5枚先まで先読みキャッシュ（バックグラウンドで直列処理）
             let cache_dir = state.cache_dir.clone();
-            if let Some(next_path) = next_image_path {
-                let cache_dir_clone = cache_dir.clone();
-                prefetch_and_cache(next_path, cache_dir_clone);
-            }
-            if let Some(next_next_path) = next_next_image_path {
-                prefetch_and_cache(next_next_path, cache_dir);
-            }
+            prefetch_and_cache_multiple(prefetch_paths, cache_dir);
 
             // 表示回数を増やす
             let db = state.db.lock().unwrap();
@@ -447,40 +445,42 @@ pub fn exit_app() {
     std::process::exit(0);
 }
 
-/// 次の画像を先読みしてキャッシュ作成（バックグラウンド処理）
-fn prefetch_and_cache(image_path: String, cache_dir: PathBuf) {
+/// 複数の画像を先読みしてキャッシュ作成（バックグラウンドで直列処理）
+fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf) {
     use std::thread;
 
     thread::spawn(move || {
-        let path = Path::new(&image_path);
+        for image_path in image_paths {
+            let path = Path::new(&image_path);
 
-        if !path.exists() {
-            return;
-        }
+            if !path.exists() {
+                continue;
+            }
 
-        // 画像サイズを取得
-        let (width, height) = match get_image_dimensions(path) {
-            Ok(dims) => dims,
-            Err(_) => return,
-        };
+            // 画像サイズを取得
+            let (width, height) = match get_image_dimensions(path) {
+                Ok(dims) => dims,
+                Err(_) => continue,
+            };
 
-        // 4Kを超える場合のみキャッシュ作成
-        if width > 3840 || height > 2160 {
-            let hash = format!("{:x}", md5::compute(&image_path));
-            let cache_file = cache_dir.join(format!("{}.jpg", hash));
+            // 4Kを超える場合のみキャッシュ作成
+            if width > 3840 || height > 2160 {
+                let hash = format!("{:x}", md5::compute(&image_path));
+                let cache_file = cache_dir.join(format!("{}.jpg", hash));
 
-            // キャッシュが既に存在する場合はスキップ
-            if !cache_file.exists() {
-                match optimize_image_for_4k(path) {
-                    Ok(optimized_data) => {
-                        if let Err(e) = fs::write(&cache_file, optimized_data) {
-                            eprintln!("Failed to write prefetched cache: {}", e);
-                        } else {
-                            println!("Prefetched and cached: {:?}", cache_file);
+                // キャッシュが既に存在する場合はスキップ
+                if !cache_file.exists() {
+                    match optimize_image_for_4k(path) {
+                        Ok(optimized_data) => {
+                            if let Err(e) = fs::write(&cache_file, optimized_data) {
+                                eprintln!("Failed to write prefetched cache: {}", e);
+                            } else {
+                                println!("Prefetched and cached: {:?}", cache_file);
+                            }
                         }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to optimize for prefetch: {}", e);
+                        Err(e) => {
+                            eprintln!("Failed to optimize for prefetch: {}", e);
+                        }
                     }
                 }
             }
