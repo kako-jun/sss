@@ -97,7 +97,7 @@ export function OverlayUI({
             className="fixed inset-0 pointer-events-none flex items-end justify-center pb-16 z-50"
           >
             <div
-              className="pointer-events-auto bg-black/30 backdrop-blur-xl rounded-2xl shadow-2xl p-6 max-w-3xl w-full mx-8"
+              className="pointer-events-auto bg-black/80 rounded-2xl shadow-2xl p-6 max-w-3xl w-full mx-8"
               style={{
                 border: '1px solid rgba(255, 255, 255, 0.1)',
               }}

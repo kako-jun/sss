@@ -24,6 +24,7 @@ image = "0.24"
 md5 = "0.7"
 base64 = "0.21"
 keepawake = "0.4"
+tauri-plugin-single-instance = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v1" }
 
 [features]
 default = ["custom-protocol"]

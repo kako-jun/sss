@@ -15,6 +15,10 @@ use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            println!("Already running instance detected");
+            println!("Args: {:?}, CWD: {:?}", argv, cwd);
+        }))
         .setup(|app| {
             // スクリーンセーバーとディスプレイスリープを抑制（クロスプラットフォーム対応）
             let keep_awake = keepawake::Builder::default()

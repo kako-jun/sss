@@ -22,8 +22,11 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
   const [displayInterval, setDisplayInterval] = useState<number>(10000); // ミリ秒単位
 
   const handleSelectFolder = async () => {
+    console.log('handleSelectFolder called');
     try {
+      console.log('Calling selectFolder...');
       const folder = await selectFolder();
+      console.log('Selected folder:', folder);
       if (folder) {
         setSelectedFolder(folder);
         setError(null);
@@ -102,10 +105,13 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
   // 設定画面が開かれたら統計情報と最後のフォルダ、表示間隔をロード
   useEffect(() => {
     if (isOpen) {
+      console.log('Settings opened, loading data...');
       loadStats();
 
       // 最後に選択したフォルダを読み込む
+      console.log('Calling getLastFolderPath...');
       getLastFolderPath().then((path) => {
+        console.log('Last folder path:', path);
         if (path) {
           setSelectedFolder(path);
         }
@@ -212,9 +218,6 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
                 )}
 
                 <div className="text-sm text-blue-300/80">
-                  • 10万枚以上の写真でも数分で完了します
-                </div>
-                <div className="text-sm text-blue-300/80">
                   • 初回スキャンは時間がかかりますが、次回以降は差分のみスキャンするため高速です
                 </div>
                 <div className="text-sm text-blue-300/80 mt-3">
@@ -281,7 +284,7 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
           <div className="flex items-center gap-4">
             <input
               type="range"
-              min="1"
+              min="5"
               max="60"
               value={displayInterval / 1000}
               onChange={(e) => handleIntervalChange(parseInt(e.target.value) * 1000)}
@@ -290,11 +293,11 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
             <div className="flex items-center gap-2">
               <input
                 type="number"
-                min="1"
+                min="5"
                 max="60"
                 value={displayInterval / 1000}
                 onChange={(e) => {
-                  const value = Math.max(1, Math.min(60, parseInt(e.target.value) || 1));
+                  const value = Math.max(5, Math.min(60, parseInt(e.target.value) || 5));
                   handleIntervalChange(value * 1000);
                 }}
                 className="w-20 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-center focus:outline-none focus:border-blue-500"
