@@ -23,5 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
+# Claude Code
+.claude/settings.local.json
+
 # Tauri
 src-tauri/target

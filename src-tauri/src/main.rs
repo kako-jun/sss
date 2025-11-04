@@ -16,6 +16,17 @@ use tauri::Manager;
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
+            // スクリーンセーバーとディスプレイスリープを抑制（クロスプラットフォーム対応）
+            let keep_awake = keepawake::Builder::default()
+                .display(true)
+                .idle(true)
+                .sleep(true)
+                .reason("Slideshow running")
+                .app_name("Smart Slide Show")
+                .create()
+                .expect("Failed to initialize keep awake");
+            println!("Screen saver prevention enabled");
+
             // データベースパスを取得
             let app_data_dir = app
                 .path_resolver()
@@ -47,6 +58,7 @@ fn main() {
                 playlist: Mutex::new(None),
                 folder_path: Mutex::new(None),
                 cache_dir,
+                _keep_awake: keep_awake,
             });
 
             Ok(())

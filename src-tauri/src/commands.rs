@@ -14,6 +14,7 @@ pub struct AppState {
     pub playlist: Mutex<Option<Playlist>>,
     pub folder_path: Mutex<Option<PathBuf>>,
     pub cache_dir: PathBuf,
+    pub _keep_awake: keepawake::AwakeHandle,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
