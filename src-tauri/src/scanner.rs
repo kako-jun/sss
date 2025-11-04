@@ -41,8 +41,15 @@ impl ImageScanner {
         ImageScanner { ignore_filter }
     }
 
-    /// フォルダをスキャン（差分検出なし）
-    pub fn scan_folder(&self, folder: &Path) -> Result<Vec<FileMetadata>, String> {
+    /// フォルダをスキャン（進捗コールバック付き）
+    pub fn scan_folder_with_progress<F>(
+        &self,
+        folder: &Path,
+        mut progress_callback: F,
+    ) -> Result<Vec<FileMetadata>, String>
+    where
+        F: FnMut(usize, usize) + Send + Sync,
+    {
         let start_time = std::time::Instant::now();
 
         // ディレクトリが存在するかチェック
@@ -64,9 +71,19 @@ impl ImageScanner {
             .filter(|e| !self.ignore_filter.is_ignored(e.path()))
             .collect();
 
-        println!("Found {} image files in {:?}", entries.len(), start_time.elapsed());
+        let total = entries.len();
+        println!("Found {} image files in {:?}", total, start_time.elapsed());
 
-        // 並列でメタデータを取得
+        // 初回の進捗報告
+        progress_callback(0, total);
+
+        // 並列でメタデータを取得（進捗報告付き）
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let processed = Arc::new(AtomicUsize::new(0));
+        let callback = Arc::new(std::sync::Mutex::new(progress_callback));
+
         let files: Vec<FileMetadata> = entries
             .par_iter()
             .filter_map(|entry| {
@@ -79,6 +96,14 @@ impl ImageScanner {
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .ok()?
                     .as_secs() as i64;
+
+                // 100ファイルごとに進捗を報告
+                let count = processed.fetch_add(1, Ordering::Relaxed) + 1;
+                if count % 100 == 0 || count == total {
+                    if let Ok(mut cb) = callback.lock() {
+                        cb(count, total);
+                    }
+                }
 
                 Some(FileMetadata {
                     path: path.to_string_lossy().to_string(),
@@ -93,12 +118,16 @@ impl ImageScanner {
         Ok(files)
     }
 
-    /// フォルダをスキャン（差分検出あり）
-    pub fn scan_folder_incremental(
+    /// フォルダをスキャン（差分検出あり、進捗コールバック付き）
+    pub fn scan_folder_incremental_with_progress<F>(
         &self,
         folder: &Path,
         previous_files: Vec<(String, i64, i64)>,
-    ) -> Result<ScanResult, String> {
+        progress_callback: F,
+    ) -> Result<ScanResult, String>
+    where
+        F: FnMut(usize, usize) + Send + Sync,
+    {
         let start_time = std::time::Instant::now();
 
         // 前回のファイルをHashMapに変換
@@ -107,8 +136,8 @@ impl ImageScanner {
             .map(|(path, mtime, size)| (path, (mtime, size)))
             .collect();
 
-        // 現在のファイルをスキャン
-        let current_files = self.scan_folder(folder)?;
+        // 現在のファイルをスキャン（進捗コールバック付き）
+        let current_files = self.scan_folder_with_progress(folder, progress_callback)?;
 
         let mut new_files = Vec::new();
         let mut unchanged_count = 0;

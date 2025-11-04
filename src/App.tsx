@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
@@ -15,6 +16,7 @@ function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [displayInterval, setDisplayInterval] = useState<number>(10000); // デフォルト10秒
   const [initStatus, setInitStatus] = useState<string>(''); // 初期化状態メッセージ
+  const [realtimeProgress, setRealtimeProgress] = useState<{ current: number; total: number } | null>(null);
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
 
   const {
@@ -29,7 +31,7 @@ function App() {
     initialize,
   } = useSlideshow(displayInterval); // 設定値を使用
 
-  const { isIdle, forceIdle } = useMouseIdle(3000); // 3秒でアイドル判定
+  const { isIdle, forceIdle, toggleIdle } = useMouseIdle(3000); // 3秒でアイドル判定
 
   // プレイリスト情報を更新
   const updatePlaylistInfo = async () => {
@@ -77,9 +79,18 @@ function App() {
           // プレイリストがない場合、最後のフォルダがあれば自動スキャン
           const lastFolder = await getLastFolderPath();
           if (lastFolder) {
+            let unlisten: UnlistenFn | null = null;
             try {
               setInitStatus('フォルダをスキャンしています...');
+
+              // リアルタイム進捗イベントをリッスン
+              unlisten = await listen<{ current: number; total: number }>('scan-progress', (event) => {
+                console.log('Init: Received scan progress:', event.payload);
+                setRealtimeProgress(event.payload);
+              });
+
               const progress = await scanFolder(lastFolder);
+              setRealtimeProgress(null); // スキャン完了後はリアルタイム進捗をクリア
               setInitStatus(`スキャン完了: ${progress.totalFiles.toLocaleString()}ファイル検出`);
 
               setInitStatus('画像を読み込んでいます...');
@@ -89,6 +100,11 @@ function App() {
             } catch (scanErr) {
               console.error('Failed to scan last folder:', scanErr);
               setIsSettingsOpen(true);
+            } finally {
+              // リスナーをクリーンアップ
+              if (unlisten) {
+                unlisten();
+              }
             }
           } else {
             // 最後のフォルダもなければ設定画面を開く
@@ -157,6 +173,13 @@ function App() {
         }
       }
 
+      // スペースキーでオーバーレイをトグル
+      if (e.key === ' ' && !isSettingsOpen) {
+        console.log('Space key pressed, toggling overlay');
+        e.preventDefault();
+        toggleIdle();
+      }
+
       // 左矢印キーで前の画像へ
       if (e.key === 'ArrowLeft' && canGoBack && !isSettingsOpen) {
         console.log('Left arrow key pressed, going to previous image');
@@ -178,7 +201,7 @@ function App() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [canGoBack, isSettingsOpen, isPlaying, play]);
+  }, [canGoBack, isSettingsOpen, isPlaying, play, toggleIdle]);
 
   const handleSettings = () => {
     pause();
@@ -225,6 +248,14 @@ function App() {
       <div className="w-screen h-screen bg-black flex items-center justify-center">
         <div className="text-white text-center">
           <div className="text-2xl mb-4">{initStatus || 'プレイリストを読み込んでいます...'}</div>
+
+          {/* リアルタイム進捗表示 */}
+          {realtimeProgress && (
+            <div className="text-3xl font-mono text-blue-300 mb-4">
+              {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()} ファイル処理中
+            </div>
+          )}
+
           <div className="text-gray-400 text-sm">
             しばらくお待ちください
           </div>

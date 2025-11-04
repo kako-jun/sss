@@ -153,10 +153,10 @@ impl Database {
     pub fn increment_display_count(&self, path: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO image_stats (path, display_count, last_displayed)
-             VALUES (?1, 1, CURRENT_TIMESTAMP)
+             VALUES (?1, 1, datetime('now', 'localtime'))
              ON CONFLICT(path) DO UPDATE SET
                  display_count = display_count + 1,
-                 last_displayed = CURRENT_TIMESTAMP",
+                 last_displayed = datetime('now', 'localtime')",
             [path],
         )?;
         Ok(())
@@ -184,7 +184,7 @@ impl Database {
     ) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO playlist_state (id, current_index, shuffled_list, last_shuffled, is_paused)
-             VALUES (1, ?1, ?2, CURRENT_TIMESTAMP, ?3)",
+             VALUES (1, ?1, ?2, datetime('now', 'localtime'), ?3)",
             [
                 &current_index.to_string(),
                 shuffled_list,
@@ -256,7 +256,7 @@ impl Database {
     /// 設定を保存
     pub fn save_setting(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)",
+            "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now', 'localtime'))",
             [key, value],
         )?;
         Ok(())
