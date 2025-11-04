@@ -49,8 +49,25 @@ export function OverlayUI({
   };
 
   const formatPath = (path: string): string => {
-    const parts = path.split(/[\\/]/);
-    return parts.slice(-3).join(' / ');
+    return path;
+  };
+
+  const formatDateTime = (isoString: string | null): string => {
+    if (!isoString) return '';
+
+    try {
+      const date = new Date(isoString);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+
+      return `${year}年${month}月${day}日 ${hours}時${minutes}分${seconds}秒`;
+    } catch {
+      return isoString;
+    }
   };
 
   return (
@@ -87,11 +104,6 @@ export function OverlayUI({
             >
             {/* 画像情報 */}
             <div className="mb-6 space-y-2">
-              <div className="flex items-center gap-2 text-white text-lg font-semibold">
-                <span className="truncate">
-                  {image.path.split(/[\\/]/).pop()}
-                </span>
-              </div>
               <div className="text-gray-300 text-sm">
                 📁 {formatPath(image.path)}
               </div>
@@ -100,8 +112,12 @@ export function OverlayUI({
                   {image.width} × {image.height}
                 </span>
                 <span>{formatFileSize(image.fileSize)}</span>
-                {image.exif?.dateTime && <span>📅 {image.exif.dateTime}</span>}
               </div>
+              {image.exif?.dateTime && (
+                <div className="text-gray-400 text-sm">
+                  📅 撮影日時: {image.exif.dateTime}
+                </div>
+              )}
               {image.exif && (image.exif.cameraMake || image.exif.cameraModel) && (
                 <div className="text-gray-400 text-sm">
                   📸 {image.exif.cameraMake} {image.exif.cameraModel}
@@ -111,8 +127,16 @@ export function OverlayUI({
                 </div>
               )}
               <div className="text-gray-400 text-sm">
-                📊 {currentPosition.toLocaleString()} / {totalImages.toLocaleString()}
+                📊 プレイリスト位置: {currentPosition.toLocaleString()} / {totalImages.toLocaleString()}
               </div>
+              <div className="text-gray-400 text-sm">
+                🔢 表示回数: {image.displayCount}回
+              </div>
+              {image.lastDisplayed && (
+                <div className="text-gray-400 text-sm">
+                  🕒 最終表示: {formatDateTime(image.lastDisplayed)}
+                </div>
+              )}
             </div>
 
             {/* コントロールボタン */}

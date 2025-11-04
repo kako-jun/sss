@@ -21,6 +21,7 @@ function App() {
     error,
     play,
     pause,
+    loadNextImage,
     loadPreviousImage,
     initialize,
   } = useSlideshow(10000); // 10秒間隔
@@ -109,13 +110,12 @@ function App() {
     await loadPreviousImage();
   };
 
-  const handleNext = () => {
-    console.log('handleNext called, isPlaying:', isPlaying);
-    // オーバーレイを非表示にしてスライドショーを再開
+  const handleNext = async () => {
+    console.log('handleNext called');
+    // すぐに次の画像を読み込む
+    await loadNextImage();
+    // オーバーレイを非表示
     forceIdle();
-    if (!isPlaying) {
-      play();
-    }
   };
 
   // キーボードショートカット
