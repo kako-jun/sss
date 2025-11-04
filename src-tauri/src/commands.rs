@@ -1,7 +1,6 @@
 use crate::database::Database;
-use crate::ignore::IgnoreFilter;
-use crate::image_processor::{get_exif_info, get_image_dimensions, ExifInfo, ImageInfo};
-use crate::playlist::{Playlist, PlaylistState};
+use crate::image_processor::{get_exif_info, get_image_dimensions, ImageInfo};
+use crate::playlist::Playlist;
 use crate::scanner::ImageScanner;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

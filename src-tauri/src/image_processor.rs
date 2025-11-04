@@ -1,11 +1,13 @@
-use image::{imageops::FilterType, DynamicImage, ImageFormat};
+use image::{imageops::FilterType, GenericImageView, ImageFormat};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 
 /// 4K解像度用の最大サイズ
+#[allow(dead_code)]
 const MAX_WIDTH_4K: u32 = 3840;
+#[allow(dead_code)]
 const MAX_HEIGHT_4K: u32 = 2160;
 
 /// EXIF情報
@@ -36,6 +38,7 @@ pub struct ImageInfo {
 }
 
 /// 画像を最適化（4K用にリサイズ）
+#[allow(dead_code)]
 pub fn optimize_image_for_4k(image_path: &Path) -> Result<Vec<u8>, String> {
     // 画像を読み込む
     let img = image::open(image_path)
@@ -77,7 +80,7 @@ pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
         .map_err(|e| format!("Failed to open file: {}", e))?;
 
     let mut buf_reader = BufReader::new(file);
-    let exif_reader = kamadak_exif::Reader::new();
+    let exif_reader = exif::Reader::new();
 
     match exif_reader.read_from_container(&mut buf_reader) {
         Ok(exif) => {
@@ -94,49 +97,49 @@ pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
             };
 
             // 撮影日時
-            if let Some(field) = exif.get_field(kamadak_exif::Tag::DateTime, kamadak_exif::In::PRIMARY) {
+            if let Some(field) = exif.get_field(exif::Tag::DateTime, exif::In::PRIMARY) {
                 info.date_time = Some(field.display_value().to_string());
             }
 
             // カメラメーカー
-            if let Some(field) = exif.get_field(kamadak_exif::Tag::Make, kamadak_exif::In::PRIMARY) {
+            if let Some(field) = exif.get_field(exif::Tag::Make, exif::In::PRIMARY) {
                 info.camera_make = Some(field.display_value().to_string());
             }
 
             // カメラモデル
-            if let Some(field) = exif.get_field(kamadak_exif::Tag::Model, kamadak_exif::In::PRIMARY) {
+            if let Some(field) = exif.get_field(exif::Tag::Model, exif::In::PRIMARY) {
                 info.camera_model = Some(field.display_value().to_string());
             }
 
             // 画像サイズ
-            if let Some(field) = exif.get_field(kamadak_exif::Tag::PixelXDimension, kamadak_exif::In::PRIMARY) {
+            if let Some(field) = exif.get_field(exif::Tag::PixelXDimension, exif::In::PRIMARY) {
                 if let Some(width) = field.value.get_uint(0) {
                     info.width = Some(width);
                 }
             }
-            if let Some(field) = exif.get_field(kamadak_exif::Tag::PixelYDimension, kamadak_exif::In::PRIMARY) {
+            if let Some(field) = exif.get_field(exif::Tag::PixelYDimension, exif::In::PRIMARY) {
                 if let Some(height) = field.value.get_uint(0) {
                     info.height = Some(height);
                 }
             }
 
             // 焦点距離
-            if let Some(field) = exif.get_field(kamadak_exif::Tag::FocalLength, kamadak_exif::In::PRIMARY) {
+            if let Some(field) = exif.get_field(exif::Tag::FocalLength, exif::In::PRIMARY) {
                 info.focal_length = Some(field.display_value().to_string());
             }
 
             // F値
-            if let Some(field) = exif.get_field(kamadak_exif::Tag::FNumber, kamadak_exif::In::PRIMARY) {
+            if let Some(field) = exif.get_field(exif::Tag::FNumber, exif::In::PRIMARY) {
                 info.f_number = Some(field.display_value().to_string());
             }
 
             // ISO感度
-            if let Some(field) = exif.get_field(kamadak_exif::Tag::PhotographicSensitivity, kamadak_exif::In::PRIMARY) {
+            if let Some(field) = exif.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY) {
                 info.iso = Some(field.display_value().to_string());
             }
 
             // 露出時間
-            if let Some(field) = exif.get_field(kamadak_exif::Tag::ExposureTime, kamadak_exif::In::PRIMARY) {
+            if let Some(field) = exif.get_field(exif::Tag::ExposureTime, exif::In::PRIMARY) {
                 info.exposure_time = Some(field.display_value().to_string());
             }
 

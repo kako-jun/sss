@@ -17,7 +17,7 @@ serde_json = "1.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
 globset = "0.4"
 walkdir = "2.4"
-kamadak-exif = "0.5"
+kamadak-exif = "0.6"
 rand = "0.8"
 rayon = "1.8"
 image = "0.24"

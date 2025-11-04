@@ -144,6 +144,27 @@ export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
             <RefreshCw size={18} className={isScanning ? 'animate-spin' : ''} />
             {isScanning ? 'スキャン中...' : 'フォルダをスキャン'}
           </button>
+
+          {/* スキャン中のメッセージ */}
+          {isScanning && (
+            <div className="mt-4 p-4 bg-blue-900/30 border border-blue-500/50 rounded-lg">
+              <div className="text-blue-200 space-y-2">
+                <div className="font-semibold flex items-center gap-2">
+                  <RefreshCw size={16} className="animate-spin" />
+                  ファイルをスキャンしています...
+                </div>
+                <div className="text-sm text-blue-300/80">
+                  • 10万枚以上の写真でも数分で完了します
+                </div>
+                <div className="text-sm text-blue-300/80">
+                  • 初回スキャンは時間がかかりますが、次回以降は差分のみスキャンするため高速です
+                </div>
+                <div className="text-sm text-blue-300/80 mt-3">
+                  画面はそのままお待ちください。完了すると結果が表示されます。
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* スキャン結果 */}

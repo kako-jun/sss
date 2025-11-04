@@ -149,6 +149,7 @@ impl Playlist {
     }
 
     /// プレイリストが空かチェック
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.shuffled_list.is_empty()
     }
