@@ -28,3 +28,6 @@ dist-ssr
 
 # Tauri
 src-tauri/target
+
+# Windows temporary files
+nul

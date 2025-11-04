@@ -10,6 +10,7 @@ const MAX_HEIGHT_4K: u32 = 2160;
 
 /// EXIF情報
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExifInfo {
     pub date_time: Option<String>,
     pub camera_make: Option<String>,
