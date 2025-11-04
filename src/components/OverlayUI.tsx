@@ -108,9 +108,12 @@ export function OverlayUI({
                 📁 {formatPath(image.path)}
               </div>
               <div className="flex items-center gap-4 text-gray-400 text-sm">
-                <span>
-                  🖼️ {image.width} × {image.height}
-                </span>
+                {!image.isVideo && image.width > 0 && (
+                  <span>
+                    🖼️ {image.width} × {image.height}
+                  </span>
+                )}
+                {image.isVideo && <span>🎬 動画ファイル</span>}
                 <span>💾 {formatFileSize(image.fileSize)}</span>
               </div>
               {image.exif?.dateTime && (

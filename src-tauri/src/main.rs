@@ -73,6 +73,8 @@ fn main() {
             commands::get_playlist_info,
             commands::get_last_folder_path,
             commands::exit_app,
+            commands::save_setting,
+            commands::get_setting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

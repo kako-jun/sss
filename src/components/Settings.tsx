@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { X, FolderOpen, RefreshCw } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { selectFolder, scanFolder, getStats, getLastFolderPath } from '../lib/tauri';
+import { selectFolder, scanFolder, getStats, getLastFolderPath, getSetting, saveSetting } from '../lib/tauri';
 import type { ScanProgress, Stats } from '../types';
 
 interface SettingsProps {
@@ -16,6 +16,7 @@ export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [displayInterval, setDisplayInterval] = useState<number>(10000); // ミリ秒単位
 
   const handleSelectFolder = async () => {
     try {
@@ -67,7 +68,17 @@ export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
     }
   };
 
-  // 設定画面が開かれたら統計情報と最後のフォルダをロード
+  // 表示間隔を保存
+  const handleIntervalChange = async (value: number) => {
+    setDisplayInterval(value);
+    try {
+      await saveSetting('display_interval', value.toString());
+    } catch (err) {
+      console.error('Failed to save display interval:', err);
+    }
+  };
+
+  // 設定画面が開かれたら統計情報と最後のフォルダ、表示間隔をロード
   useEffect(() => {
     if (isOpen) {
       loadStats();
@@ -79,6 +90,15 @@ export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
         }
       }).catch((err) => {
         console.error('Failed to load last folder:', err);
+      });
+
+      // 表示間隔を読み込む
+      getSetting('display_interval').then((value) => {
+        if (value) {
+          setDisplayInterval(parseInt(value, 10));
+        }
+      }).catch((err) => {
+        console.error('Failed to load display interval:', err);
       });
     }
   }, [isOpen]);
@@ -136,6 +156,40 @@ export function Settings({ isOpen, onClose, onScanComplete }: SettingsProps) {
               <FolderOpen size={18} />
               選択
             </button>
+          </div>
+        </div>
+
+        {/* 表示間隔設定 */}
+        <div className="mb-6">
+          <label className="block text-gray-300 font-medium mb-2">
+            表示間隔 (秒)
+          </label>
+          <div className="flex items-center gap-4">
+            <input
+              type="range"
+              min="1"
+              max="60"
+              value={displayInterval / 1000}
+              onChange={(e) => handleIntervalChange(parseInt(e.target.value) * 1000)}
+              className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1"
+                max="60"
+                value={displayInterval / 1000}
+                onChange={(e) => {
+                  const value = Math.max(1, Math.min(60, parseInt(e.target.value) || 1));
+                  handleIntervalChange(value * 1000);
+                }}
+                className="w-20 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-center focus:outline-none focus:border-blue-500"
+              />
+              <span className="text-gray-400 text-sm">秒</span>
+            </div>
+          </div>
+          <div className="mt-2 text-sm text-gray-400">
+            各画像の表示時間を設定します（1〜60秒）
           </div>
         </div>
 

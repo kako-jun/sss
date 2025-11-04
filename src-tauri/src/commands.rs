@@ -1,5 +1,5 @@
 use crate::database::Database;
-use crate::image_processor::{get_exif_info, get_image_dimensions, optimize_image_for_4k, read_image_as_base64, ImageInfo};
+use crate::image_processor::{get_exif_info, get_image_dimensions, optimize_image_for_4k, read_image_as_base64, is_video_file, ImageInfo};
 use crate::playlist::Playlist;
 use crate::scanner::ImageScanner;
 use serde::{Deserialize, Serialize};
@@ -274,16 +274,23 @@ fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<
         return Ok(None);
     }
 
+    // 動画ファイルかどうかを判定
+    let is_video = is_video_file(path);
+
     // ファイルサイズ
     let file_size = std::fs::metadata(path)
         .map(|m| m.len())
         .unwrap_or(0);
 
-    // 画像サイズ
-    let (width, height) = get_image_dimensions(path).unwrap_or((0, 0));
+    // 画像サイズ（動画の場合は0x0）
+    let (width, height) = if !is_video {
+        get_image_dimensions(path).unwrap_or((0, 0))
+    } else {
+        (0, 0)
+    };
 
-    // 4K最適化：画像が4K(3840x2160)を超える場合はリサイズしてキャッシュ
-    let optimized_path = if width > 3840 || height > 2160 {
+    // 4K最適化：画像が4K(3840x2160)を超える場合はリサイズしてキャッシュ（動画は除く）
+    let optimized_path = if !is_video && (width > 3840 || height > 2160) {
         // キャッシュファイル名を生成（元のファイル名のハッシュを使用）
         let hash = format!("{:x}", md5::compute(image_path));
         let cache_file = state.cache_dir.join(format!("{}.jpg", hash));
@@ -312,32 +319,42 @@ fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<
         None
     };
 
-    // EXIF情報
-    let exif = get_exif_info(path).ok();
+    // EXIF情報（画像のみ）
+    let exif = if !is_video {
+        get_exif_info(path).ok()
+    } else {
+        None
+    };
 
     // データベースから統計情報を取得
     let db = state.db.lock().unwrap();
     let (display_count, last_displayed) = db.get_image_stats(image_path).unwrap_or((0, None));
     drop(db);
 
-    // 画像データをbase64エンコード
-    // 最適化版がある場合はそれを使用、ない場合またはキャッシュ読み込み失敗時は元の画像を使用
-    let image_data = if let Some(ref opt_path) = optimized_path {
-        let opt_result = read_image_as_base64(Path::new(opt_path));
-        if let Ok(data) = opt_result {
-            data
+    // 画像データをbase64エンコード（動画はスキップ）
+    let image_data = if !is_video {
+        // 最適化版がある場合はそれを使用、ない場合またはキャッシュ読み込み失敗時は元の画像を使用
+        if let Some(ref opt_path) = optimized_path {
+            let opt_result = read_image_as_base64(Path::new(opt_path));
+            if let Ok(data) = opt_result {
+                data
+            } else {
+                eprintln!("Optimized cache not found or corrupted, falling back to original");
+                read_image_as_base64(path)?
+            }
         } else {
-            eprintln!("Optimized cache not found or corrupted, falling back to original");
             read_image_as_base64(path)?
         }
     } else {
-        read_image_as_base64(path)?
+        // 動画の場合は空文字列
+        String::new()
     };
 
     Ok(Some(ImageInfo {
         path: image_path.to_string(),
         optimized_path,
         image_data,
+        is_video,
         width,
         height,
         file_size,
@@ -444,6 +461,22 @@ pub async fn get_last_folder_path(state: State<'_, AppState>) -> Result<Option<S
 #[tauri::command]
 pub fn exit_app() {
     std::process::exit(0);
+}
+
+/// 設定を保存
+#[tauri::command]
+pub fn save_setting(state: State<AppState>, key: String, value: String) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.save_setting(&key, &value)
+        .map_err(|e| format!("Failed to save setting: {}", e))
+}
+
+/// 設定を取得
+#[tauri::command]
+pub fn get_setting(state: State<AppState>, key: String) -> Result<Option<String>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.get_setting(&key)
+        .map_err(|e| format!("Failed to get setting: {}", e))
 }
 
 /// 複数の画像を先読みしてキャッシュ作成（バックグラウンドで直列処理）
