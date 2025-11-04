@@ -54,70 +54,76 @@ function App() {
       return; // 既に初期化済み
     }
 
-    const init = async () => {
-      try {
-        initRef.current = true; // 初期化開始をマーク
+    // 最初に画面描画を完了させるため、初期化処理を次のイベントループで実行
+    const timeoutId = setTimeout(() => {
+      const init = async () => {
+        try {
+          initRef.current = true; // 初期化開始をマーク
 
-        setInitStatus('設定を読み込んでいます...');
-        // 表示間隔を読み込む
-        const intervalSetting = await getSetting('display_interval');
-        if (intervalSetting) {
-          setDisplayInterval(parseInt(intervalSetting, 10));
-        }
-
-        setInitStatus('プレイリストを確認しています...');
-        // 保存されたプレイリストを復元
-        const savedImagePath = await initPlaylist();
-
-        if (savedImagePath) {
-          setInitStatus('画像を読み込んでいます...');
-          // 既存のプレイリストがあれば初期化
-          await initialize(true);
-          setIsInitialized(true);
-          await updatePlaylistInfo();
-        } else {
-          // プレイリストがない場合、最後のフォルダがあれば自動スキャン
-          const lastFolder = await getLastFolderPath();
-          if (lastFolder) {
-            let unlisten: UnlistenFn | null = null;
-            try {
-              setInitStatus('フォルダをスキャンしています...');
-
-              // リアルタイム進捗イベントをリッスン
-              unlisten = await listen<{ current: number; total: number }>('scan-progress', (event) => {
-                console.log('Init: Received scan progress:', event.payload);
-                setRealtimeProgress(event.payload);
-              });
-
-              const progress = await scanFolder(lastFolder);
-              setRealtimeProgress(null); // スキャン完了後はリアルタイム進捗をクリア
-              setInitStatus(`スキャン完了: ${progress.totalFiles.toLocaleString()}ファイル検出`);
-
-              setInitStatus('画像を読み込んでいます...');
-              await initialize(true);
-              setIsInitialized(true);
-              await updatePlaylistInfo();
-            } catch (scanErr) {
-              console.error('Failed to scan last folder:', scanErr);
-              setIsSettingsOpen(true);
-            } finally {
-              // リスナーをクリーンアップ
-              if (unlisten) {
-                unlisten();
-              }
-            }
-          } else {
-            // 最後のフォルダもなければ設定画面を開く
-            setIsSettingsOpen(true);
+          setInitStatus('設定を読み込んでいます...');
+          // 表示間隔を読み込む
+          const intervalSetting = await getSetting('display_interval');
+          if (intervalSetting) {
+            setDisplayInterval(parseInt(intervalSetting, 10));
           }
-        }
-      } catch (err) {
-        console.error('Failed to initialize:', err);
-        setIsSettingsOpen(true);
-      }
-    };
 
-    init();
+          setInitStatus('プレイリストを確認しています...');
+          // 保存されたプレイリストを復元
+          const savedImagePath = await initPlaylist();
+
+          if (savedImagePath) {
+            setInitStatus('画像を読み込んでいます...');
+            // 既存のプレイリストがあれば初期化
+            await initialize(true);
+            setIsInitialized(true);
+            await updatePlaylistInfo();
+          } else {
+            // プレイリストがない場合、最後のフォルダがあれば自動スキャン
+            const lastFolder = await getLastFolderPath();
+            if (lastFolder) {
+              let unlisten: UnlistenFn | null = null;
+              try {
+                setInitStatus('フォルダをスキャンしています...');
+
+                // リアルタイム進捗イベントをリッスン
+                unlisten = await listen<{ current: number; total: number }>('scan-progress', (event) => {
+                  console.log('Init: Received scan progress:', event.payload);
+                  setRealtimeProgress(event.payload);
+                });
+
+                const progress = await scanFolder(lastFolder);
+                setRealtimeProgress(null); // スキャン完了後はリアルタイム進捗をクリア
+                setInitStatus(`スキャン完了: ${progress.totalFiles.toLocaleString()}ファイル検出`);
+
+                setInitStatus('画像を読み込んでいます...');
+                await initialize(true);
+                setIsInitialized(true);
+                await updatePlaylistInfo();
+              } catch (scanErr) {
+                console.error('Failed to scan last folder:', scanErr);
+                setIsSettingsOpen(true);
+              } finally {
+                // リスナーをクリーンアップ
+                if (unlisten) {
+                  unlisten();
+                }
+              }
+            } else {
+              // 最後のフォルダもなければ設定画面を開く
+              setIsSettingsOpen(true);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to initialize:', err);
+          setIsSettingsOpen(true);
+        }
+      };
+
+      init();
+    }, 0);
+
+    // クリーンアップ関数
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -128,22 +134,22 @@ function App() {
     }
   }, [currentImage]);
 
-  // マウス操作で自動一時停止/再開
+  // マウス操作と設定画面で自動一時停止/再開
   useEffect(() => {
-    if (!isIdle) {
-      // マウスが動いた（オーバーレイ表示）→ 一時停止
+    if (!isIdle || isSettingsOpen) {
+      // マウスが動いた（オーバーレイ表示）または設定画面表示 → 一時停止
       if (isPlaying) {
-        console.log('Mouse active, pausing slideshow');
+        console.log('Pausing slideshow (mouse active or settings open)');
         pause();
       }
     } else {
-      // マウスがアイドル（オーバーレイ非表示）→ 自動再開
+      // マウスがアイドル（オーバーレイ非表示）かつ設定画面が閉じている → 自動再開
       if (!isPlaying && isInitialized) {
-        console.log('Mouse idle, resuming slideshow');
+        console.log('Resuming slideshow (mouse idle and settings closed)');
         play();
       }
     }
-  }, [isIdle, isPlaying, isInitialized, pause, play]);
+  }, [isIdle, isSettingsOpen, isPlaying, isInitialized, pause, play]);
 
   const handlePrevious = async () => {
     await loadPreviousImage();
