@@ -146,11 +146,18 @@ pub async fn scan_folder(
 
     let mut playlist_lock = state.playlist.lock().unwrap();
 
-    if let Some(ref mut playlist) = *playlist_lock {
-        // 既存のプレイリストを更新
-        playlist.update_images(scan_result.new_files.clone(), scan_result.deleted_files.clone());
+    // フォルダパスを確認
+    let current_folder = state.folder_path.lock().unwrap().clone();
+    let is_same_folder = current_folder.as_ref().map(|p| p == &folder).unwrap_or(false);
+
+    if is_same_folder && playlist_lock.is_some() {
+        // 同じフォルダの場合のみ既存のプレイリストを更新
+        if let Some(ref mut playlist) = *playlist_lock {
+            playlist.update_images(scan_result.new_files.clone(), scan_result.deleted_files.clone());
+        }
     } else {
-        // 新規プレイリストを作成
+        // 別のフォルダまたは初回の場合は新規プレイリストを作成
+        println!("Creating new playlist for folder: {:?}", folder);
         *playlist_lock = Some(Playlist::new(image_paths));
     }
 
@@ -211,6 +218,7 @@ pub async fn init_playlist(state: State<'_, AppState>) -> Result<Option<String>,
 /// 次の画像を取得（カウント+1）
 #[tauri::command]
 pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
+    println!("get_next_image called");
     let mut playlist_lock = state.playlist.lock().unwrap();
 
     if let Some(ref mut playlist) = *playlist_lock {
@@ -219,8 +227,10 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             return Err("Playlist is empty".to_string());
         }
 
+        println!("Current position before advance: {}/{}", playlist.current_position(), playlist.total_count());
         if let Some(image_path) = playlist.advance() {
             let path_str = image_path.clone();
+            println!("Advanced to: {} (position: {}/{})", path_str, playlist.current_position(), playlist.total_count());
 
             // 5枚先までのパスを取得（先読み用）
             let mut prefetch_paths = Vec::new();
@@ -334,25 +344,33 @@ fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<
         let hash = format!("{:x}", md5::compute(image_path));
         let cache_file = state.cache_dir.join(format!("{}.jpg", hash));
 
-        // キャッシュが存在しない場合は作成
-        if !cache_file.exists() {
-            match optimize_image_for_4k(path) {
-                Ok(optimized_data) => {
-                    if let Err(e) = fs::write(&cache_file, optimized_data) {
-                        eprintln!("Failed to write optimized image: {}", e);
-                        None
-                    } else {
-                        println!("Created optimized image: {:?}", cache_file);
-                        Some(cache_file.to_string_lossy().to_string())
+        // キャッシュが存在する場合は使用
+        if cache_file.exists() {
+            println!("Using cached optimized image: {:?}", cache_file);
+            Some(cache_file.to_string_lossy().to_string())
+        } else {
+            // キャッシュがない場合は、バックグラウンドで作成して元画像を返す
+            println!("Cache not found, scheduling optimization for: {}", image_path);
+            let cache_file_clone = cache_file.clone();
+            let path_clone = path.to_path_buf();
+
+            std::thread::spawn(move || {
+                match optimize_image_for_4k(&path_clone) {
+                    Ok(optimized_data) => {
+                        if let Err(e) = fs::write(&cache_file_clone, optimized_data) {
+                            eprintln!("Failed to write optimized image: {}", e);
+                        } else {
+                            println!("Created optimized image in background: {:?}", cache_file_clone);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to optimize image: {}", e);
                     }
                 }
-                Err(e) => {
-                    eprintln!("Failed to optimize image: {}", e);
-                    None
-                }
-            }
-        } else {
-            Some(cache_file.to_string_lossy().to_string())
+            });
+
+            // 元画像を返す（すぐに表示）
+            None
         }
     } else {
         None
