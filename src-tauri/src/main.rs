@@ -28,10 +28,15 @@ fn main() {
             let db_path = app_data_dir.join("sss.db");
             println!("Database path: {:?}", db_path);
 
-            // キャッシュディレクトリを作成
+            // キャッシュディレクトリを削除して再作成（起動時にクリア）
             let cache_dir = app_data_dir.join("cache");
+            if cache_dir.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
+                    eprintln!("Failed to remove cache directory: {}", e);
+                }
+            }
             std::fs::create_dir_all(&cache_dir).expect("failed to create cache directory");
-            println!("Cache directory: {:?}", cache_dir);
+            println!("Cache directory cleared and created: {:?}", cache_dir);
 
             // データベースを初期化
             let db = Database::new(db_path).expect("failed to initialize database");
@@ -55,6 +60,7 @@ fn main() {
             commands::get_stats,
             commands::get_playlist_info,
             commands::get_last_folder_path,
+            commands::exit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

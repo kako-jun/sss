@@ -3,13 +3,17 @@ import { useState, useEffect, useCallback } from 'react';
 /**
  * マウスが一定時間動かなかったかを検出するフック
  * @param idleTimeout アイドル判定時間（ミリ秒）
- * @returns isIdle マウスがアイドル状態か
+ * @returns isIdle マウスがアイドル状態か、forceIdle 強制的にアイドル状態にする関数
  */
 export function useMouseIdle(idleTimeout: number = 3000) {
   const [isIdle, setIsIdle] = useState(true);
 
   const resetIdle = useCallback(() => {
     setIsIdle(false);
+  }, []);
+
+  const forceIdle = useCallback(() => {
+    setIsIdle(true);
   }, []);
 
   useEffect(() => {
@@ -56,5 +60,5 @@ export function useMouseIdle(idleTimeout: number = 3000) {
     };
   }, [idleTimeout]);
 
-  return { isIdle, resetIdle };
+  return { isIdle, resetIdle, forceIdle };
 }
