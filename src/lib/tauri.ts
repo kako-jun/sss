@@ -73,6 +73,7 @@ export async function getPlaylistInfo(): Promise<[number, number, boolean] | nul
  * 画像パスをTauriのURLに変換
  */
 export function getImageUrl(imagePath: string): string {
+  // Tauri v1ではデフォルトプロトコルを使用
   return convertFileSrc(imagePath);
 }
 

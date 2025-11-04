@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, ChevronLeft, FolderOpen, Settings } from 'lucide-react';
+import { ChevronLeft, FolderOpen, Settings } from 'lucide-react';
 import type { ImageInfo } from '../types';
 import { openInExplorer } from '../lib/tauri';
 import { useState } from 'react';
@@ -7,11 +7,9 @@ import { useState } from 'react';
 interface OverlayUIProps {
   image: ImageInfo | null;
   isVisible: boolean;
-  isPlaying: boolean;
   canGoBack: boolean;
   currentPosition: number;
   totalImages: number;
-  onPlay: () => void;
   onPrevious: () => void;
   onSettings: () => void;
 }
@@ -19,11 +17,9 @@ interface OverlayUIProps {
 export function OverlayUI({
   image,
   isVisible,
-  isPlaying,
   canGoBack,
   currentPosition,
   totalImages,
-  onPlay,
   onPrevious,
   onSettings,
 }: OverlayUIProps) {
@@ -101,17 +97,6 @@ export function OverlayUI({
 
             {/* コントロールボタン */}
             <div className="flex items-center gap-3">
-              {/* 再開ボタン */}
-              {!isPlaying && (
-                <button
-                  onClick={onPlay}
-                  className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors text-white font-medium"
-                >
-                  <Play size={18} />
-                  再開
-                </button>
-              )}
-
               {/* 前へボタン */}
               <button
                 onClick={onPrevious}

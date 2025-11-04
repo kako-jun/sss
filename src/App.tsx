@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { exit } from '@tauri-apps/api/process';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
 import { useMouseIdle } from './hooks/useMouseIdle';
 import { initPlaylist, getPlaylistInfo, getLastFolderPath, scanFolder } from './lib/tauri';
+import { invoke } from '@tauri-apps/api/tauri';
 
 function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -25,7 +25,7 @@ function App() {
     initialize,
   } = useSlideshow(10000); // 10秒間隔
 
-  const { isIdle } = useMouseIdle(3000); // 3秒でアイドル判定
+  const { isIdle, forceIdle } = useMouseIdle(3000); // 3秒でアイドル判定
 
   // プレイリスト情報を更新
   const updatePlaylistInfo = async () => {
@@ -88,31 +88,46 @@ function App() {
     }
   }, [currentImage]);
 
-  // マウス操作で自動一時停止
+  // マウス操作で自動一時停止/再開
   useEffect(() => {
-    if (!isIdle && isPlaying) {
-      pause();
+    if (!isIdle) {
+      // マウスが動いた（オーバーレイ表示）→ 一時停止
+      if (isPlaying) {
+        console.log('Mouse active, pausing slideshow');
+        pause();
+      }
+    } else {
+      // マウスがアイドル（オーバーレイ非表示）→ 自動再開
+      if (!isPlaying && isInitialized) {
+        console.log('Mouse idle, resuming slideshow');
+        play();
+      }
     }
-  }, [isIdle, isPlaying, pause]);
+  }, [isIdle, isPlaying, isInitialized, pause, play]);
 
   // ESCキーでアプリ終了（どの画面でも）
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        console.log('ESC key pressed, exiting app...');
         e.preventDefault();
         e.stopPropagation();
-        exit(0);
+        e.stopImmediatePropagation();
+        try {
+          await invoke('exit_app');
+        } catch (err) {
+          console.error('Failed to exit app:', err);
+        }
       }
     };
 
-    // captureフェーズでリスナーを追加して、設定画面でも確実にキャッチ
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, []);
+    // captureフェーズで最優先でキャッチ
+    document.addEventListener('keydown', handleKeyDown, true);
 
-  const handlePlay = () => {
-    play();
-  };
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []);
 
   const handlePrevious = async () => {
     await loadPreviousImage();
@@ -172,11 +187,9 @@ function App() {
       <OverlayUI
         image={currentImage}
         isVisible={!isIdle}
-        isPlaying={isPlaying}
         canGoBack={canGoBack}
         currentPosition={currentPosition}
         totalImages={totalImages}
-        onPlay={handlePlay}
         onPrevious={handlePrevious}
         onSettings={handleSettings}
       />

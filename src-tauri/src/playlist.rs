@@ -52,6 +52,24 @@ impl Playlist {
         self.shuffled_list.get(self.current_index)
     }
 
+    /// 次の画像のパスを覗く（インデックスは変更しない）
+    pub fn peek_next(&self) -> Option<&String> {
+        if self.shuffled_list.is_empty() {
+            return None;
+        }
+        let next_index = (self.current_index + 1) % self.shuffled_list.len();
+        self.shuffled_list.get(next_index)
+    }
+
+    /// N個先の画像のパスを覗く（インデックスは変更しない）
+    pub fn peek_next_n(&self, n: usize) -> Option<&String> {
+        if self.shuffled_list.is_empty() {
+            return None;
+        }
+        let next_index = (self.current_index + n) % self.shuffled_list.len();
+        self.shuffled_list.get(next_index)
+    }
+
     /// 次の画像に進む（新しい画像、カウント+1）
     pub fn advance(&mut self) -> Option<&String> {
         if self.shuffled_list.is_empty() {

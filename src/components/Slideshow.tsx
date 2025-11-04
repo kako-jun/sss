@@ -22,6 +22,13 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
   const imagePath = image.optimizedPath || image.path;
   const imageUrl = getImageUrl(imagePath);
 
+  console.log('Displaying image:', {
+    originalPath: image.path,
+    optimizedPath: image.optimizedPath,
+    usedPath: imagePath,
+    convertedUrl: imageUrl
+  });
+
   return (
     <div className="w-screen h-screen bg-black overflow-hidden">
       <AnimatePresence mode="wait">
@@ -38,6 +45,13 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
             willChange: 'opacity',
           }}
           draggable={false}
+          onError={(e) => {
+            console.error('Failed to load image:', imageUrl);
+            console.error('Error event:', e);
+          }}
+          onLoad={() => {
+            console.log('Image loaded successfully:', imageUrl);
+          }}
         />
       </AnimatePresence>
     </div>
