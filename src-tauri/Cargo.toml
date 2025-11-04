@@ -1,0 +1,27 @@
+[package]
+name = "sss"
+version = "1.0.0"
+description = "Smart Slide Show - A photo slideshow application for viewing 100k+ photos"
+authors = ["kako-jun"]
+license = "MIT"
+repository = ""
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.5", features = ["dialog-open", "fs-all", "path-all", "shell-open"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version = "0.31", features = ["bundled"] }
+globset = "0.4"
+walkdir = "2.4"
+kamadak-exif = "0.5"
+rand = "0.8"
+rayon = "1.8"
+image = "0.24"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
