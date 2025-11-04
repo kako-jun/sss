@@ -321,7 +321,20 @@ fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<
 
     // EXIF情報（画像のみ）
     let exif = if !is_video {
-        get_exif_info(path).ok()
+        match get_exif_info(path) {
+            Ok(info) => {
+                if let Some(ref dt) = info.date_time {
+                    println!("EXIF info loaded for {} - DateTime: {}", image_path, dt);
+                } else {
+                    println!("EXIF info loaded for {} - No DateTime field", image_path);
+                }
+                Some(info)
+            }
+            Err(e) => {
+                println!("Failed to get EXIF info for {}: {}", image_path, e);
+                None
+            }
+        }
     } else {
         None
     };

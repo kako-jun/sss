@@ -14,6 +14,7 @@ function App() {
   const [canGoBack, setCanGoBack] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [displayInterval, setDisplayInterval] = useState<number>(10000); // デフォルト10秒
+  const [initStatus, setInitStatus] = useState<string>(''); // 初期化状態メッセージ
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
 
   const {
@@ -55,16 +56,19 @@ function App() {
       try {
         initRef.current = true; // 初期化開始をマーク
 
+        setInitStatus('設定を読み込んでいます...');
         // 表示間隔を読み込む
         const intervalSetting = await getSetting('display_interval');
         if (intervalSetting) {
           setDisplayInterval(parseInt(intervalSetting, 10));
         }
 
+        setInitStatus('プレイリストを確認しています...');
         // 保存されたプレイリストを復元
         const savedImagePath = await initPlaylist();
 
         if (savedImagePath) {
+          setInitStatus('画像を読み込んでいます...');
           // 既存のプレイリストがあれば初期化
           await initialize(true);
           setIsInitialized(true);
@@ -74,7 +78,11 @@ function App() {
           const lastFolder = await getLastFolderPath();
           if (lastFolder) {
             try {
-              await scanFolder(lastFolder);
+              setInitStatus('フォルダをスキャンしています...');
+              const progress = await scanFolder(lastFolder);
+              setInitStatus(`スキャン完了: ${progress.totalFiles.toLocaleString()}ファイル検出`);
+
+              setInitStatus('画像を読み込んでいます...');
               await initialize(true);
               setIsInitialized(true);
               await updatePlaylistInfo();
@@ -216,7 +224,7 @@ function App() {
     return (
       <div className="w-screen h-screen bg-black flex items-center justify-center">
         <div className="text-white text-center">
-          <div className="text-2xl mb-4">プレイリストを読み込んでいます...</div>
+          <div className="text-2xl mb-4">{initStatus || 'プレイリストを読み込んでいます...'}</div>
           <div className="text-gray-400 text-sm">
             しばらくお待ちください
           </div>
@@ -226,7 +234,10 @@ function App() {
   }
 
   return (
-    <div className="w-screen h-screen bg-black overflow-hidden">
+    <div
+      className="w-screen h-screen bg-black overflow-hidden"
+      style={{ cursor: isIdle ? 'none' : 'default' }}
+    >
       {/* スライドショー */}
       <Slideshow image={currentImage} isLoading={isLoading} />
 
