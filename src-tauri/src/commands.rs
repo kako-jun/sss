@@ -110,7 +110,12 @@ pub async fn scan_folder(
     drop(playlist_lock);
 
     // フォルダパスを保存
-    *state.folder_path.lock().unwrap() = Some(folder);
+    *state.folder_path.lock().unwrap() = Some(folder.clone());
+
+    // フォルダパスをデータベースに永続化
+    let db = state.db.lock().unwrap();
+    let _ = db.save_setting("last_folder_path", &folder_path);
+    drop(db);
 
     Ok(ScanProgress {
         total_files: scan_result.total_count,
@@ -307,4 +312,13 @@ pub async fn get_playlist_info(state: State<'_, AppState>) -> Result<Option<(usi
     } else {
         Ok(None)
     }
+}
+
+/// 最後に選択したフォルダパスを取得
+#[tauri::command]
+pub async fn get_last_folder_path(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let db = state.db.lock().unwrap();
+    let path = db.get_setting("last_folder_path")
+        .map_err(|e| format!("Database error: {}", e))?;
+    Ok(path)
 }

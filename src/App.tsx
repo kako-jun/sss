@@ -4,7 +4,7 @@ import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
 import { useMouseIdle } from './hooks/useMouseIdle';
-import { initPlaylist, getPlaylistInfo } from './lib/tauri';
+import { initPlaylist, getPlaylistInfo, getLastFolderPath, scanFolder } from './lib/tauri';
 
 function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -54,8 +54,22 @@ function App() {
           setIsInitialized(true);
           await updatePlaylistInfo();
         } else {
-          // プレイリストがなければ設定画面を開く
-          setIsSettingsOpen(true);
+          // プレイリストがない場合、最後のフォルダがあれば自動スキャン
+          const lastFolder = await getLastFolderPath();
+          if (lastFolder) {
+            try {
+              await scanFolder(lastFolder);
+              await initialize(true);
+              setIsInitialized(true);
+              await updatePlaylistInfo();
+            } catch (scanErr) {
+              console.error('Failed to scan last folder:', scanErr);
+              setIsSettingsOpen(true);
+            }
+          } else {
+            // 最後のフォルダもなければ設定画面を開く
+            setIsSettingsOpen(true);
+          }
         }
       } catch (err) {
         console.error('Failed to initialize:', err);
@@ -80,16 +94,19 @@ function App() {
     }
   }, [isIdle, isPlaying, pause]);
 
-  // ESCキーでアプリ終了
+  // ESCキーでアプリ終了（どの画面でも）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
         window.__TAURI__.process.exit(0);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    // captureフェーズでリスナーを追加して、設定画面でも確実にキャッチ
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, []);
 
   const handlePlay = () => {

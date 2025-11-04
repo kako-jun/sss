@@ -74,6 +74,16 @@ impl Database {
             [],
         )?;
 
+        // アプリ設定
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
         // インデックス作成
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_modified_time ON file_metadata(modified_time)",
@@ -241,5 +251,29 @@ impl Database {
             |row| row.get(0),
         )?;
         Ok(count)
+    }
+
+    /// 設定を保存
+    pub fn save_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)",
+            [key, value],
+        )?;
+        Ok(())
+    }
+
+    /// 設定を取得
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let result = self.conn.query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            [key],
+            |row| row.get(0),
+        );
+
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
