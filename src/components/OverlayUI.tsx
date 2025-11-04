@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, FolderOpen, Settings } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FolderOpen, Settings } from 'lucide-react';
 import type { ImageInfo } from '../types';
 import { openInExplorer } from '../lib/tauri';
 import { useState } from 'react';
@@ -11,7 +11,9 @@ interface OverlayUIProps {
   currentPosition: number;
   totalImages: number;
   onPrevious: () => void;
+  onNext: () => void;
   onSettings: () => void;
+  onHide: () => void;
 }
 
 export function OverlayUI({
@@ -21,7 +23,9 @@ export function OverlayUI({
   currentPosition,
   totalImages,
   onPrevious,
+  onNext,
   onSettings,
+  onHide,
 }: OverlayUIProps) {
   const [isOpeningFolder, setIsOpeningFolder] = useState(false);
 
@@ -52,19 +56,35 @@ export function OverlayUI({
   return (
     <AnimatePresence>
       {isVisible && image && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 20 }}
-          transition={{ duration: 0.3, ease: 'easeOut' }}
-          className="fixed inset-0 pointer-events-none flex items-end justify-center pb-16"
-        >
-          <div
-            className="pointer-events-auto bg-black/30 backdrop-blur-xl rounded-2xl shadow-2xl p-6 max-w-3xl w-full mx-8"
-            style={{
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+        <>
+          {/* バックドロップ（クリックで閉じる） */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 z-40 pointer-events-auto cursor-pointer"
+            onClick={(e) => {
+              console.log('Backdrop clicked');
+              e.stopPropagation();
+              onHide();
             }}
+          />
+
+          {/* オーバーレイコンテンツ */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
+            className="fixed inset-0 pointer-events-none flex items-end justify-center pb-16 z-50"
           >
+            <div
+              className="pointer-events-auto bg-black/30 backdrop-blur-xl rounded-2xl shadow-2xl p-6 max-w-3xl w-full mx-8"
+              style={{
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+              }}
+            >
             {/* 画像情報 */}
             <div className="mb-6 space-y-2">
               <div className="flex items-center gap-2 text-white text-lg font-semibold">
@@ -111,6 +131,19 @@ export function OverlayUI({
                 前へ
               </button>
 
+              {/* 次へボタン */}
+              <button
+                onClick={(e) => {
+                  console.log('Next button clicked');
+                  e.stopPropagation();
+                  onNext();
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors text-white font-medium"
+              >
+                次へ
+                <ChevronRight size={18} />
+              </button>
+
               {/* 開くボタン */}
               <button
                 onClick={handleOpenFolder}
@@ -130,8 +163,9 @@ export function OverlayUI({
                 設定
               </button>
             </div>
-          </div>
-        </motion.div>
+            </div>
+          </motion.div>
+        </>
       )}
     </AnimatePresence>
   );
