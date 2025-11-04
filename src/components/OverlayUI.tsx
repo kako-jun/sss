@@ -64,7 +64,7 @@ export function OverlayUI({
       const minutes = String(date.getMinutes()).padStart(2, '0');
       const seconds = String(date.getSeconds()).padStart(2, '0');
 
-      return `${year}年${month}月${day}日 ${hours}時${minutes}分${seconds}秒`;
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
     } catch {
       return isoString;
     }
@@ -109,9 +109,9 @@ export function OverlayUI({
               </div>
               <div className="flex items-center gap-4 text-gray-400 text-sm">
                 <span>
-                  {image.width} × {image.height}
+                  🖼️ {image.width} × {image.height}
                 </span>
-                <span>{formatFileSize(image.fileSize)}</span>
+                <span>💾 {formatFileSize(image.fileSize)}</span>
               </div>
               {image.exif?.dateTime && (
                 <div className="text-gray-400 text-sm">
@@ -134,7 +134,7 @@ export function OverlayUI({
               </div>
               {image.lastDisplayed && (
                 <div className="text-gray-400 text-sm">
-                  🕒 最終表示: {formatDateTime(image.lastDisplayed)}
+                  🕒 最新表示: {formatDateTime(image.lastDisplayed)}
                 </div>
               )}
             </div>
