@@ -4,7 +4,7 @@ import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
 import { useMouseIdle } from './hooks/useMouseIdle';
-import { initPlaylist, getPlaylistInfo, getLastFolderPath, scanFolder } from './lib/tauri';
+import { initPlaylist, getPlaylistInfo, getLastFolderPath, scanFolder, getSetting } from './lib/tauri';
 import { invoke } from '@tauri-apps/api/tauri';
 
 function App() {
@@ -13,6 +13,7 @@ function App() {
   const [totalImages, setTotalImages] = useState(0);
   const [canGoBack, setCanGoBack] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [displayInterval, setDisplayInterval] = useState<number>(10000); // デフォルト10秒
 
   const {
     currentImage,
@@ -24,7 +25,7 @@ function App() {
     loadNextImage,
     loadPreviousImage,
     initialize,
-  } = useSlideshow(10000); // 10秒間隔
+  } = useSlideshow(displayInterval); // 設定値を使用
 
   const { isIdle, forceIdle } = useMouseIdle(3000); // 3秒でアイドル判定
 
@@ -47,6 +48,12 @@ function App() {
   useEffect(() => {
     const init = async () => {
       try {
+        // 表示間隔を読み込む
+        const intervalSetting = await getSetting('display_interval');
+        if (intervalSetting) {
+          setDisplayInterval(parseInt(intervalSetting, 10));
+        }
+
         // 保存されたプレイリストを復元
         const savedImage = await initPlaylist();
 

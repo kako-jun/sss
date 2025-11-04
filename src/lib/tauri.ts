@@ -83,3 +83,17 @@ export function getImageUrl(imagePath: string): string {
 export async function getLastFolderPath(): Promise<string | null> {
   return await invoke<string | null>('get_last_folder_path');
 }
+
+/**
+ * 設定を保存
+ */
+export async function saveSetting(key: string, value: string): Promise<void> {
+  return await invoke<void>('save_setting', { key, value });
+}
+
+/**
+ * 設定を取得
+ */
+export async function getSetting(key: string): Promise<string | null> {
+  return await invoke<string | null>('get_setting', { key });
+}

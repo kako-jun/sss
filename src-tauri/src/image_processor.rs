@@ -29,7 +29,8 @@ pub struct ExifInfo {
 pub struct ImageInfo {
     pub path: String,
     pub optimized_path: Option<String>,  // 4K最適化された画像のパス（ある場合）
-    pub image_data: String,  // base64エンコードされた画像データ
+    pub image_data: String,  // base64エンコードされた画像データ（画像のみ）
+    pub is_video: bool,  // 動画ファイルかどうか
     pub width: u32,
     pub height: u32,
     pub file_size: u64,
@@ -190,6 +191,16 @@ pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
                 exposure_time: None,
             })
         }
+    }
+}
+
+/// 動画ファイルかどうかを判定
+pub fn is_video_file(path: &Path) -> bool {
+    if let Some(extension) = path.extension() {
+        let ext = extension.to_string_lossy().to_lowercase();
+        matches!(ext.as_str(), "mp4" | "mov" | "avi" | "mkv" | "webm" | "flv" | "wmv" | "m4v")
+    } else {
+        false
     }
 }
 
