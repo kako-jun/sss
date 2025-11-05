@@ -97,3 +97,24 @@ export async function saveSetting(key: string, value: string): Promise<void> {
 export async function getSetting(key: string): Promise<string | null> {
   return await invoke<string | null>('get_setting', { key });
 }
+
+/**
+ * シェアマーク：画像をPictures/sssフォルダにコピー
+ */
+export async function shareImage(imagePath: string): Promise<string> {
+  return await invoke<string>('share_image', { imagePath });
+}
+
+/**
+ * 除外：画像を.sssignoreに追加
+ */
+export async function excludeImage(imagePath: string, excludeType: 'date' | 'file' | 'folder'): Promise<string> {
+  return await invoke<string>('exclude_image', { imagePath, excludeType });
+}
+
+/**
+ * 統計データを取得（グラフ用）
+ */
+export async function getDisplayStats(): Promise<Array<[string, number]>> {
+  return await invoke<Array<[string, number]>>('get_display_stats');
+}

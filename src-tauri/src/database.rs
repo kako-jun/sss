@@ -276,4 +276,28 @@ impl Database {
             Err(e) => Err(e),
         }
     }
+
+    /// 全画像の表示回数をリセット
+    pub fn reset_all_display_counts(&self) -> Result<()> {
+        self.conn.execute("UPDATE image_stats SET display_count = 0", [])?;
+        Ok(())
+    }
+
+    /// 全画像の表示回数を取得（グラフ用、パスでソート）
+    pub fn get_all_display_counts(&self) -> Result<Vec<(String, i32)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, display_count FROM image_stats ORDER BY path ASC"
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+
+        Ok(results)
+    }
 }

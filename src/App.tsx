@@ -4,7 +4,6 @@ import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
-import { useMouseIdle } from './hooks/useMouseIdle';
 import { initPlaylist, getPlaylistInfo, getLastFolderPath, scanFolder, getSetting } from './lib/tauri';
 import { invoke } from '@tauri-apps/api/tauri';
 
@@ -17,6 +16,7 @@ function App() {
   const [displayInterval, setDisplayInterval] = useState<number>(10000); // デフォルト10秒
   const [initStatus, setInitStatus] = useState<string>(''); // 初期化状態メッセージ
   const [realtimeProgress, setRealtimeProgress] = useState<{ current: number; total: number } | null>(null);
+  const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
 
   const {
@@ -30,8 +30,6 @@ function App() {
     loadPreviousImage,
     initialize,
   } = useSlideshow(displayInterval); // 設定値を使用
-
-  const { isIdle, forceIdle, toggleIdle } = useMouseIdle(3000); // 3秒でアイドル判定
 
   // プレイリスト情報を更新
   const updatePlaylistInfo = async () => {
@@ -134,22 +132,22 @@ function App() {
     }
   }, [currentImage]);
 
-  // マウス操作と設定画面で自動一時停止/再開
+  // オーバーレイホバーと設定画面で自動一時停止/再開
   useEffect(() => {
-    if (!isIdle || isSettingsOpen) {
-      // マウスが動いた（オーバーレイ表示）または設定画面表示 → 一時停止
+    if (isOverlayHovered || isSettingsOpen) {
+      // オーバーレイにマウスオーバーまたは設定画面表示 → 一時停止
       if (isPlaying) {
-        console.log('Pausing slideshow (mouse active or settings open)');
+        console.log('Pausing slideshow (overlay hovered or settings open)');
         pause();
       }
     } else {
-      // マウスがアイドル（オーバーレイ非表示）かつ設定画面が閉じている → 自動再開
+      // オーバーレイから離れた かつ 設定画面が閉じている → 自動再開
       if (!isPlaying && isInitialized) {
-        console.log('Resuming slideshow (mouse idle and settings closed)');
+        console.log('Resuming slideshow (overlay not hovered and settings closed)');
         play();
       }
     }
-  }, [isIdle, isSettingsOpen, isPlaying, isInitialized, pause, play]);
+  }, [isOverlayHovered, isSettingsOpen, isPlaying, isInitialized, pause, play]);
 
   const handlePrevious = async () => {
     await loadPreviousImage();
@@ -159,8 +157,6 @@ function App() {
     console.log('handleNext called');
     // すぐに次の画像を読み込む
     await loadNextImage();
-    // オーバーレイを非表示
-    forceIdle();
   };
 
   // キーボードショートカット
@@ -177,13 +173,6 @@ function App() {
         } catch (err) {
           console.error('Failed to exit app:', err);
         }
-      }
-
-      // スペースキーでオーバーレイをトグル
-      if (e.key === ' ' && !isSettingsOpen) {
-        console.log('Space key pressed, toggling overlay');
-        e.preventDefault();
-        toggleIdle();
       }
 
       // 左矢印キーで前の画像へ
@@ -207,15 +196,24 @@ function App() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [canGoBack, isSettingsOpen, isPlaying, play, toggleIdle]);
+  }, [canGoBack, isSettingsOpen]);
 
   const handleSettings = () => {
     pause();
     setIsSettingsOpen(true);
   };
 
-  const handleHideOverlay = () => {
-    forceIdle();
+  const handleOverlayMouseEnter = () => {
+    setIsOverlayHovered(true);
+  };
+
+  const handleOverlayMouseLeave = () => {
+    setIsOverlayHovered(false);
+  };
+
+  const handleTogglePause = () => {
+    // タッチデバイス対応：タップで一時停止/再生をトグル
+    setIsOverlayHovered(!isOverlayHovered);
   };
 
   const handleScanComplete = async () => {
@@ -271,24 +269,22 @@ function App() {
   }
 
   return (
-    <div
-      className="w-screen h-screen bg-black overflow-hidden"
-      style={{ cursor: isIdle ? 'none' : 'default' }}
-    >
+    <div className="w-screen h-screen bg-black overflow-hidden">
       {/* スライドショー */}
       <Slideshow image={currentImage} isLoading={isLoading} />
 
-      {/* オーバーレイUI */}
+      {/* オーバーレイUI（常時表示） */}
       <OverlayUI
         image={currentImage}
-        isVisible={!isIdle}
         canGoBack={canGoBack}
         currentPosition={currentPosition}
         totalImages={totalImages}
         onPrevious={handlePrevious}
         onNext={handleNext}
         onSettings={handleSettings}
-        onHide={handleHideOverlay}
+        onMouseEnter={handleOverlayMouseEnter}
+        onMouseLeave={handleOverlayMouseLeave}
+        onTogglePause={handleTogglePause}
       />
 
       {/* 設定画面 */}

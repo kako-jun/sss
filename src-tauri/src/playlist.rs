@@ -62,11 +62,23 @@ impl Playlist {
     }
 
     /// 次の画像に進む（新しい画像、カウント+1）
-    pub fn advance(&mut self) -> Option<&String> {
+    /// 戻り値: (画像パス, カウントすべきか)
+    pub fn advance(&mut self) -> (Option<&String>, bool) {
         if self.shuffled_list.is_empty() {
-            return None;
+            return (None, false);
         }
 
+        // 履歴の途中にいるかチェック（前へで戻った後か？）
+        let is_in_history = self.history_position < self.history.len() - 1;
+
+        if is_in_history {
+            // 履歴内を進む（既に見た画像なのでカウントしない）
+            self.history_position += 1;
+            self.current_index = self.history[self.history_position];
+            return (self.current(), false);
+        }
+
+        // 新しい画像に進む（カウントする）
         // 次のインデックスに進む
         self.current_index = (self.current_index + 1) % self.shuffled_list.len();
 
@@ -84,7 +96,7 @@ impl Playlist {
         self.history.push(self.current_index);
         self.history_position = self.history.len() - 1;
 
-        self.current()
+        (self.current(), true)
     }
 
     /// 前の画像に戻る（履歴から、カウント増やさない）
@@ -183,15 +195,21 @@ mod tests {
         assert_eq!(playlist.current_position(), 1);
 
         // 次に進む
-        playlist.advance();
+        let (img, should_count) = playlist.advance();
+        assert!(img.is_some());
+        assert!(should_count); // 新しい画像なのでカウントする
         assert_eq!(playlist.current_position(), 2);
 
         // さらに次に進む
-        playlist.advance();
+        let (img, should_count) = playlist.advance();
+        assert!(img.is_some());
+        assert!(should_count);
         assert_eq!(playlist.current_position(), 3);
 
         // 最後まで進んだら最初に戻る（シャッフル）
-        playlist.advance();
+        let (img, should_count) = playlist.advance();
+        assert!(img.is_some());
+        assert!(should_count);
         assert_eq!(playlist.current_position(), 1);
     }
 
@@ -209,8 +227,10 @@ mod tests {
         assert!(!playlist.can_go_back());
 
         // 2回進む
-        playlist.advance();
-        playlist.advance();
+        let (_, should_count1) = playlist.advance();
+        let (_, should_count2) = playlist.advance();
+        assert!(should_count1);
+        assert!(should_count2);
 
         // 履歴があるので戻れる
         assert!(playlist.can_go_back());
@@ -219,9 +239,13 @@ mod tests {
         playlist.go_back();
         assert!(playlist.can_go_back());
 
+        // 再度次へ進む（履歴内なのでカウントしない）
+        let (_, should_count) = playlist.advance();
+        assert!(!should_count); // 履歴内の画像なのでカウントしない
+
         // もう1つ戻る
         playlist.go_back();
-        assert!(!playlist.can_go_back());
+        assert!(playlist.can_go_back());
     }
 
     #[test]

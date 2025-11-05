@@ -14,14 +14,10 @@ export interface ImageInfo {
 // EXIF情報
 export interface ExifInfo {
   dateTime: string | null;
-  cameraMake: string | null;
-  cameraModel: string | null;
+  gpsLatitude: number | null;
+  gpsLongitude: number | null;
   width: number | null;
   height: number | null;
-  focalLength: string | null;
-  fNumber: string | null;
-  iso: string | null;
-  exposureTime: string | null;
 }
 
 // スキャン進捗

@@ -21,15 +21,16 @@ fn main() {
         }))
         .setup(|app| {
             // スクリーンセーバーとディスプレイスリープを抑制（クロスプラットフォーム対応）
+            // sleep(false)によりノートPC蓋閉じ時のシステムスリープは許可
             let keep_awake = keepawake::Builder::default()
-                .display(true)
-                .idle(true)
-                .sleep(true)
+                .display(true)  // ディスプレイをオンに保つ（スライドショー表示のため）
+                .idle(true)     // アイドルスリープを防ぐ
+                .sleep(false)   // 明示的なスリープは許可（ノートPC蓋閉じ時など）
                 .reason("Slideshow running")
                 .app_name("Smart Slide Show")
                 .create()
                 .expect("Failed to initialize keep awake");
-            println!("Screen saver prevention enabled");
+            println!("Screen saver prevention enabled (system sleep allowed)");
 
             // データベースパスを取得
             let app_data_dir = app
@@ -79,6 +80,9 @@ fn main() {
             commands::exit_app,
             commands::save_setting,
             commands::get_setting,
+            commands::share_image,
+            commands::exclude_image,
+            commands::get_display_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
