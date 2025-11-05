@@ -23,6 +23,7 @@ rayon = "1"
 image = "0.25"
 md5 = "0.7"
 keepawake = "0.4"
+dirs = "5"
 tauri-plugin-single-instance = { version = "2" }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"

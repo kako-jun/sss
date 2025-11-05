@@ -49,38 +49,26 @@ export function SettingsSection() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-semibold text-white">その他の設定</h3>
-
       {/* 表示回数リセット設定 */}
-      <label className="flex items-start gap-3 p-4 bg-gray-800 rounded cursor-pointer hover:bg-gray-750 transition">
+      <label className="flex items-start gap-3 cursor-pointer">
         <input
           type="checkbox"
           checked={resetOnDirectoryChange}
           onChange={(e) => handleResetChange(e.target.checked)}
-          className="mt-1 w-5 h-5 rounded border-gray-600 text-blue-600 focus:ring-blue-500"
+          className="mt-1 w-5 h-5 rounded border-gray-600 text-gray-600 focus:ring-gray-500"
         />
-        <div>
-          <div className="text-white font-medium">ディレクトリ変更時に表示回数をリセット</div>
-          <div className="text-sm text-gray-400 mt-1">
-            ONの場合、ディレクトリを選び直すたびに全ての表示回数を0にリセット
-          </div>
-        </div>
+        <div className="text-white font-medium">ディレクトリ変更時に表示回数をリセット</div>
       </label>
 
       {/* EXIF回転設定 */}
-      <label className="flex items-start gap-3 p-4 bg-gray-800 rounded cursor-pointer hover:bg-gray-750 transition">
+      <label className="flex items-start gap-3 cursor-pointer">
         <input
           type="checkbox"
           checked={applyExifRotation}
           onChange={(e) => handleExifRotationChange(e.target.checked)}
-          className="mt-1 w-5 h-5 rounded border-gray-600 text-blue-600 focus:ring-blue-500"
+          className="mt-1 w-5 h-5 rounded border-gray-600 text-gray-600 focus:ring-gray-500"
         />
-        <div>
-          <div className="text-white font-medium">EXIF回転情報を適用</div>
-          <div className="text-sm text-gray-400 mt-1">
-            ONの場合、撮影時の向きに従って画像を自動回転
-          </div>
-        </div>
+        <div className="text-white font-medium">EXIF回転情報に従って画像を自動回転</div>
       </label>
     </div>
   );

@@ -2,9 +2,9 @@ import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useState } from 'react';
 import { ScanSection } from './ScanSection';
-import { StatsSection } from './StatsSection';
 import { IntervalSection } from './IntervalSection';
 import { SettingsSection } from './SettingsSection';
+import { ShareFolderSection } from './ShareFolderSection';
 import { GraphSection } from './GraphSection';
 import { MODAL_ANIMATION_DURATION } from '../../constants';
 
@@ -59,7 +59,7 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
                 : 'text-gray-400 hover:text-gray-300'
             }`}
           >
-            ディレクトリ読み込み
+            入力
           </button>
           <button
             onClick={() => setActiveTab('options')}
@@ -86,15 +86,13 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
         {/* タブコンテンツ */}
         <div className="flex-1 overflow-y-auto">
           {activeTab === 'scan' && (
-            <div className="space-y-8">
-              <ScanSection onScanComplete={onScanComplete} />
-              <StatsSection isOpen={isOpen} />
-            </div>
+            <ScanSection onScanComplete={onScanComplete} />
           )}
           {activeTab === 'options' && (
             <div className="space-y-8">
               <IntervalSection onIntervalChange={onIntervalChange} />
               <SettingsSection />
+              <ShareFolderSection />
             </div>
           )}
           {activeTab === 'stats' && (

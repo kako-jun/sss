@@ -87,6 +87,7 @@ fn main() {
             commands::file_operations::share_image,
             commands::file_operations::exclude_image,
             commands::stats::get_display_stats,
+            commands::file_operations::get_default_share_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

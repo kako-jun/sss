@@ -125,6 +125,21 @@ pub async fn scan_folder(
         .map(|p| p == &folder)
         .unwrap_or(false);
 
+    // 設定を確認して表示回数をリセット（スキャン時は常にチェック）
+    let db = state.db.lock().unwrap();
+    let should_reset = db
+        .get_setting("reset_on_directory_change")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(true); // デフォルトはON
+
+    if should_reset {
+        let _ = db.reset_all_display_counts();
+        println!("Display counts reset on scan");
+    }
+    drop(db);
+
     if is_same_folder && playlist_lock.is_some() {
         // 同じフォルダの場合のみ既存のプレイリストを更新
         if let Some(ref mut playlist) = *playlist_lock {
@@ -137,21 +152,6 @@ pub async fn scan_folder(
         // 別のフォルダまたは初回の場合は新規プレイリストを作成
         println!("Creating new playlist for folder: {:?}", folder);
         *playlist_lock = Some(Playlist::new(image_paths));
-
-        // ディレクトリ変更時、設定を確認して表示回数をリセット
-        let db = state.db.lock().unwrap();
-        let should_reset = db
-            .get_setting("reset_on_directory_change")
-            .ok()
-            .flatten()
-            .map(|v| v == "true")
-            .unwrap_or(true); // デフォルトはON
-
-        if should_reset {
-            let _ = db.reset_all_display_counts();
-            println!("Display counts reset due to directory change");
-        }
-        drop(db);
     }
 
     // プレイリスト状態をDBに保存
