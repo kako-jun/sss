@@ -8,6 +8,7 @@ interface OverlayUIProps {
   canGoBack: boolean;
   currentPosition: number;
   totalImages: number;
+  progress: number; // 0-100のプログレス値
   onPrevious: () => void;
   onNext: () => void;
   onSettings: () => void;
@@ -21,6 +22,7 @@ export function OverlayUI({
   canGoBack,
   currentPosition,
   totalImages,
+  progress,
   onPrevious,
   onNext,
   onSettings,
@@ -115,6 +117,14 @@ export function OverlayUI({
       onMouseLeave={onMouseLeave}
       onClick={handleBackgroundClick}
     >
+      {/* プログレスバー */}
+      <div className="absolute top-0 left-0 right-0 h-0.5 bg-gray-700">
+        <div
+          className="h-full bg-white transition-all duration-100 ease-linear"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+
       {/* ステータスメッセージ */}
       {statusMessage && (
         <div className="absolute top-4 left-4 right-4 bg-blue-600/90 text-white text-sm px-3 py-2 rounded">
@@ -127,10 +137,10 @@ export function OverlayUI({
         {/* 撮影日時（デジタル時計風） */}
         {image.exif?.dateTime && (
           <div className="text-center border-b border-white/10 pb-4">
-            <div className="text-white font-mono font-bold" style={{ fontSize: '2rem' }}>
+            <div className="text-white font-mono font-bold whitespace-nowrap overflow-hidden" style={{ fontSize: 'clamp(1.2rem, 5vw, 2rem)' }}>
               {formatDateTime(image.exif.dateTime).split(' ')[0] || '----/--/--'}
             </div>
-            <div className="text-gray-400 font-mono mt-1" style={{ fontSize: '1.2rem' }}>
+            <div className="text-gray-400 font-mono mt-1 whitespace-nowrap" style={{ fontSize: '1.2rem' }}>
               {formatDateTime(image.exif.dateTime).split(' ')[1] || '--:--:--'}
             </div>
           </div>
@@ -182,7 +192,7 @@ export function OverlayUI({
                     />
                     {/* マップピンオーバーレイ */}
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <MapPin size={24} className="text-red-500 drop-shadow-lg" fill="currentColor" />
+                      <MapPin size={24} className="text-gray-400 group-hover:text-red-500 drop-shadow-lg transition-colors" fill="currentColor" />
                     </div>
                     {/* 外部リンクアイコン（右下） */}
                     <div className="absolute bottom-1 right-1 bg-black/60 rounded p-1">
@@ -216,7 +226,7 @@ export function OverlayUI({
           <ChevronLeft size={20} />
           {canGoBack && (
             <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-              ←キーで前へ
+              ←
             </span>
           )}
         </button>
@@ -227,7 +237,7 @@ export function OverlayUI({
         >
           <ChevronRight size={20} />
           <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-            →キーで次へ
+            →
           </span>
         </button>
 

@@ -26,6 +26,7 @@ function App() {
     isPlaying,
     isLoading,
     error,
+    progress,
     play,
     pause,
     loadNextImage,
@@ -293,6 +294,7 @@ function App() {
         canGoBack={canGoBack}
         currentPosition={currentPosition}
         totalImages={totalImages}
+        progress={progress}
         onPrevious={handlePrevious}
         onNext={handleNext}
         onSettings={handleSettings}

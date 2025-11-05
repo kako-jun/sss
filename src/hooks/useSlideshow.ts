@@ -11,8 +11,11 @@ export function useSlideshow(interval: number = 10000) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0); // 0-100のプログレス値
 
   const intervalRef = useRef<number | undefined>(undefined);
+  const progressIntervalRef = useRef<number | undefined>(undefined);
+  const startTimeRef = useRef<number>(0);
 
   /**
    * 次の画像を読み込む
@@ -80,10 +83,22 @@ export function useSlideshow(interval: number = 10000) {
   }, []);
 
   /**
-   * 自動進行のタイマー
+   * 自動進行のタイマーとプログレスバー
    */
   useEffect(() => {
     if (isPlaying && !isLoading) {
+      // プログレスバーをリセット
+      setProgress(0);
+      startTimeRef.current = Date.now();
+
+      // プログレスバーの更新（60FPS）
+      progressIntervalRef.current = window.setInterval(() => {
+        const elapsed = Date.now() - startTimeRef.current;
+        const newProgress = Math.min((elapsed / interval) * 100, 100);
+        setProgress(newProgress);
+      }, 16); // 約60FPS
+
+      // 画像切り替えタイマー
       intervalRef.current = window.setInterval(() => {
         loadNextImage();
       }, interval);
@@ -92,7 +107,16 @@ export function useSlideshow(interval: number = 10000) {
         if (intervalRef.current !== undefined) {
           window.clearInterval(intervalRef.current);
         }
+        if (progressIntervalRef.current !== undefined) {
+          window.clearInterval(progressIntervalRef.current);
+        }
       };
+    } else {
+      // 一時停止時はプログレスをリセット
+      setProgress(0);
+      if (progressIntervalRef.current !== undefined) {
+        window.clearInterval(progressIntervalRef.current);
+      }
     }
   }, [isPlaying, isLoading, interval, loadNextImage]);
 
@@ -111,6 +135,7 @@ export function useSlideshow(interval: number = 10000) {
     isPlaying,
     isLoading,
     error,
+    progress,
     play,
     pause,
     togglePlayPause,
