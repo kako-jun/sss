@@ -24,8 +24,8 @@ pub struct ExifInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ImageInfo {
     pub path: String,
-    pub optimized_path: Option<String>,  // 4K最適化された画像のパス（ある場合）
-    pub is_video: bool,  // 動画ファイルかどうか
+    pub optimized_path: Option<String>, // 4K最適化された画像のパス（ある場合）
+    pub is_video: bool,                 // 動画ファイルかどうか
     pub width: u32,
     pub height: u32,
     pub file_size: u64,
@@ -37,17 +37,13 @@ pub struct ImageInfo {
 /// 画像を最適化（4K用にリサイズ）
 pub fn optimize_image_for_4k(image_path: &Path) -> Result<Vec<u8>, String> {
     // 画像を読み込む
-    let img = image::open(image_path)
-        .map_err(|e| format!("Failed to open image: {}", e))?;
+    let img = image::open(image_path).map_err(|e| format!("Failed to open image: {}", e))?;
 
     let (width, height) = img.dimensions();
 
     // 4K解像度を超える場合はリサイズ
     let resized_img = if width > MAX_WIDTH_4K || height > MAX_HEIGHT_4K {
-        println!(
-            "Resizing image from {}x{} to fit 4K",
-            width, height
-        );
+        println!("Resizing image from {}x{} to fit 4K", width, height);
         img.resize(MAX_WIDTH_4K, MAX_HEIGHT_4K, FilterType::Lanczos3)
     } else {
         img
@@ -64,16 +60,14 @@ pub fn optimize_image_for_4k(image_path: &Path) -> Result<Vec<u8>, String> {
 
 /// 画像の基本情報を取得
 pub fn get_image_dimensions(image_path: &Path) -> Result<(u32, u32), String> {
-    let img = image::open(image_path)
-        .map_err(|e| format!("Failed to open image: {}", e))?;
+    let img = image::open(image_path).map_err(|e| format!("Failed to open image: {}", e))?;
 
     Ok(img.dimensions())
 }
 
 /// EXIF情報を取得
 pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
-    let file = File::open(image_path)
-        .map_err(|e| format!("Failed to open file: {}", e))?;
+    let file = File::open(image_path).map_err(|e| format!("Failed to open file: {}", e))?;
 
     let mut buf_reader = BufReader::new(file);
     let exif_reader = exif::Reader::new();
@@ -96,8 +90,13 @@ pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
             // GPS座標の取得
             // 緯度
             if let Some(lat_field) = exif.get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY) {
-                if let Some(lat_ref_field) = exif.get_field(exif::Tag::GPSLatitudeRef, exif::In::PRIMARY) {
-                    if let Some(latitude) = parse_gps_coordinate(&lat_field.value, &lat_ref_field.display_value().to_string()) {
+                if let Some(lat_ref_field) =
+                    exif.get_field(exif::Tag::GPSLatitudeRef, exif::In::PRIMARY)
+                {
+                    if let Some(latitude) = parse_gps_coordinate(
+                        &lat_field.value,
+                        &lat_ref_field.display_value().to_string(),
+                    ) {
                         info.gps_latitude = Some(latitude);
                     }
                 }
@@ -105,8 +104,13 @@ pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
 
             // 経度
             if let Some(lon_field) = exif.get_field(exif::Tag::GPSLongitude, exif::In::PRIMARY) {
-                if let Some(lon_ref_field) = exif.get_field(exif::Tag::GPSLongitudeRef, exif::In::PRIMARY) {
-                    if let Some(longitude) = parse_gps_coordinate(&lon_field.value, &lon_ref_field.display_value().to_string()) {
+                if let Some(lon_ref_field) =
+                    exif.get_field(exif::Tag::GPSLongitudeRef, exif::In::PRIMARY)
+                {
+                    if let Some(longitude) = parse_gps_coordinate(
+                        &lon_field.value,
+                        &lon_ref_field.display_value().to_string(),
+                    ) {
                         info.gps_longitude = Some(longitude);
                     }
                 }
@@ -165,7 +169,10 @@ fn parse_gps_coordinate(value: &exif::Value, reference: &str) -> Option<f64> {
 pub fn is_video_file(path: &Path) -> bool {
     if let Some(extension) = path.extension() {
         let ext = extension.to_string_lossy().to_lowercase();
-        matches!(ext.as_str(), "mp4" | "mov" | "avi" | "mkv" | "webm" | "flv" | "wmv" | "m4v")
+        matches!(
+            ext.as_str(),
+            "mp4" | "mov" | "avi" | "mkv" | "webm" | "flv" | "wmv" | "m4v"
+        )
     } else {
         false
     }

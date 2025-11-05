@@ -2,51 +2,27 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../dist",
-    "withGlobalTauri": false
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
   },
-  "package": {
-    "productName": "sss",
-    "version": "1.0.0"
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "dialog": {
-        "open": true
-      },
-      "fs": {
-        "all": true,
-        "scope": ["**"]
-      },
-      "path": {
-        "all": true
-      },
-      "shell": {
-        "open": true
-      },
-      "protocol": {
-        "all": true,
-        "asset": true,
-        "assetScope": ["**"]
-      }
-    },
-    "bundle": {
-      "active": true,
-      "targets": "all",
-      "identifier": "com.kakojun.sss",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ]
-    },
-    "security": {
-      "csp": null
-    },
+  "productName": "sss",
+  "mainBinaryName": "sss",
+  "version": "1.0.0",
+  "identifier": "com.kakojun.sss",
+  "plugins": {},
+  "app": {
+    "withGlobalTauri": false,
     "windows": [
       {
         "fullscreen": true,
@@ -57,8 +33,19 @@
         "height": 1080,
         "decorations": false,
         "alwaysOnTop": false,
-        "visible": true
+        "visible": true,
+        "backgroundColor": "#000000",
+        "useHttpsScheme": true
       }
-    ]
+    ],
+    "security": {
+      "assetProtocol": {
+        "scope": [
+          "**"
+        ],
+        "enable": true
+      },
+      "csp": null
+    }
   }
 }

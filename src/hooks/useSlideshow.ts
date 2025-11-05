@@ -12,7 +12,7 @@ export function useSlideshow(interval: number = 10000) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const intervalRef = useRef<number | undefined>();
+  const intervalRef = useRef<number | undefined>(undefined);
 
   /**
    * 次の画像を読み込む

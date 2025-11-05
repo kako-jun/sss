@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { convertFileSrc } from '@tauri-apps/api/tauri';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import type { ImageInfo } from '../types';
 
 interface SlideshowProps {

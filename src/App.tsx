@@ -5,7 +5,7 @@ import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
 import { initPlaylist, getPlaylistInfo, getLastFolderPath, scanFolder, getSetting } from './lib/tauri';
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 
 function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);

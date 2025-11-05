@@ -144,7 +144,8 @@ impl Playlist {
     pub fn update_images(&mut self, new_images: Vec<String>, deleted_images: Vec<String>) {
         // 削除された画像を除外
         if !deleted_images.is_empty() {
-            self.shuffled_list.retain(|path| !deleted_images.contains(path));
+            self.shuffled_list
+                .retain(|path| !deleted_images.contains(path));
         }
 
         // 新規画像を追加してシャッフル
@@ -250,10 +251,7 @@ mod tests {
 
     #[test]
     fn test_playlist_update() {
-        let images = vec![
-            "img1.jpg".to_string(),
-            "img2.jpg".to_string(),
-        ];
+        let images = vec!["img1.jpg".to_string(), "img2.jpg".to_string()];
 
         let mut playlist = Playlist::new(images);
         assert_eq!(playlist.total_count(), 2);

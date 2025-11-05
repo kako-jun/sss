@@ -15,6 +15,9 @@ use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|_app, argv, cwd| {
             println!("Already running instance detected");
             println!("Args: {:?}, CWD: {:?}", argv, cwd);
@@ -23,9 +26,9 @@ fn main() {
             // スクリーンセーバーとディスプレイスリープを抑制（クロスプラットフォーム対応）
             // sleep(false)によりノートPC蓋閉じ時のシステムスリープは許可
             let keep_awake = keepawake::Builder::default()
-                .display(true)  // ディスプレイをオンに保つ（スライドショー表示のため）
-                .idle(true)     // アイドルスリープを防ぐ
-                .sleep(false)   // 明示的なスリープは許可（ノートPC蓋閉じ時など）
+                .display(true) // ディスプレイをオンに保つ（スライドショー表示のため）
+                .idle(true) // アイドルスリープを防ぐ
+                .sleep(false) // 明示的なスリープは許可（ノートPC蓋閉じ時など）
                 .reason("Slideshow running")
                 .app_name("Smart Slide Show")
                 .create()
@@ -34,7 +37,7 @@ fn main() {
 
             // データベースパスを取得
             let app_data_dir = app
-                .path_resolver()
+                .path()
                 .app_data_dir()
                 .expect("failed to get app data directory");
 

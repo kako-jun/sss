@@ -1,6 +1,6 @@
-import { invoke } from '@tauri-apps/api/tauri';
-import { open } from '@tauri-apps/api/dialog';
-import { convertFileSrc } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import type { ImageInfo, ScanProgress, Stats } from '../types';
 
 /**
@@ -73,7 +73,7 @@ export async function getPlaylistInfo(): Promise<[number, number, boolean] | nul
  * 画像パスをTauriのURLに変換
  */
 export function getImageUrl(imagePath: string): string {
-  // Tauri v1ではデフォルトプロトコルを使用
+  // Tauri v2ではデフォルトプロトコルを使用
   return convertFileSrc(imagePath);
 }
 

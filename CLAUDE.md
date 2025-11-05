@@ -9,23 +9,28 @@
 ## 技術スタック
 
 ### バックエンド
-- **フレームワーク**: Tauri v1.5
+- **フレームワーク**: Tauri v2 (最新版、モバイル対応準備)
 - **言語**: Rust (edition 2021)
-- **データベース**: SQLite (rusqlite v0.31, bundled)
-- **並列処理**: rayon v1.8
-- **ファイル走査**: walkdir v2.4
+- **データベース**: SQLite (rusqlite v0.32, bundled)
+- **並列処理**: rayon v1
+- **ファイル走査**: walkdir v2
 - **フィルタリング**: globset v0.4
 - **EXIF読み取り**: kamadak-exif v0.6 (画像のみ)
-- **画像処理**: image v0.24
-- **画像エンコーディング**: base64 v0.21
+- **画像処理**: image v0.25
+- **キャッシュ管理**: md5 v0.7 (ファイル名ハッシュ生成)
 - **ランダム生成**: rand v0.8
 - **スクリーンセーバー抑制**: keepawake v0.4 (クロスプラットフォーム対応)
+- **プラグイン**:
+  - tauri-plugin-dialog v2 (ダイアログ)
+  - tauri-plugin-shell v2 (シェル操作)
+  - tauri-plugin-fs v2 (ファイルシステム)
+  - tauri-plugin-single-instance v2 (単一インスタンス)
 
 ### フロントエンド
-- **フレームワーク**: React 18 + TypeScript
-- **ビルドツール**: Vite
+- **フレームワーク**: React 19 + TypeScript
+- **ビルドツール**: Vite v7
 - **アニメーション**: Framer Motion
-- **スタイリング**: TailwindCSS
+- **スタイリング**: TailwindCSS v3
 - **アイコン**: Lucide React
 
 ## コア機能
@@ -43,8 +48,8 @@
   - 画像: JPG, PNG, GIF, BMP, WEBP など
   - 動画: MP4, MOV, AVI, MKV など
 - **表示モード**: 4K最適化 (3840x2160)
-- **画像処理**: 4Kを超える画像は自動リサイズ (Lanczos3フィルタ)
-- **画像ロード**: base64エンコーディングでクロスプラットフォーム対応
+- **画像処理**: 4Kを超える画像は自動リサイズ (Lanczos3フィルタ)してキャッシュフォルダに保存
+- **画像ロード**: Tauriの`convertFileSrc()`でプロトコル経由読み込み（クロスプラットフォーム対応）
 - **先読みキャッシュ**: 5枚先まで先読み（直列処理、弱いCPU対応）
 - **動画処理**: ネイティブサイズで表示
 
@@ -91,7 +96,7 @@
    - 🖼️ 画像サイズ（幅x高さ）
    - 💾 ファイルサイズ
    - 📅 撮影日時（画像のみ、EXIFから取得）
-   - 📸 カメラ情報（画像のみ、EXIF: メーカー、モデル、焦点距離、F値、ISO、露出時間）
+   - 📍 GPS座標（画像のみ、EXIF: 緯度・経度）
    - 📊 プレイリスト位置: 現在位置 / 総数（例: 1,234 / 100,000）
    - 🔢 表示回数: 何回表示されたか
    - 🕒 最新表示: 最後に表示された日時（ISO 8601形式: YYYY-MM-DD HH:MM:SS）
@@ -209,16 +214,21 @@ CREATE TABLE scan_history (
 - 画像サイズ取得
 
 ### src-tauri/src/commands.rs
-- Tauriコマンドハンドラ（9つ）
-  1. `scan_folder`: フォルダスキャン
-  2. `init_playlist`: プレイリスト初期化
+- Tauriコマンドハンドラ（14個）
+  1. `scan_folder`: フォルダスキャン（リアルタイム進捗イベント付き）
+  2. `init_playlist`: プレイリスト初期化（保存された状態から復元）
   3. `get_next_image`: 次の画像/動画取得（5枚先読みキャッシュ）
-  4. `get_previous_image`: 前の画像/動画取得
-  5. `open_in_explorer`: ファイルマネージャーで開く
+  4. `get_previous_image`: 前の画像/動画取得（表示回数を増やさない）
+  5. `open_in_explorer`: ファイルマネージャーで開く（OS別対応）
   6. `get_stats`: 統計情報取得
-  7. `get_playlist_info`: プレイリスト情報取得
+  7. `get_playlist_info`: プレイリスト情報取得（位置、総数、戻れるか）
   8. `get_last_folder_path`: 最後にスキャンしたフォルダパス取得
   9. `exit_app`: アプリケーション終了
+  10. `save_setting`: 設定を保存
+  11. `get_setting`: 設定を取得
+  12. `share_image`: 画像をPictures/sssフォルダにコピー
+  13. `exclude_image`: 画像を.sssignoreに追加（日付/ファイル/フォルダ除外）
+  14. `get_display_stats`: 統計データ取得（グラフ用、全画像の表示回数）
 
 ## Reactコンポーネント構成
 
@@ -308,7 +318,6 @@ CREATE TABLE scan_history (
 
 ### 📍 GPS/位置情報機能
 - [x] **EXIF GPS座標の取得**: kamadak-exifでGPS情報（緯度・経度）を抽出
-- [x] **カメラ情報の削除**: EXIF表示からメーカー、モデル、焦点距離、F値、ISO、露出時間を削除（撮影日時のみ残す）
 - [ ] **地図の埋め込み表示**: オーバーレイ内に地図を埋め込み表示（ボタンではなく）
   - 位置：左端、高さ2行分
   - GPS情報がある場合のみ表示
@@ -379,8 +388,77 @@ CREATE TABLE scan_history (
 - [ ] 動画メタデータの取得（時長、コーデック、解像度など）
 
 ### ⚙️ その他の機能拡張
-- [ ] **表示間隔のカスタマイズ**: 設定画面から秒数を変更可能に（現在は10秒固定）
 - [ ] リモートフォルダ対応（ネットワークドライブ、NAS）
+
+### 📱 Tauri 2アップグレードとモバイル対応
+- [x] **Tauri 2へのアップグレード**:
+  - Tauri v1.x → v2.xへの移行
+  - 依存関係の更新とAPIの変更対応
+  - パフォーマンスとセキュリティの改善
+  - 起動時の白いウィンドウ問題を解決（backgroundColor設定）
+  - プラグインシステムへの移行完了
+- [ ] **Android対応**:
+  - Tauri 2のAndroidサポートを活用
+  - タブレット最適化（タッチ操作、ジェスチャー対応）
+  - レスポンシブレイアウトの実装
+- [ ] **iOS対応**（オプション）:
+  - iPad向けの最適化
+  - タッチインターフェース対応
+- [ ] **タッチ操作の実装**:
+  - スワイプジェスチャーで前後移動
+  - ピンチズームでオーバーレイUI表示/非表示
+  - ダブルタップで一時停止/再生
+- [ ] **モバイルUI最適化**:
+  - 画面サイズに応じた柔軟なレイアウト
+  - タブレット向けの大きなボタンとタップエリア
+  - 縦画面・横画面の両対応
+
+---
+
+## Tauri 2への移行（2025-11-05 完了）
+
+### 主要な変更点
+
+#### 1. プラグインシステムへの移行
+Tauri v1のallowlist機能が、v2では新しいプラグインシステムとパーミッションモデルに置き換わりました：
+- `tauri-plugin-dialog`: ファイル選択ダイアログ
+- `tauri-plugin-shell`: シェルコマンド実行
+- `tauri-plugin-fs`: ファイルシステムアクセス
+- `tauri-plugin-single-instance`: 単一インスタンス管理
+
+#### 2. APIの変更
+- `@tauri-apps/api/tauri` → `@tauri-apps/api/core`にリネーム
+- `app.path_resolver()` → `app.path()`に変更
+- `convertFileSrc`の動作はほぼ同じだが、内部実装が改善
+
+#### 3. 起動時の白いウィンドウ問題の解決
+`tauri.conf.json`に以下の設定を追加：
+```json
+{
+  "backgroundColor": "#000000"
+}
+```
+これにより、HTMLロード前からウィンドウ背景が黒になり、白いフラッシュが発生しなくなりました。
+
+#### 4. 依存関係の更新と最適化
+- Vite v5 → v7
+- rusqlite v0.31 → v0.32
+- image v0.24 → v0.25
+- rayon v1.8 → v1.x
+- **base64を削除**: Tauriの`convertFileSrc()`を使用するため不要に
+- 画像表示方法の改善: ファイルパスベース（Tauriプロトコル経由）
+- その他多数のTauri関連クレート更新
+
+#### 5. ビルド設定
+`.cargo/config.toml`を追加してビルドジョブ数を1に制限：
+```toml
+[build]
+jobs = 1
+```
+これにより、SQLiteコンパイル時のメモリ不足エラーを回避しました。
+
+### モバイル対応の準備
+Tauri v2はAndroidとiOSに対応しており、将来的なタブレット版の開発が可能になりました。
 
 ---
 
@@ -401,7 +479,8 @@ MIT License
 
 ## 参考リソース
 
-- Tauri ドキュメント: https://tauri.app/
+- Tauri v2 ドキュメント: https://v2.tauri.app/
+- Tauri v2 移行ガイド: https://v2.tauri.app/start/migrate/from-tauri-1/
 - kamadak-exif: https://crates.io/crates/kamadak-exif
 - rayon: https://crates.io/crates/rayon
 - Framer Motion: https://www.framer.com/motion/
