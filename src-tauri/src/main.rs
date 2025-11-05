@@ -82,6 +82,7 @@ fn main() {
             commands::stats::get_playlist_info,
             commands::settings::get_last_directory_path,
             commands::system::exit_app,
+            commands::system::reset_all_data,
             commands::settings::save_setting,
             commands::settings::get_setting,
             commands::file_operations::share_image,

@@ -61,23 +61,41 @@ export function GraphSection() {
           label: '表示回数',
           stroke: 'rgb(59, 130, 246)', // blue-500
           fill: 'rgba(59, 130, 246, 0.1)',
-          width: 1,
+          width: 2,
+          points: {
+            show: displayStats.length <= 50, // 50ファイル以下の場合のみポイント表示
+          },
         },
       ],
       axes: [
         {
           label: 'ファイルID (A-Z順)',
-          stroke: '#9ca3af',
+          stroke: '#d1d5db', // gray-300
+          labelFont: '12px sans-serif',
+          labelSize: 12,
+          labelGap: 8,
           grid: {
             stroke: '#374151',
             width: 1,
           },
+          ticks: {
+            stroke: '#6b7280',
+            width: 1,
+          },
+          values: (_u, vals) => vals.map(v => Math.round(v).toString()), // 整数のみ表示
         },
         {
           label: '表示回数',
-          stroke: '#9ca3af',
+          stroke: '#d1d5db', // gray-300
+          labelFont: '12px sans-serif',
+          labelSize: 12,
+          labelGap: 8,
           grid: {
             stroke: '#374151',
+            width: 1,
+          },
+          ticks: {
+            stroke: '#6b7280',
             width: 1,
           },
         },
@@ -85,7 +103,12 @@ export function GraphSection() {
       scales: {
         x: {
           time: false,
+          range: [0, displayStats.length - 1], // データ範囲を正確に設定
         },
+      },
+      legend: {
+        show: true,
+        live: false,
       },
     };
 

@@ -12,7 +12,6 @@ export function useSlideshow(interval: number = 10000) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0); // 0-100のプログレス値
-  const [isResetting, setIsResetting] = useState(false); // リセット中かどうか
 
   const intervalRef = useRef<number | undefined>(undefined);
   const progressIntervalRef = useRef<number | undefined>(undefined);
@@ -88,15 +87,7 @@ export function useSlideshow(interval: number = 10000) {
    */
   useEffect(() => {
     if (isPlaying && !isLoading) {
-      // 画像切り替え時：瞬時に0にリセット
-      setIsResetting(true);
       setProgress(0);
-
-      // すぐにリセットフラグを解除
-      const resetTimeout = setTimeout(() => {
-        setIsResetting(false);
-      }, 10);
-
       startTimeRef.current = Date.now();
 
       // プログレスバーの更新（60FPS）
@@ -112,7 +103,6 @@ export function useSlideshow(interval: number = 10000) {
       }, interval);
 
       return () => {
-        clearTimeout(resetTimeout);
         if (intervalRef.current !== undefined) {
           window.clearInterval(intervalRef.current);
         }
@@ -122,7 +112,6 @@ export function useSlideshow(interval: number = 10000) {
       };
     } else {
       // 一時停止時はプログレスをリセット
-      setIsResetting(false);
       setProgress(0);
       if (progressIntervalRef.current !== undefined) {
         window.clearInterval(progressIntervalRef.current);
@@ -146,7 +135,6 @@ export function useSlideshow(interval: number = 10000) {
     isLoading,
     error,
     progress,
-    isResetting,
     play,
     pause,
     togglePlayPause,
