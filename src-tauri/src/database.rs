@@ -125,9 +125,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT path, modified_time, file_size FROM file_metadata WHERE is_valid = 1",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
 
         let mut result = Vec::new();
         for row in rows {
@@ -164,9 +162,9 @@ impl Database {
 
     /// 画像統計を取得
     pub fn get_image_stats(&self, path: &str) -> Result<(i32, Option<String>)> {
-        let mut stmt = self.conn.prepare(
-            "SELECT display_count, last_displayed FROM image_stats WHERE path = ?1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT display_count, last_displayed FROM image_stats WHERE path = ?1")?;
         let result = stmt.query_row([path], |row| Ok((row.get(0)?, row.get(1)?)));
 
         match result {
@@ -279,19 +277,18 @@ impl Database {
 
     /// 全画像の表示回数をリセット
     pub fn reset_all_display_counts(&self) -> Result<()> {
-        self.conn.execute("UPDATE image_stats SET display_count = 0", [])?;
+        self.conn
+            .execute("UPDATE image_stats SET display_count = 0", [])?;
         Ok(())
     }
 
     /// 全画像の表示回数を取得（グラフ用、パスでソート）
     pub fn get_all_display_counts(&self) -> Result<Vec<(String, i32)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT path, display_count FROM image_stats ORDER BY path ASC"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, display_count FROM image_stats ORDER BY path ASC")?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
         let mut results = Vec::new();
         for row in rows {

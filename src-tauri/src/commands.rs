@@ -1,5 +1,7 @@
 use crate::database::Database;
-use crate::image_processor::{get_exif_info, get_image_dimensions, optimize_image_for_4k, is_video_file, ImageInfo};
+use crate::image_processor::{
+    get_exif_info, get_image_dimensions, is_video_file, optimize_image_for_4k, ImageInfo,
+};
 use crate::playlist::Playlist;
 use crate::scanner::ImageScanner;
 use serde::{Deserialize, Serialize};
@@ -7,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::{Emitter, State};
 
 pub struct AppState {
     pub db: Mutex<Database>,
@@ -104,7 +106,7 @@ pub async fn scan_folder(
         previous_files,
         |current, total| {
             // 進捗イベントを発行
-            let _ = app.emit_all(
+            let _ = app.emit(
                 "scan-progress",
                 serde_json::json!({
                     "current": current,
@@ -148,12 +150,18 @@ pub async fn scan_folder(
 
     // フォルダパスを確認
     let current_folder = state.folder_path.lock().unwrap().clone();
-    let is_same_folder = current_folder.as_ref().map(|p| p == &folder).unwrap_or(false);
+    let is_same_folder = current_folder
+        .as_ref()
+        .map(|p| p == &folder)
+        .unwrap_or(false);
 
     if is_same_folder && playlist_lock.is_some() {
         // 同じフォルダの場合のみ既存のプレイリストを更新
         if let Some(ref mut playlist) = *playlist_lock {
-            playlist.update_images(scan_result.new_files.clone(), scan_result.deleted_files.clone());
+            playlist.update_images(
+                scan_result.new_files.clone(),
+                scan_result.deleted_files.clone(),
+            );
         }
     } else {
         // 別のフォルダまたは初回の場合は新規プレイリストを作成
@@ -162,7 +170,8 @@ pub async fn scan_folder(
 
         // ディレクトリ変更時、設定を確認して表示回数をリセット
         let db = state.db.lock().unwrap();
-        let should_reset = db.get_setting("reset_on_directory_change")
+        let should_reset = db
+            .get_setting("reset_on_directory_change")
             .ok()
             .flatten()
             .map(|v| v == "true")
@@ -208,7 +217,9 @@ pub async fn scan_folder(
 #[tauri::command]
 pub async fn init_playlist(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let db = state.db.lock().unwrap();
-    let playlist_state = db.get_playlist_state().map_err(|e| format!("Database error: {}", e))?;
+    let playlist_state = db
+        .get_playlist_state()
+        .map_err(|e| format!("Database error: {}", e))?;
 
     drop(db);
 
@@ -241,11 +252,21 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             return Err("Playlist is empty".to_string());
         }
 
-        println!("Current position before advance: {}/{}", playlist.current_position(), playlist.total_count());
+        println!(
+            "Current position before advance: {}/{}",
+            playlist.current_position(),
+            playlist.total_count()
+        );
         let (image_path, should_count) = playlist.advance();
         if let Some(image_path) = image_path {
             let path_str = image_path.clone();
-            println!("Advanced to: {} (position: {}/{}, should_count: {})", path_str, playlist.current_position(), playlist.total_count(), should_count);
+            println!(
+                "Advanced to: {} (position: {}/{}, should_count: {})",
+                path_str,
+                playlist.current_position(),
+                playlist.total_count(),
+                should_count
+            );
 
             // 5枚先までのパスを取得（先読み用）
             let mut prefetch_paths = Vec::new();
@@ -333,7 +354,10 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
 }
 
 /// 画像情報を取得
-fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<Option<ImageInfo>, String> {
+fn get_image_info_internal(
+    image_path: &str,
+    state: &State<AppState>,
+) -> Result<Option<ImageInfo>, String> {
     let path = Path::new(image_path);
 
     if !path.exists() {
@@ -344,9 +368,7 @@ fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<
     let is_video = is_video_file(path);
 
     // ファイルサイズ
-    let file_size = std::fs::metadata(path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
     // 画像サイズ（動画の場合は0x0）
     let (width, height) = if !is_video {
@@ -367,22 +389,26 @@ fn get_image_info_internal(image_path: &str, state: &State<AppState>) -> Result<
             Some(cache_file.to_string_lossy().to_string())
         } else {
             // キャッシュがない場合は、バックグラウンドで作成して元画像を返す
-            println!("Cache not found, scheduling optimization for: {}", image_path);
+            println!(
+                "Cache not found, scheduling optimization for: {}",
+                image_path
+            );
             let cache_file_clone = cache_file.clone();
             let path_clone = path.to_path_buf();
 
-            std::thread::spawn(move || {
-                match optimize_image_for_4k(&path_clone) {
-                    Ok(optimized_data) => {
-                        if let Err(e) = fs::write(&cache_file_clone, optimized_data) {
-                            eprintln!("Failed to write optimized image: {}", e);
-                        } else {
-                            println!("Created optimized image in background: {:?}", cache_file_clone);
-                        }
+            std::thread::spawn(move || match optimize_image_for_4k(&path_clone) {
+                Ok(optimized_data) => {
+                    if let Err(e) = fs::write(&cache_file_clone, optimized_data) {
+                        eprintln!("Failed to write optimized image: {}", e);
+                    } else {
+                        println!(
+                            "Created optimized image in background: {:?}",
+                            cache_file_clone
+                        );
                     }
-                    Err(e) => {
-                        eprintln!("Failed to optimize image: {}", e);
-                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to optimize image: {}", e);
                 }
             });
 
@@ -487,10 +513,12 @@ pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
 pub async fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
     let db = state.db.lock().unwrap();
 
-    let total_images = db.get_total_image_count()
+    let total_images = db
+        .get_total_image_count()
         .map_err(|e| format!("Database error: {}", e))?;
 
-    let displayed_images = db.get_displayed_image_count()
+    let displayed_images = db
+        .get_displayed_image_count()
         .map_err(|e| format!("Database error: {}", e))?;
 
     Ok(Stats {
@@ -501,14 +529,16 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
 
 /// 現在のプレイリスト状態を取得 (position, total, canGoBack)
 #[tauri::command]
-pub async fn get_playlist_info(state: State<'_, AppState>) -> Result<Option<(usize, usize, bool)>, String> {
+pub async fn get_playlist_info(
+    state: State<'_, AppState>,
+) -> Result<Option<(usize, usize, bool)>, String> {
     let playlist_lock = state.playlist.lock().unwrap();
 
     if let Some(ref playlist) = *playlist_lock {
         Ok(Some((
             playlist.current_position(),
             playlist.total_count(),
-            playlist.can_go_back()
+            playlist.can_go_back(),
         )))
     } else {
         Ok(None)
@@ -519,7 +549,8 @@ pub async fn get_playlist_info(state: State<'_, AppState>) -> Result<Option<(usi
 #[tauri::command]
 pub async fn get_last_folder_path(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let db = state.db.lock().unwrap();
-    let path = db.get_setting("last_folder_path")
+    let path = db
+        .get_setting("last_folder_path")
         .map_err(|e| format!("Database error: {}", e))?;
     Ok(path)
 }
@@ -557,7 +588,10 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
 
     // コピー先フォルダを取得（設定から、なければデフォルト）
     let db = state.db.lock().unwrap();
-    let share_folder = match db.get_setting("share_folder_path").map_err(|e| e.to_string())? {
+    let share_folder = match db
+        .get_setting("share_folder_path")
+        .map_err(|e| e.to_string())?
+    {
         Some(path) => PathBuf::from(path),
         None => {
             // デフォルト: Pictures/sss
@@ -565,7 +599,8 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
                 std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
             } else {
                 std::env::var("HOME").map(|p| PathBuf::from(p).join("Pictures"))
-            }.map_err(|_| "Failed to get home directory".to_string())?;
+            }
+            .map_err(|_| "Failed to get home directory".to_string())?;
 
             pictures_dir.join("sss")
         }
@@ -579,8 +614,7 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
     }
 
     // ファイル名を取得
-    let file_name = source_path.file_name()
-        .ok_or("Failed to get file name")?;
+    let file_name = source_path.file_name().ok_or("Failed to get file name")?;
 
     let dest_path = share_folder.join(file_name);
 
@@ -598,8 +632,7 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
     };
 
     // ファイルをコピー
-    fs::copy(&source_path, &final_dest_path)
-        .map_err(|e| format!("Failed to copy file: {}", e))?;
+    fs::copy(&source_path, &final_dest_path).map_err(|e| format!("Failed to copy file: {}", e))?;
 
     Ok(final_dest_path.to_string_lossy().to_string())
 }
@@ -622,7 +655,8 @@ pub async fn exclude_image(
         std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join(".sssignore"))
     } else {
         std::env::var("HOME").map(|p| PathBuf::from(p).join(".sssignore"))
-    }.map_err(|_| "Failed to get home directory".to_string())?;
+    }
+    .map_err(|_| "Failed to get home directory".to_string())?;
 
     let pattern = match exclude_type.as_str() {
         "date" => {
@@ -664,8 +698,7 @@ pub async fn exclude_image(
         .open(&ignore_path)
         .map_err(|e| format!("Failed to open .sssignore: {}", e))?;
 
-    writeln!(file, "{}", pattern)
-        .map_err(|e| format!("Failed to write to .sssignore: {}", e))?;
+    writeln!(file, "{}", pattern).map_err(|e| format!("Failed to write to .sssignore: {}", e))?;
 
     // プレイリストから該当画像を削除（ファイル除外の場合のみ即座に削除）
     if exclude_type == "file" {
@@ -678,7 +711,10 @@ pub async fn exclude_image(
         Ok(format!("除外パターン追加: {}", pattern))
     } else {
         // 日付・フォルダ除外は再スキャンが必要
-        Ok(format!("除外パターン追加: {} (変更を反映するには再スキャンしてください)", pattern))
+        Ok(format!(
+            "除外パターン追加: {} (変更を反映するには再スキャンしてください)",
+            pattern
+        ))
     }
 }
 

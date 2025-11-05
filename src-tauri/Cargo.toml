@@ -8,23 +8,25 @@ repository = ""
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "1.5", features = [] }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "1.5", features = [ "protocol-all", "dialog-open", "fs-all", "path-all", "shell-open"] }
+tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 globset = "0.4"
-walkdir = "2.4"
+walkdir = "2"
 kamadak-exif = "0.6"
 rand = "0.8"
-rayon = "1.8"
-image = "0.24"
+rayon = "1"
+image = "0.25"
 md5 = "0.7"
-base64 = "0.21"
 keepawake = "0.4"
-tauri-plugin-single-instance = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v1" }
+tauri-plugin-single-instance = { version = "2" }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-fs = "2"
 
 [features]
 default = ["custom-protocol"]
