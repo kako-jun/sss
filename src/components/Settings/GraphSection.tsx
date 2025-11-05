@@ -1,71 +1,76 @@
-import { useState } from 'react';
-import { BarChart3 } from 'lucide-react';
-import { getDisplayStats } from '../../lib/tauri';
+import { useState, useEffect } from 'react';
+import { getDisplayStats, getStats } from '../../lib/tauri';
+import type { Stats } from '../../types';
 
 export function GraphSection() {
   const [displayStats, setDisplayStats] = useState<Array<[string, number]>>([]);
-  const [showGraph, setShowGraph] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const toggleGraph = async () => {
-    if (!showGraph) {
+  useEffect(() => {
+    const loadStats = async () => {
       setIsLoading(true);
       try {
-        const stats = await getDisplayStats();
-        setDisplayStats(stats);
+        const [graphStats, summaryStats] = await Promise.all([
+          getDisplayStats(),
+          getStats(),
+        ]);
+        setDisplayStats(graphStats);
+        setStats(summaryStats);
       } catch (err) {
         console.error('Failed to load display stats:', err);
       } finally {
         setIsLoading(false);
       }
-    }
-    setShowGraph(!showGraph);
-  };
+    };
+
+    loadStats();
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="p-4 bg-gray-800 rounded text-center text-gray-400">
+        読み込み中...
+      </div>
+    );
+  }
+
+  if (displayStats.length === 0) {
+    return (
+      <div className="p-4 bg-gray-800 rounded text-center text-gray-400">
+        データがありません。スキャンを実行してください。
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <button
-        onClick={toggleGraph}
-        disabled={isLoading}
-        className="w-full flex items-center justify-between p-4 bg-gray-800 rounded hover:bg-gray-750 transition text-white font-semibold"
-      >
-        <span>表示回数グラフ</span>
-        <BarChart3
-          size={18}
-          className={`transition-transform ${showGraph ? 'rotate-180' : ''} ${isLoading ? 'animate-spin' : ''}`}
-        />
-      </button>
-
-      {showGraph && displayStats.length > 0 && (
+      {stats && (
         <div className="p-4 bg-gray-800 rounded">
-          <div className="h-64 flex items-end gap-px overflow-x-auto bg-gray-900 rounded p-3">
-            {displayStats.map(([path, count], index) => {
-              const maxCount = Math.max(...displayStats.map(([, c]) => c));
-              const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
-              return (
-                <div
-                  key={index}
-                  className="flex-1 min-w-[2px] bg-blue-500 hover:bg-blue-400 transition-colors cursor-pointer"
-                  style={{ height: `${height}%` }}
-                  title={`${path.split('\\').pop() || path.split('/').pop()}: ${count}回`}
-                />
-              );
-            })}
-          </div>
-          <div className="mt-3 text-xs text-gray-400 text-center">
-            各バーは画像1枚の表示回数（全{displayStats.length.toLocaleString()}枚）
-          </div>
-          <div className="mt-2 text-xs text-gray-500 text-center">
-            完全平等ランダムアルゴリズムの検証：全てのバーが均等であれば正常動作
+          <div className="flex justify-between text-gray-300">
+            <span>1回でも表示済みのファイル数:</span>
+            <span className="font-mono">{stats.displayedImages.toLocaleString()}</span>
           </div>
         </div>
       )}
 
-      {showGraph && displayStats.length === 0 && !isLoading && (
-        <div className="p-4 bg-gray-800 rounded text-center text-gray-400">
-          データがありません。スキャンを実行してください。
+      <div className="p-4 bg-gray-800 rounded">
+        <h3 className="text-lg font-semibold text-white mb-4">画像ごとの表示回数</h3>
+        <div className="h-64 flex items-end gap-px overflow-x-auto bg-gray-900 rounded p-3">
+          {displayStats.map(([path, count], index) => {
+            const maxCount = Math.max(...displayStats.map(([, c]) => c));
+            const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
+            return (
+              <div
+                key={index}
+                className="flex-1 min-w-[2px] bg-gray-500 hover:bg-gray-400 transition-colors cursor-pointer"
+                style={{ height: `${height}%` }}
+                title={`${path.split('\\').pop() || path.split('/').pop()}: ${count}回`}
+              />
+            );
+          })}
         </div>
-      )}
+      </div>
     </div>
   );
 }

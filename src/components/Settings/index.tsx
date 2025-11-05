@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
+import { useState } from 'react';
 import { ScanSection } from './ScanSection';
 import { StatsSection } from './StatsSection';
 import { IntervalSection } from './IntervalSection';
@@ -14,7 +15,11 @@ interface SettingsProps {
   onIntervalChange?: (interval: number) => void;
 }
 
+type TabType = 'scan' | 'options' | 'stats';
+
 export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: SettingsProps) {
+  const [activeTab, setActiveTab] = useState<TabType>('scan');
+
   if (!isOpen) return null;
 
   return (
@@ -31,7 +36,7 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
         transition={{ duration: MODAL_ANIMATION_DURATION }}
-        className="bg-gray-900 rounded-2xl shadow-2xl p-8 max-w-2xl w-full mx-8 max-h-[90vh] overflow-y-auto border border-gray-700"
+        className="bg-gray-900 rounded-2xl shadow-2xl p-8 max-w-2xl w-full mx-8 max-h-[90vh] overflow-hidden border border-gray-700 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">
@@ -44,12 +49,59 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
           </button>
         </div>
 
-        <div className="space-y-8">
-          <ScanSection onScanComplete={onScanComplete} />
-          <StatsSection isOpen={isOpen} />
-          <IntervalSection onIntervalChange={onIntervalChange} />
-          <SettingsSection />
-          <GraphSection />
+        {/* タブナビゲーション */}
+        <div className="flex gap-2 mb-6 border-b border-gray-700">
+          <button
+            onClick={() => setActiveTab('scan')}
+            className={`px-4 py-2 font-medium transition-colors ${
+              activeTab === 'scan'
+                ? 'text-white border-b-2 border-white'
+                : 'text-gray-400 hover:text-gray-300'
+            }`}
+          >
+            ディレクトリ読み込み
+          </button>
+          <button
+            onClick={() => setActiveTab('options')}
+            className={`px-4 py-2 font-medium transition-colors ${
+              activeTab === 'options'
+                ? 'text-white border-b-2 border-white'
+                : 'text-gray-400 hover:text-gray-300'
+            }`}
+          >
+            オプション
+          </button>
+          <button
+            onClick={() => setActiveTab('stats')}
+            className={`px-4 py-2 font-medium transition-colors ${
+              activeTab === 'stats'
+                ? 'text-white border-b-2 border-white'
+                : 'text-gray-400 hover:text-gray-300'
+            }`}
+          >
+            統計グラフ
+          </button>
+        </div>
+
+        {/* タブコンテンツ */}
+        <div className="flex-1 overflow-y-auto">
+          {activeTab === 'scan' && (
+            <div className="space-y-8">
+              <ScanSection onScanComplete={onScanComplete} />
+              <StatsSection isOpen={isOpen} />
+            </div>
+          )}
+          {activeTab === 'options' && (
+            <div className="space-y-8">
+              <IntervalSection onIntervalChange={onIntervalChange} />
+              <SettingsSection />
+            </div>
+          )}
+          {activeTab === 'stats' && (
+            <div className="space-y-8">
+              <GraphSection />
+            </div>
+          )}
         </div>
       </motion.div>
     </motion.div>
