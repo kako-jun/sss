@@ -4,20 +4,20 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import type { ImageInfo, ScanProgress, Stats } from '../types';
 
 /**
- * デフォルトのシェアフォルダパスを取得
+ * デフォルトのシェアディレクトリパスを取得
  */
-export async function getDefaultShareFolder(): Promise<string> {
-  return await invoke<string>('get_default_share_folder');
+export async function getDefaultShareDirectory(): Promise<string> {
+  return await invoke<string>('get_default_share_directory');
 }
 
 /**
- * フォルダ選択ダイアログを開く
+ * ディレクトリ選択ダイアログを開く
  */
-export async function selectFolder(): Promise<string | null> {
+export async function selectDirectory(): Promise<string | null> {
   const selected = await open({
     directory: true,
     multiple: false,
-    title: 'Select Photo Folder',
+    title: 'Select Photo Directory',
   });
 
   if (typeof selected === 'string') {
@@ -28,10 +28,10 @@ export async function selectFolder(): Promise<string | null> {
 }
 
 /**
- * フォルダをスキャンしてプレイリストを初期化
+ * ディレクトリをスキャンしてプレイリストを初期化
  */
-export async function scanFolder(folderPath: string): Promise<ScanProgress> {
-  return await invoke<ScanProgress>('scan_folder', { folderPath });
+export async function scanDirectory(directoryPath: string): Promise<ScanProgress> {
+  return await invoke<ScanProgress>('scan_directory', { directoryPath });
 }
 
 /**
@@ -85,10 +85,10 @@ export function getImageUrl(imagePath: string): string {
 }
 
 /**
- * 最後に選択したフォルダパスを取得
+ * 最後に選択したディレクトリパスを取得
  */
-export async function getLastFolderPath(): Promise<string | null> {
-  return await invoke<string | null>('get_last_folder_path');
+export async function getLastDirectoryPath(): Promise<string | null> {
+  return await invoke<string | null>('get_last_directory_path');
 }
 
 /**
@@ -115,7 +115,7 @@ export async function shareImage(imagePath: string): Promise<string> {
 /**
  * 除外：画像を.sssignoreに追加
  */
-export async function excludeImage(imagePath: string, excludeType: 'date' | 'file' | 'folder'): Promise<string> {
+export async function excludeImage(imagePath: string, excludeType: 'date' | 'file' | 'directory'): Promise<string> {
   return await invoke<string>('exclude_image', { imagePath, excludeType });
 }
 

@@ -5,17 +5,17 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{Emitter, State};
 
-/// フォルダをスキャンしてプレイリストを初期化
+/// ディレクトリをスキャンしてプレイリストを初期化
 #[tauri::command]
-pub async fn scan_folder(
-    folder_path: String,
+pub async fn scan_directory(
+    directory_path: String,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<ScanProgress, String> {
-    let folder = PathBuf::from(&folder_path);
+    let directory = PathBuf::from(&directory_path);
 
-    if !folder.exists() {
-        return Err(format!("Folder does not exist: {}", folder_path));
+    if !directory.exists() {
+        return Err(format!("Directory does not exist: {}", directory_path));
     }
 
     // .sssignoreのパス（ユーザーホームディレクトリに保存）
@@ -71,8 +71,8 @@ pub async fn scan_folder(
     drop(db);
 
     // 差分スキャンを実行（進捗イベント付き）
-    let scan_result = scanner.scan_folder_incremental_with_progress(
-        &folder,
+    let scan_result = scanner.scan_directory_incremental_with_progress(
+        &directory,
         previous_files,
         |current, total| {
             // 進捗イベントを発行
@@ -103,7 +103,7 @@ pub async fn scan_folder(
 
     // スキャン履歴を記録
     db.record_scan_history(
-        &folder_path,
+        &directory_path,
         scan_result.total_count as i32,
         scan_result.new_count as i32,
         scan_result.deleted_count as i32,
@@ -118,11 +118,11 @@ pub async fn scan_folder(
 
     let mut playlist_lock = state.playlist.lock().unwrap();
 
-    // フォルダパスを確認
-    let current_folder = state.folder_path.lock().unwrap().clone();
-    let is_same_folder = current_folder
+    // ディレクトリパスを確認
+    let current_directory = state.directory_path.lock().unwrap().clone();
+    let is_same_directory = current_directory
         .as_ref()
-        .map(|p| p == &folder)
+        .map(|p| p == &directory)
         .unwrap_or(false);
 
     // 設定を確認して表示回数をリセット（スキャン時は常にチェック）
@@ -140,8 +140,8 @@ pub async fn scan_folder(
     }
     drop(db);
 
-    if is_same_folder && playlist_lock.is_some() {
-        // 同じフォルダの場合のみ既存のプレイリストを更新
+    if is_same_directory && playlist_lock.is_some() {
+        // 同じディレクトリの場合のみ既存のプレイリストを更新
         if let Some(ref mut playlist) = *playlist_lock {
             playlist.update_images(
                 scan_result.new_files.clone(),
@@ -149,8 +149,8 @@ pub async fn scan_folder(
             );
         }
     } else {
-        // 別のフォルダまたは初回の場合は新規プレイリストを作成
-        println!("Creating new playlist for folder: {:?}", folder);
+        // 別のディレクトリまたは初回の場合は新規プレイリストを作成
+        println!("Creating new playlist for directory: {:?}", directory);
         *playlist_lock = Some(Playlist::new(image_paths));
     }
 
@@ -167,12 +167,12 @@ pub async fn scan_folder(
 
     drop(playlist_lock);
 
-    // フォルダパスを保存
-    *state.folder_path.lock().unwrap() = Some(folder.clone());
+    // ディレクトリパスを保存
+    *state.directory_path.lock().unwrap() = Some(directory.clone());
 
-    // フォルダパスをデータベースに永続化
+    // ディレクトリパスをデータベースに永続化
     let db = state.db.lock().unwrap();
-    let _ = db.save_setting("last_folder_path", &folder_path);
+    let _ = db.save_setting("last_directory_path", &directory_path);
     drop(db);
 
     Ok(ScanProgress {

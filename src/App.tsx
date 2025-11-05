@@ -4,10 +4,10 @@ import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
-import { initPlaylist, getPlaylistInfo, getLastFolderPath, scanFolder, getSetting } from './lib/tauri';
+import { initPlaylist, getPlaylistInfo, getLastDirectoryPath, scanDirectory, getSetting } from './lib/tauri';
 import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
-import { X } from 'lucide-react';
+import { X, Settings as SettingsIcon } from 'lucide-react';
 
 function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -27,7 +27,7 @@ function App() {
     isLoading,
     error,
     progress,
-    shouldAnimateReset,
+    isResetting,
     play,
     pause,
     loadNextImage,
@@ -80,12 +80,12 @@ function App() {
             setIsInitialized(true);
             await updatePlaylistInfo();
           } else {
-            // プレイリストがない場合、最後のフォルダがあれば自動スキャン
-            const lastFolder = await getLastFolderPath();
-            if (lastFolder) {
+            // プレイリストがない場合、最後のディレクトリがあれば自動スキャン
+            const lastDirectory = await getLastDirectoryPath();
+            if (lastDirectory) {
               let unlisten: UnlistenFn | null = null;
               try {
-                setInitStatus('フォルダをスキャンしています...');
+                setInitStatus('ディレクトリをスキャンしています...');
 
                 // リアルタイム進捗イベントをリッスン
                 unlisten = await listen<{ current: number; total: number }>('scan-progress', (event) => {
@@ -93,7 +93,7 @@ function App() {
                   setRealtimeProgress(event.payload);
                 });
 
-                const progress = await scanFolder(lastFolder);
+                const progress = await scanDirectory(lastDirectory);
                 setRealtimeProgress(null); // スキャン完了後はリアルタイム進捗をクリア
                 setInitStatus(`スキャン完了: ${progress.totalFiles.toLocaleString()}ファイル検出`);
 
@@ -102,22 +102,20 @@ function App() {
                 setIsInitialized(true);
                 await updatePlaylistInfo();
               } catch (scanErr) {
-                console.error('Failed to scan last folder:', scanErr);
-                setIsSettingsOpen(true);
+                console.error('Failed to scan last directory:', scanErr);
+                // エラーが発生してもボタンで開けるので自動的には開かない
               } finally {
                 // リスナーをクリーンアップ
                 if (unlisten) {
                   unlisten();
                 }
               }
-            } else {
-              // 最後のフォルダもなければ設定画面を開く
-              setIsSettingsOpen(true);
             }
+            // 最後のディレクトリもなければ、ボタンで設定を開けるようにする（自動的には開かない）
           }
         } catch (err) {
           console.error('Failed to initialize:', err);
-          setIsSettingsOpen(true);
+          // エラーが発生してもボタンで開けるので自動的には開かない
         }
       };
 
@@ -289,6 +287,22 @@ function App() {
         </span>
       </button>
 
+      {/* 画像がない場合の案内 */}
+      {!currentImage && !isLoading && !isSettingsOpen && (
+        <div className="fixed inset-0 flex items-center justify-center z-40">
+          <div className="text-center">
+            <div className="text-white text-xl mb-4">画像が読み込まれていません</div>
+            <button
+              onClick={handleSettings}
+              className="flex items-center gap-2 px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors mx-auto"
+            >
+              <SettingsIcon size={20} />
+              設定を開く
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* オーバーレイUI（常時表示） */}
       <OverlayUI
         image={currentImage}
@@ -296,7 +310,7 @@ function App() {
         currentPosition={currentPosition}
         totalImages={totalImages}
         progress={progress}
-        shouldAnimateReset={shouldAnimateReset}
+        isResetting={isResetting}
         onPrevious={handlePrevious}
         onNext={handleNext}
         onSettings={handleSettings}

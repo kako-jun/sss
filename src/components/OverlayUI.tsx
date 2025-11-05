@@ -10,7 +10,7 @@ interface OverlayUIProps {
   currentPosition: number;
   totalImages: number;
   progress: number; // 0-100のプログレス値
-  shouldAnimateReset: boolean; // リセット時にアニメーションするか
+  isResetting: boolean; // リセット中かどうか
   onPrevious: () => void;
   onNext: () => void;
   onSettings: () => void;
@@ -25,7 +25,7 @@ export function OverlayUI({
   currentPosition,
   totalImages,
   progress,
-  shouldAnimateReset,
+  isResetting,
   onPrevious,
   onNext,
   onSettings,
@@ -33,20 +33,20 @@ export function OverlayUI({
   onMouseLeave,
   onTogglePause,
 }: OverlayUIProps) {
-  const [isOpeningFolder, setIsOpeningFolder] = useState(false);
+  const [isOpeningDirectory, setIsOpeningDirectory] = useState(false);
   const [showExcludeMenu, setShowExcludeMenu] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
 
-  const handleOpenFolder = async () => {
+  const handleOpenDirectory = async () => {
     if (!image) return;
 
     try {
-      setIsOpeningFolder(true);
+      setIsOpeningDirectory(true);
       await openInExplorer(image.path);
     } catch (err) {
-      console.error('Failed to open folder:', err);
+      console.error('Failed to open directory:', err);
     } finally {
-      setIsOpeningFolder(false);
+      setIsOpeningDirectory(false);
     }
   };
 
@@ -74,7 +74,7 @@ export function OverlayUI({
     }
   };
 
-  const handleExclude = async (type: 'date' | 'file' | 'folder') => {
+  const handleExclude = async (type: 'date' | 'file' | 'directory') => {
     if (!image) return;
 
     try {
@@ -135,8 +135,11 @@ export function OverlayUI({
       {/* プログレスバー */}
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-gray-700">
         <div
-          className={`h-full bg-white ${shouldAnimateReset ? 'transition-all duration-100 ease-linear' : ''}`}
-          style={{ width: `${progress}%` }}
+          className="h-full bg-white"
+          style={{
+            width: `${progress}%`,
+            transition: isResetting ? 'none' : 'width 0.1s linear'
+          }}
         />
       </div>
 
@@ -170,13 +173,19 @@ export function OverlayUI({
             </div>
           </div>
           <div className="text-gray-500 space-y-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 group relative">
               <Hash size={14} className="text-gray-400" />
               <span>{currentPosition.toLocaleString()} / {totalImages.toLocaleString()}</span>
+              <span className="absolute left-0 bottom-full mb-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                プレイリスト位置
+              </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 group relative">
               <File size={14} className="text-gray-400" />
               <span>×{image.displayCount}</span>
+              <span className="absolute left-0 bottom-full mb-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                表示回数
+              </span>
             </div>
             {/* 撮影位置（GPS情報がある場合のみ表示） */}
             {image.exif && image.exif.gpsLatitude !== null && image.exif.gpsLongitude !== null && (
@@ -258,8 +267,8 @@ export function OverlayUI({
 
         {/* 2行目：開く、シェア */}
         <button
-          onClick={handleOpenFolder}
-          disabled={isOpeningFolder}
+          onClick={handleOpenDirectory}
+          disabled={isOpeningDirectory}
           className="p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center"
           title="ファイルマネージャーで開く"
         >
@@ -300,7 +309,7 @@ export function OverlayUI({
                   撮影日付で除外
                 </button>
                 <button
-                  onClick={() => handleExclude('folder')}
+                  onClick={() => handleExclude('directory')}
                   className="w-full p-2 rounded hover:bg-white/10 text-left text-sm text-gray-300"
                 >
                   このディレクトリを除外

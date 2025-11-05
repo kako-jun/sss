@@ -17,12 +17,12 @@ pub fn get_setting(state: State<AppState>, key: String) -> Result<Option<String>
         .map_err(|e| format!("Failed to get setting: {}", e))
 }
 
-/// 最後に選択したフォルダパスを取得
+/// 最後に選択したディレクトリパスを取得
 #[tauri::command]
-pub async fn get_last_folder_path(state: State<'_, AppState>) -> Result<Option<String>, String> {
+pub async fn get_last_directory_path(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let db = state.db.lock().unwrap();
     let path = db
-        .get_setting("last_folder_path")
+        .get_setting("last_directory_path")
         .map_err(|e| format!("Database error: {}", e))?;
     Ok(path)
 }

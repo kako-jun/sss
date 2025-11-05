@@ -1,13 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getDisplayStats, getStats } from '../../lib/tauri';
 import type { Stats } from '../../types';
+import uPlot from 'uplot';
+import 'uplot/dist/uPlot.min.css';
 
 export function GraphSection() {
   const [displayStats, setDisplayStats] = useState<Array<[string, number]>>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const chartRef = useRef<HTMLDivElement>(null);
+  const plotRef = useRef<uPlot | null>(null);
 
   useEffect(() => {
+    // タブが表示されるたびにデータを再読み込み（keyによる再マウント）
     const loadStats = async () => {
       setIsLoading(true);
       try {
@@ -26,6 +31,86 @@ export function GraphSection() {
 
     loadStats();
   }, []);
+
+  useEffect(() => {
+    if (!chartRef.current || displayStats.length === 0 || isLoading) {
+      return;
+    }
+
+    // 既存のグラフを破棄
+    if (plotRef.current) {
+      plotRef.current.destroy();
+      plotRef.current = null;
+    }
+
+    // X軸: ファイルID (0, 1, 2, ...)
+    const xData = displayStats.map((_, i) => i);
+    // Y軸: 表示回数
+    const yData = displayStats.map(([, count]) => count);
+
+    const data: uPlot.AlignedData = [xData, yData];
+
+    const opts: uPlot.Options = {
+      width: chartRef.current.clientWidth,
+      height: 300,
+      series: [
+        {
+          label: 'ファイルID',
+        },
+        {
+          label: '表示回数',
+          stroke: 'rgb(59, 130, 246)', // blue-500
+          fill: 'rgba(59, 130, 246, 0.1)',
+          width: 1,
+        },
+      ],
+      axes: [
+        {
+          label: 'ファイルID (A-Z順)',
+          stroke: '#9ca3af',
+          grid: {
+            stroke: '#374151',
+            width: 1,
+          },
+        },
+        {
+          label: '表示回数',
+          stroke: '#9ca3af',
+          grid: {
+            stroke: '#374151',
+            width: 1,
+          },
+        },
+      ],
+      scales: {
+        x: {
+          time: false,
+        },
+      },
+    };
+
+    plotRef.current = new uPlot(opts, data, chartRef.current);
+
+    // ウィンドウリサイズ対応
+    const handleResize = () => {
+      if (plotRef.current && chartRef.current) {
+        plotRef.current.setSize({
+          width: chartRef.current.clientWidth,
+          height: 300,
+        });
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (plotRef.current) {
+        plotRef.current.destroy();
+        plotRef.current = null;
+      }
+    };
+  }, [displayStats, isLoading]);
 
   if (isLoading) {
     return (
@@ -54,30 +139,9 @@ export function GraphSection() {
 
       <div className="bg-gray-800 rounded p-4">
         <h3 className="text-lg font-semibold text-white mb-4">画像ごとの表示回数</h3>
-        <div className="h-64 bg-gray-900 rounded p-3 relative">
-          {/* Y軸グリッド線 */}
-          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none p-3">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="border-t border-gray-700/50" />
-            ))}
-          </div>
-          {/* X軸基準線（0の位置） */}
-          <div className="absolute bottom-3 left-3 right-3 border-b border-gray-500 pointer-events-none" />
-          {/* グラフバー */}
-          <div className="h-full flex items-end relative">
-            {displayStats.map(([path, count], index) => {
-              const maxCount = Math.max(...displayStats.map(([, c]) => c));
-              const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
-              return (
-                <div
-                  key={index}
-                  className="flex-1 bg-blue-500 hover:bg-blue-400 transition-colors cursor-pointer"
-                  style={{ height: `${height}%` }}
-                  title={`${path.split('\\').pop() || path.split('/').pop()}: ${count}回`}
-                />
-              );
-            })}
-          </div>
+        <div ref={chartRef} className="w-full" />
+        <div className="mt-2 text-xs text-gray-400">
+          完全平等ランダムアルゴリズムが正しく動作していれば、全てのファイルが均等に表示されます（全て0→全て1→全て2...）
         </div>
       </div>
     </div>

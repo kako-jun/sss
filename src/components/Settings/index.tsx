@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { ScanSection } from './ScanSection';
 import { IntervalSection } from './IntervalSection';
 import { SettingsSection } from './SettingsSection';
-import { ShareFolderSection } from './ShareFolderSection';
+import { ShareDirectorySection } from './ShareDirectorySection';
 import { GraphSection } from './GraphSection';
+import { InfoSection } from './InfoSection';
 import { MODAL_ANIMATION_DURATION } from '../../constants';
 
 interface SettingsProps {
@@ -15,10 +16,11 @@ interface SettingsProps {
   onIntervalChange?: (interval: number) => void;
 }
 
-type TabType = 'scan' | 'options' | 'stats';
+type TabType = 'scan' | 'options' | 'stats' | 'info';
 
 export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>('scan');
+  const [statsKey, setStatsKey] = useState(0); // 統計グラフの強制再マウント用
 
   if (!isOpen) return null;
 
@@ -72,7 +74,10 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
             オプション
           </button>
           <button
-            onClick={() => setActiveTab('stats')}
+            onClick={() => {
+              setActiveTab('stats');
+              setStatsKey(prev => prev + 1); // タブを開くたびにkeyを変更して再マウント
+            }}
             className={`px-4 py-2 font-medium transition-colors ${
               activeTab === 'stats'
                 ? 'text-white border-b-2 border-white'
@@ -80,6 +85,16 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
             }`}
           >
             統計グラフ
+          </button>
+          <button
+            onClick={() => setActiveTab('info')}
+            className={`px-4 py-2 font-medium transition-colors ${
+              activeTab === 'info'
+                ? 'text-white border-b-2 border-white'
+                : 'text-gray-400 hover:text-gray-300'
+            }`}
+          >
+            情報
           </button>
         </div>
 
@@ -92,12 +107,17 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
             <div className="space-y-8">
               <IntervalSection onIntervalChange={onIntervalChange} />
               <SettingsSection />
-              <ShareFolderSection />
+              <ShareDirectorySection />
             </div>
           )}
           {activeTab === 'stats' && (
             <div className="space-y-8">
-              <GraphSection />
+              <GraphSection key={statsKey} />
+            </div>
+          )}
+          {activeTab === 'info' && (
+            <div className="space-y-8">
+              <InfoSection />
             </div>
           )}
         </div>
