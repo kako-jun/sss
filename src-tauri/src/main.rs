@@ -72,20 +72,20 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::scan_folder,
-            commands::init_playlist,
-            commands::get_next_image,
-            commands::get_previous_image,
-            commands::open_in_explorer,
-            commands::get_stats,
-            commands::get_playlist_info,
-            commands::get_last_folder_path,
-            commands::exit_app,
-            commands::save_setting,
-            commands::get_setting,
-            commands::share_image,
-            commands::exclude_image,
-            commands::get_display_stats,
+            commands::scan::scan_folder,
+            commands::scan::init_playlist,
+            commands::image::get_next_image,
+            commands::image::get_previous_image,
+            commands::file_operations::open_in_explorer,
+            commands::stats::get_stats,
+            commands::stats::get_playlist_info,
+            commands::settings::get_last_folder_path,
+            commands::system::exit_app,
+            commands::settings::save_setting,
+            commands::settings::get_setting,
+            commands::file_operations::share_image,
+            commands::file_operations::exclude_image,
+            commands::stats::get_display_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
