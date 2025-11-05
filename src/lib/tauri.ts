@@ -4,6 +4,13 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import type { ImageInfo, ScanProgress, Stats } from '../types';
 
 /**
+ * デフォルトのシェアフォルダパスを取得
+ */
+export async function getDefaultShareFolder(): Promise<string> {
+  return await invoke<string>('get_default_share_folder');
+}
+
+/**
  * フォルダ選択ダイアログを開く
  */
 export async function selectFolder(): Promise<string | null> {

@@ -27,6 +27,7 @@ function App() {
     isLoading,
     error,
     progress,
+    shouldAnimateReset,
     play,
     pause,
     loadNextImage,
@@ -223,7 +224,7 @@ function App() {
     // スキャン完了後にプレイリストを初期化
     await initialize(true);
     setIsInitialized(true);
-    setIsSettingsOpen(false);
+    // 設定画面は閉じない（ユーザーが結果を確認できるように）
     await updatePlaylistInfo();
   };
 
@@ -295,6 +296,7 @@ function App() {
         currentPosition={currentPosition}
         totalImages={totalImages}
         progress={progress}
+        shouldAnimateReset={shouldAnimateReset}
         onPrevious={handlePrevious}
         onNext={handleNext}
         onSettings={handleSettings}

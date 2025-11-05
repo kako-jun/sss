@@ -1,7 +1,7 @@
 import { FolderOpen, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { UnlistenFn, listen } from '@tauri-apps/api/event';
-import { selectFolder, scanFolder } from '../../lib/tauri';
+import { selectFolder, scanFolder, getLastFolderPath } from '../../lib/tauri';
 import type { ScanProgress } from '../../types';
 
 interface ScanSectionProps {
@@ -14,6 +14,21 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
   const [realtimeProgress, setRealtimeProgress] = useState<{ current: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // 前回のディレクトリパスを読み込む
+  useEffect(() => {
+    const loadLastFolder = async () => {
+      try {
+        const lastFolder = await getLastFolderPath();
+        if (lastFolder) {
+          setSelectedDirectory(lastFolder);
+        }
+      } catch (err) {
+        console.error('Failed to load last folder path:', err);
+      }
+    };
+    loadLastFolder();
+  }, []);
 
   const handleSelectDirectory = async () => {
     try {
@@ -49,6 +64,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
       const progress = await scanFolder(selectedDirectory);
       setScanProgress(progress);
       setRealtimeProgress(null);
+      // スキャン完了を通知するが、設定画面は閉じない
       onScanComplete();
     } catch (err) {
       console.error('Failed to scan folder:', err);
@@ -70,7 +86,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
           type="text"
           value={selectedDirectory}
           readOnly
-          placeholder="ディレクトリを選択してください"
+          placeholder=""
           className="flex-1 px-3 py-2 bg-gray-800 text-gray-300 rounded border border-gray-700 focus:outline-none focus:border-gray-500"
         />
         <button
@@ -88,7 +104,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
         className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white rounded transition"
       >
         <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
-        {isScanning ? 'スキャン中...' : 'ディレクトリをスキャン'}
+        {isScanning ? 'スキャン中...' : 'スキャン'}
       </button>
 
       {error && (
@@ -104,18 +120,21 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
       )}
 
       {scanProgress && (
-        <div className="space-y-2 p-4 bg-gray-800 rounded">
-          <div className="text-sm text-gray-300">
-            ファイル数: {scanProgress.totalFiles}
-          </div>
-          <div className="text-sm text-green-400">
-            新規: {scanProgress.newFiles}
-          </div>
-          <div className="text-sm text-red-400">
-            削除: {scanProgress.deletedFiles}
-          </div>
-          <div className="text-sm text-gray-400">
-            処理時間: {(scanProgress.durationMs / 1000).toFixed(2)}秒
+        <div className="space-y-2">
+          <h3 className="text-lg font-semibold text-white">スキャン結果</h3>
+          <div className="space-y-2 p-4 bg-gray-800 rounded">
+            <div className="text-sm text-gray-300">
+              ファイル数: {scanProgress.totalFiles}
+            </div>
+            <div className="text-sm text-green-400">
+              新規: {scanProgress.newFiles}
+            </div>
+            <div className="text-sm text-red-400">
+              削除: {scanProgress.deletedFiles}
+            </div>
+            <div className="text-sm text-gray-400">
+              処理時間: {(scanProgress.durationMs / 1000).toFixed(2)}秒
+            </div>
           </div>
         </div>
       )}

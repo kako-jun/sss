@@ -5,14 +5,42 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::State;
 
+/// デフォルトのシェアフォルダパスを取得
+#[tauri::command]
+pub async fn get_default_share_folder() -> Result<String, String> {
+    let pictures_dir = if cfg!(windows) {
+        std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
+    } else {
+        std::env::var("HOME").map(|p| PathBuf::from(p).join("Pictures"))
+    }
+    .map_err(|_| "Failed to get home directory".to_string())?;
+
+    let share_folder = pictures_dir.join("sss");
+    Ok(share_folder.to_str().unwrap_or("").to_string())
+}
+
 /// ファイラで画像を選択状態で開く（OS別）
 #[tauri::command]
 pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
-    let path = Path::new(&image_path);
+    // チルダ（~）を展開
+    let expanded_path = if image_path.starts_with("~/") || image_path == "~" {
+        let home = dirs::home_dir().ok_or("Failed to get home directory")?;
+        if image_path == "~" {
+            home
+        } else {
+            home.join(&image_path[2..])
+        }
+    } else {
+        PathBuf::from(&image_path)
+    };
+
+    let path = expanded_path.as_path();
 
     if !path.exists() {
-        return Err(format!("File does not exist: {}", image_path));
+        return Err(format!("File does not exist: {}", path.display()));
     }
+
+    let image_path = path.to_str().ok_or("Invalid path")?.to_string();
 
     #[cfg(target_os = "windows")]
     {

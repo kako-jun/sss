@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, FolderOpen, Settings, Share2, Ban, File, Has
 import type { ImageInfo } from '../types';
 import { openInExplorer, shareImage, excludeImage } from '../lib/tauri';
 import { useState } from 'react';
+import { open } from '@tauri-apps/plugin-shell';
 
 interface OverlayUIProps {
   image: ImageInfo | null;
@@ -9,6 +10,7 @@ interface OverlayUIProps {
   currentPosition: number;
   totalImages: number;
   progress: number; // 0-100のプログレス値
+  shouldAnimateReset: boolean; // リセット時にアニメーションするか
   onPrevious: () => void;
   onNext: () => void;
   onSettings: () => void;
@@ -23,6 +25,7 @@ export function OverlayUI({
   currentPosition,
   totalImages,
   progress,
+  shouldAnimateReset,
   onPrevious,
   onNext,
   onSettings,
@@ -86,6 +89,18 @@ export function OverlayUI({
     }
   };
 
+  const handleOpenSssignore = async () => {
+    try {
+      // ホームディレクトリの.sssignoreファイルパスを取得して開く
+      await openInExplorer('~/.sssignore');
+      setShowExcludeMenu(false);
+    } catch (err) {
+      console.error('Failed to open .sssignore:', err);
+      setStatusMessage('エラー: .sssignoreを開けませんでした');
+      setTimeout(() => setStatusMessage(''), 3000);
+    }
+  };
+
   const formatDateTime = (dateTimeString: string | null): string => {
     if (!dateTimeString) return '';
 
@@ -120,7 +135,7 @@ export function OverlayUI({
       {/* プログレスバー */}
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-gray-700">
         <div
-          className="h-full bg-white transition-all duration-100 ease-linear"
+          className={`h-full bg-white ${shouldAnimateReset ? 'transition-all duration-100 ease-linear' : ''}`}
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -140,7 +155,7 @@ export function OverlayUI({
             <div className="text-white font-mono font-bold whitespace-nowrap overflow-hidden" style={{ fontSize: 'clamp(1.2rem, 5vw, 2rem)' }}>
               {formatDateTime(image.exif.dateTime).split(' ')[0] || '----/--/--'}
             </div>
-            <div className="text-gray-400 font-mono mt-1 whitespace-nowrap" style={{ fontSize: '1.2rem' }}>
+            <div className="text-gray-400 font-mono mt-1 whitespace-nowrap" style={{ fontSize: '1.5rem' }}>
               {formatDateTime(image.exif.dateTime).split(' ')[1] || '--:--:--'}
             </div>
           </div>
@@ -167,9 +182,9 @@ export function OverlayUI({
             {image.exif && image.exif.gpsLatitude !== null && image.exif.gpsLongitude !== null && (
               <div className="mt-2">
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     const url = `https://www.google.com/maps?q=${image.exif!.gpsLatitude},${image.exif!.gpsLongitude}`;
-                    window.open(url, '_blank');
+                    await open(url);
                   }}
                   className="w-full bg-gray-800 hover:bg-gray-700 rounded border border-gray-600 overflow-hidden transition-colors group"
                 >
@@ -226,7 +241,7 @@ export function OverlayUI({
           <ChevronLeft size={20} />
           {canGoBack && (
             <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-              ←
+              ←で前へ
             </span>
           )}
         </button>
@@ -237,7 +252,7 @@ export function OverlayUI({
         >
           <ChevronRight size={20} />
           <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-            →
+            →で次へ
           </span>
         </button>
 
@@ -295,6 +310,14 @@ export function OverlayUI({
                   className="w-full p-2 rounded hover:bg-white/10 text-left text-sm text-gray-300"
                 >
                   このファイルを除外
+                </button>
+                {/* セパレータ */}
+                <div className="border-t border-white/10 my-1" />
+                <button
+                  onClick={handleOpenSssignore}
+                  className="w-full p-2 rounded hover:bg-white/10 text-left text-sm text-gray-300"
+                >
+                  .sssignoreを開く
                 </button>
               </div>
             </>
