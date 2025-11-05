@@ -125,3 +125,10 @@ export async function excludeImage(imagePath: string, excludeType: 'date' | 'fil
 export async function getDisplayStats(): Promise<Array<[string, number]>> {
   return await invoke<Array<[string, number]>>('get_display_stats');
 }
+
+/**
+ * すべての設定とデータを初期化（データベースとキャッシュを削除）
+ */
+export async function resetAllData(): Promise<void> {
+  return await invoke<void>('reset_all_data');
+}

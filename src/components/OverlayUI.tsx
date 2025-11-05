@@ -10,7 +10,6 @@ interface OverlayUIProps {
   currentPosition: number;
   totalImages: number;
   progress: number; // 0-100のプログレス値
-  isResetting: boolean; // リセット中かどうか
   onPrevious: () => void;
   onNext: () => void;
   onSettings: () => void;
@@ -25,7 +24,6 @@ export function OverlayUI({
   currentPosition,
   totalImages,
   progress,
-  isResetting,
   onPrevious,
   onNext,
   onSettings,
@@ -137,8 +135,7 @@ export function OverlayUI({
         <div
           className="h-full bg-white"
           style={{
-            width: `${progress}%`,
-            transition: isResetting ? 'none' : 'width 0.1s linear'
+            width: `${progress}%`
           }}
         />
       </div>
