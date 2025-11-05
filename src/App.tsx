@@ -6,6 +6,8 @@ import { Settings } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
 import { initPlaylist, getPlaylistInfo, getLastFolderPath, scanFolder, getSetting } from './lib/tauri';
 import { invoke } from '@tauri-apps/api/core';
+import { exit } from '@tauri-apps/plugin-process';
+import { X } from 'lucide-react';
 
 function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -272,6 +274,18 @@ function App() {
     <div className="w-screen h-screen bg-black overflow-hidden">
       {/* スライドショー */}
       <Slideshow image={currentImage} isLoading={isLoading} />
+
+      {/* 終了ボタン（左上） */}
+      <button
+        onClick={() => exit(0)}
+        className="fixed top-4 left-4 z-50 p-2 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-gray-300 hover:text-white transition-colors group"
+        title="ESCで終了"
+      >
+        <X size={20} />
+        <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          ESCで終了
+        </span>
+      </button>
 
       {/* オーバーレイUI（常時表示） */}
       <OverlayUI
