@@ -18,6 +18,7 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|_app, argv, cwd| {
             println!("Already running instance detected");
             println!("Args: {:?}, CWD: {:?}", argv, cwd);

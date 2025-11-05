@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, FolderOpen, Settings, Share2, Ban, File, Hash, MapPin } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FolderOpen, Settings, Share2, Ban, File, Hash, MapPin, ExternalLink } from 'lucide-react';
 import type { ImageInfo } from '../types';
 import { openInExplorer, shareImage, excludeImage } from '../lib/tauri';
 import { useState } from 'react';
@@ -127,10 +127,10 @@ export function OverlayUI({
         {/* 撮影日時（デジタル時計風） */}
         {image.exif?.dateTime && (
           <div className="text-center border-b border-white/10 pb-4">
-            <div className="text-white font-mono font-bold" style={{ fontSize: '1.6rem' }}>
+            <div className="text-white font-mono font-bold" style={{ fontSize: '2rem' }}>
               {formatDateTime(image.exif.dateTime).split(' ')[0] || '----/--/--'}
             </div>
-            <div className="text-gray-400 font-mono mt-1" style={{ fontSize: '0.8rem' }}>
+            <div className="text-gray-400 font-mono mt-1" style={{ fontSize: '1.2rem' }}>
               {formatDateTime(image.exif.dateTime).split(' ')[1] || '--:--:--'}
             </div>
           </div>
@@ -155,16 +155,46 @@ export function OverlayUI({
             </div>
             {/* 撮影位置（GPS情報がある場合のみ表示） */}
             {image.exif && image.exif.gpsLatitude !== null && image.exif.gpsLongitude !== null && (
-              <div className="flex items-start gap-2">
-                <MapPin size={14} className="text-gray-400 mt-0.5 shrink-0" />
+              <div className="mt-2">
                 <button
                   onClick={() => {
                     const url = `https://www.google.com/maps?q=${image.exif!.gpsLatitude},${image.exif!.gpsLongitude}`;
                     window.open(url, '_blank');
                   }}
-                  className="text-blue-400 hover:text-blue-300 text-left underline"
+                  className="w-full bg-gray-800 hover:bg-gray-700 rounded border border-gray-600 overflow-hidden transition-colors group"
                 >
-                  {image.exif.gpsLatitude.toFixed(6)}, {image.exif.gpsLongitude.toFixed(6)}
+                  {/* 実際の地図表示（OpenStreetMap） */}
+                  <div className="relative h-20 bg-gray-900 overflow-hidden">
+                    {/* 地図画像（Static Map） */}
+                    <img
+                      src={`https://api.mapbox.com/styles/v1/mapbox/light-v11/static/pin-s+555555(${image.exif.gpsLongitude},${image.exif.gpsLatitude})/${image.exif.gpsLongitude},${image.exif.gpsLatitude},13,0/200x80@2x?access_token=pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw`}
+                      alt="Location Map"
+                      className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all"
+                      onError={(e) => {
+                        // フォールバック: OpenStreetMapタイル
+                        const zoom = 13;
+                        const lat = image.exif!.gpsLatitude!;
+                        const lon = image.exif!.gpsLongitude!;
+                        const x = Math.floor((lon + 180) / 360 * Math.pow(2, zoom));
+                        const y = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
+                        (e.target as HTMLImageElement).src = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+                      }}
+                    />
+                    {/* マップピンオーバーレイ */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <MapPin size={24} className="text-red-500 drop-shadow-lg" fill="currentColor" />
+                    </div>
+                    {/* 外部リンクアイコン（右下） */}
+                    <div className="absolute bottom-1 right-1 bg-black/60 rounded p-1">
+                      <ExternalLink size={12} className="text-white" />
+                    </div>
+                  </div>
+                  {/* 座標情報 */}
+                  <div className="p-2 text-center">
+                    <div className="text-gray-400 text-xs font-mono">
+                      {image.exif.gpsLatitude.toFixed(6)}, {image.exif.gpsLongitude.toFixed(6)}
+                    </div>
+                  </div>
                 </button>
               </div>
             )}
@@ -178,19 +208,27 @@ export function OverlayUI({
         <button
           onClick={onPrevious}
           disabled={!canGoBack}
-          className={`p-3 rounded hover:bg-white/10 transition-colors flex items-center justify-center ${
+          className={`relative p-3 rounded hover:bg-white/10 transition-colors flex items-center justify-center group ${
             canGoBack ? 'text-gray-300' : 'text-gray-600 cursor-not-allowed'
           }`}
-          title="前へ"
+          title="前へ (←)"
         >
           <ChevronLeft size={20} />
+          {canGoBack && (
+            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              ←キーで前へ
+            </span>
+          )}
         </button>
         <button
           onClick={onNext}
-          className="p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center"
-          title="次へ"
+          className="relative p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center group"
+          title="次へ (→)"
         >
           <ChevronRight size={20} />
+          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            →キーで次へ
+          </span>
         </button>
 
         {/* 2行目：開く、シェア */}

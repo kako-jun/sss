@@ -26,6 +26,7 @@
     "dialog:allow-open",
     "dialog:default",
     "shell:default",
-    "fs:default"
+    "fs:default",
+    "process:allow-exit"
   ]
 }
