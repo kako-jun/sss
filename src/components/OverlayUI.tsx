@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, FolderOpen, Settings, Share2, Ban, File, Image as ImageIcon, Calendar, Hash, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FolderOpen, Settings, Share2, Ban, File, Hash, MapPin } from 'lucide-react';
 import type { ImageInfo } from '../types';
 import { openInExplorer, shareImage, excludeImage } from '../lib/tauri';
 import { useState } from 'react';
@@ -63,6 +63,12 @@ export function OverlayUI({
     setShowExcludeMenu(!showExcludeMenu);
   };
 
+  const handleExcludeMenuBackdropClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      setShowExcludeMenu(false);
+    }
+  };
+
   const handleExclude = async (type: 'date' | 'file' | 'folder') => {
     if (!image) return;
 
@@ -76,12 +82,6 @@ export function OverlayUI({
       setStatusMessage('エラー: 除外失敗');
       setTimeout(() => setStatusMessage(''), 3000);
     }
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const formatDateTime = (dateTimeString: string | null): string => {
@@ -109,7 +109,8 @@ export function OverlayUI({
 
   return (
     <div
-      className="fixed top-0 right-0 bottom-0 w-64 bg-black/60 backdrop-blur-sm border-l border-white/10 flex flex-col py-4 px-3 gap-4 z-50"
+      className="fixed top-0 right-0 bottom-0 bg-black/60 backdrop-blur-sm border-l border-white/10 flex flex-col py-4 px-3 gap-4 z-50"
+      style={{ width: '200px' }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       onClick={handleBackgroundClick}
@@ -123,38 +124,14 @@ export function OverlayUI({
 
       {/* 上部：閲覧情報 */}
       <div className="flex flex-col gap-4 flex-1 overflow-y-auto">
-        {/* 地図（GPS情報がある場合のみ表示） */}
-        {image.exif && image.exif.gpsLatitude !== null && image.exif.gpsLongitude !== null && (
-          <div className="w-full bg-gray-800 rounded border border-gray-700 p-3">
-            <div className="text-gray-400 text-xs mb-2 flex items-center gap-2">
-              <span>📍 撮影位置</span>
-            </div>
-            <div className="text-gray-300 text-sm mb-2 font-mono">
-              {image.exif.gpsLatitude.toFixed(6)}, {image.exif.gpsLongitude.toFixed(6)}
-            </div>
-            <button
-              onClick={() => {
-                const url = `https://www.google.com/maps?q=${image.exif!.gpsLatitude},${image.exif!.gpsLongitude}`;
-                window.open(url, '_blank');
-              }}
-              className="w-full p-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm transition-colors"
-            >
-              Google Mapsで開く
-            </button>
-          </div>
-        )}
-
         {/* 撮影日時（デジタル時計風） */}
         {image.exif?.dateTime && (
           <div className="text-center border-b border-white/10 pb-4">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <Clock size={16} className="text-gray-400" />
-            </div>
-            <div className="text-white text-3xl font-mono font-bold">
-              {formatDateTime(image.exif.dateTime).split(' ')[1] || '--:--:--'}
-            </div>
-            <div className="text-gray-400 text-sm font-mono mt-1">
+            <div className="text-white font-mono font-bold" style={{ fontSize: '1.6rem' }}>
               {formatDateTime(image.exif.dateTime).split(' ')[0] || '----/--/--'}
+            </div>
+            <div className="text-gray-400 font-mono mt-1" style={{ fontSize: '0.8rem' }}>
+              {formatDateTime(image.exif.dateTime).split(' ')[1] || '--:--:--'}
             </div>
           </div>
         )}
@@ -168,124 +145,119 @@ export function OverlayUI({
             </div>
           </div>
           <div className="text-gray-500 space-y-2">
-            {!image.isVideo && image.width > 0 && (
-              <div className="flex items-center gap-2">
-                <ImageIcon size={14} className="text-gray-400" />
-                <span>{image.width} × {image.height}</span>
-              </div>
-            )}
-            {image.isVideo && (
-              <div className="flex items-center gap-2">
-                <ImageIcon size={14} className="text-gray-400" />
-                <span>Video</span>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <File size={14} className="text-gray-400" />
-              <span>{formatFileSize(image.fileSize)}</span>
-            </div>
             <div className="flex items-center gap-2">
               <Hash size={14} className="text-gray-400" />
               <span>{currentPosition.toLocaleString()} / {totalImages.toLocaleString()}</span>
             </div>
             <div className="flex items-center gap-2">
-              <Calendar size={14} className="text-gray-400" />
+              <File size={14} className="text-gray-400" />
               <span>×{image.displayCount}</span>
             </div>
+            {/* 撮影位置（GPS情報がある場合のみ表示） */}
+            {image.exif && image.exif.gpsLatitude !== null && image.exif.gpsLongitude !== null && (
+              <div className="flex items-start gap-2">
+                <MapPin size={14} className="text-gray-400 mt-0.5 shrink-0" />
+                <button
+                  onClick={() => {
+                    const url = `https://www.google.com/maps?q=${image.exif!.gpsLatitude},${image.exif!.gpsLongitude}`;
+                    window.open(url, '_blank');
+                  }}
+                  className="text-blue-400 hover:text-blue-300 text-left underline"
+                >
+                  {image.exif.gpsLatitude.toFixed(6)}, {image.exif.gpsLongitude.toFixed(6)}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* 下部：操作アイコン（縦に並べる） */}
-      <div className="flex flex-col gap-2 shrink-0 border-t border-white/10 pt-4">
-        {/* 前へ */}
+      {/* 下部：操作アイコン（2列レイアウト） */}
+      <div className="grid grid-cols-2 gap-2 shrink-0 border-t border-white/10 pt-4">
+        {/* 1行目：前へ、次へ */}
         <button
           onClick={onPrevious}
           disabled={!canGoBack}
-          className={`w-full p-3 rounded hover:bg-white/10 transition-colors flex items-center justify-center gap-2 ${
+          className={`p-3 rounded hover:bg-white/10 transition-colors flex items-center justify-center ${
             canGoBack ? 'text-gray-300' : 'text-gray-600 cursor-not-allowed'
           }`}
           title="前へ"
         >
           <ChevronLeft size={20} />
-          <span className="text-sm">前へ</span>
         </button>
-
-        {/* 次へ */}
         <button
           onClick={onNext}
-          className="w-full p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center gap-2"
+          className="p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center"
           title="次へ"
         >
-          <span className="text-sm">次へ</span>
           <ChevronRight size={20} />
         </button>
 
-        {/* 開く */}
+        {/* 2行目：開く、シェア */}
         <button
           onClick={handleOpenFolder}
           disabled={isOpeningFolder}
-          className="w-full p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center gap-2"
+          className="p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center"
           title="ファイルマネージャーで開く"
         >
           <FolderOpen size={18} />
-          <span className="text-sm">開く</span>
         </button>
-
-        {/* シェア */}
         <button
           onClick={handleShare}
-          className="w-full p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center gap-2"
+          className="p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center"
           title="シェア用にコピー"
         >
           <Share2 size={18} />
-          <span className="text-sm">シェア</span>
         </button>
 
-        {/* 除外 */}
+        {/* 3行目：除外、設定 */}
         <div className="relative">
           <button
             onClick={handleExcludeClick}
-            className="w-full p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center gap-2"
+            className="w-full p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center"
             title="除外"
           >
             <Ban size={18} />
-            <span className="text-sm">除外</span>
           </button>
 
-          {/* 除外メニュー */}
+          {/* 除外メニュー（背景付き） */}
           {showExcludeMenu && (
-            <div className="absolute bottom-full right-0 mb-2 bg-gray-900 rounded shadow-lg border border-white/10 p-2 space-y-1 w-48">
-              <button
-                onClick={() => handleExclude('date')}
-                className="w-full p-2 rounded hover:bg-white/10 text-left text-sm text-gray-300"
-              >
-                撮影日付で除外
-              </button>
-              <button
-                onClick={() => handleExclude('folder')}
-                className="w-full p-2 rounded hover:bg-white/10 text-left text-sm text-gray-300"
-              >
-                このディレクトリを除外
-              </button>
-              <button
-                onClick={() => handleExclude('file')}
-                className="w-full p-2 rounded hover:bg-white/10 text-left text-sm text-gray-300"
-              >
-                このファイルを除外
-              </button>
-            </div>
+            <>
+              {/* 背景オーバーレイ */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={handleExcludeMenuBackdropClick}
+              />
+              {/* メニュー本体 */}
+              <div className="absolute bottom-full right-0 mb-2 bg-gray-900 rounded shadow-lg border border-white/10 p-2 space-y-1 w-48 z-50">
+                <button
+                  onClick={() => handleExclude('date')}
+                  className="w-full p-2 rounded hover:bg-white/10 text-left text-sm text-gray-300"
+                >
+                  撮影日付で除外
+                </button>
+                <button
+                  onClick={() => handleExclude('folder')}
+                  className="w-full p-2 rounded hover:bg-white/10 text-left text-sm text-gray-300"
+                >
+                  このディレクトリを除外
+                </button>
+                <button
+                  onClick={() => handleExclude('file')}
+                  className="w-full p-2 rounded hover:bg-white/10 text-left text-sm text-gray-300"
+                >
+                  このファイルを除外
+                </button>
+              </div>
+            </>
           )}
         </div>
-
-        {/* 設定 */}
         <button
           onClick={onSettings}
-          className="w-full p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center gap-2"
+          className="p-3 rounded hover:bg-white/10 transition-colors text-gray-300 flex items-center justify-center"
           title="設定"
         >
           <Settings size={18} />
-          <span className="text-sm">設定</span>
         </button>
       </div>
     </div>
