@@ -13,14 +13,10 @@ const MAX_HEIGHT_4K: u32 = 2160;
 #[serde(rename_all = "camelCase")]
 pub struct ExifInfo {
     pub date_time: Option<String>,
-    pub camera_make: Option<String>,
-    pub camera_model: Option<String>,
+    pub gps_latitude: Option<f64>,
+    pub gps_longitude: Option<f64>,
     pub width: Option<u32>,
     pub height: Option<u32>,
-    pub focal_length: Option<String>,
-    pub f_number: Option<String>,
-    pub iso: Option<String>,
-    pub exposure_time: Option<String>,
 }
 
 /// 画像情報
@@ -86,14 +82,10 @@ pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
         Ok(exif) => {
             let mut info = ExifInfo {
                 date_time: None,
-                camera_make: None,
-                camera_model: None,
+                gps_latitude: None,
+                gps_longitude: None,
                 width: None,
                 height: None,
-                focal_length: None,
-                f_number: None,
-                iso: None,
-                exposure_time: None,
             };
 
             // 撮影日時
@@ -101,14 +93,23 @@ pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
                 info.date_time = Some(field.display_value().to_string());
             }
 
-            // カメラメーカー
-            if let Some(field) = exif.get_field(exif::Tag::Make, exif::In::PRIMARY) {
-                info.camera_make = Some(field.display_value().to_string());
+            // GPS座標の取得
+            // 緯度
+            if let Some(lat_field) = exif.get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY) {
+                if let Some(lat_ref_field) = exif.get_field(exif::Tag::GPSLatitudeRef, exif::In::PRIMARY) {
+                    if let Some(latitude) = parse_gps_coordinate(&lat_field.value, &lat_ref_field.display_value().to_string()) {
+                        info.gps_latitude = Some(latitude);
+                    }
+                }
             }
 
-            // カメラモデル
-            if let Some(field) = exif.get_field(exif::Tag::Model, exif::In::PRIMARY) {
-                info.camera_model = Some(field.display_value().to_string());
+            // 経度
+            if let Some(lon_field) = exif.get_field(exif::Tag::GPSLongitude, exif::In::PRIMARY) {
+                if let Some(lon_ref_field) = exif.get_field(exif::Tag::GPSLongitudeRef, exif::In::PRIMARY) {
+                    if let Some(longitude) = parse_gps_coordinate(&lon_field.value, &lon_ref_field.display_value().to_string()) {
+                        info.gps_longitude = Some(longitude);
+                    }
+                }
             }
 
             // 画像サイズ
@@ -123,43 +124,41 @@ pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
                 }
             }
 
-            // 焦点距離
-            if let Some(field) = exif.get_field(exif::Tag::FocalLength, exif::In::PRIMARY) {
-                info.focal_length = Some(field.display_value().to_string());
-            }
-
-            // F値
-            if let Some(field) = exif.get_field(exif::Tag::FNumber, exif::In::PRIMARY) {
-                info.f_number = Some(field.display_value().to_string());
-            }
-
-            // ISO感度
-            if let Some(field) = exif.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY) {
-                info.iso = Some(field.display_value().to_string());
-            }
-
-            // 露出時間
-            if let Some(field) = exif.get_field(exif::Tag::ExposureTime, exif::In::PRIMARY) {
-                info.exposure_time = Some(field.display_value().to_string());
-            }
-
             Ok(info)
         }
         Err(_) => {
             // EXIF情報がない場合は空の情報を返す
             Ok(ExifInfo {
                 date_time: None,
-                camera_make: None,
-                camera_model: None,
+                gps_latitude: None,
+                gps_longitude: None,
                 width: None,
                 height: None,
-                focal_length: None,
-                f_number: None,
-                iso: None,
-                exposure_time: None,
             })
         }
     }
+}
+
+/// GPS座標をパースして10進数に変換
+fn parse_gps_coordinate(value: &exif::Value, reference: &str) -> Option<f64> {
+    // GPS座標は度・分・秒の3つの有理数で表現される
+    if let exif::Value::Rational(coords) = value {
+        if coords.len() >= 3 {
+            let degrees = coords[0].to_f64();
+            let minutes = coords[1].to_f64();
+            let seconds = coords[2].to_f64();
+
+            let mut decimal = degrees + (minutes / 60.0) + (seconds / 3600.0);
+
+            // 南緯または西経の場合は負の値にする
+            if reference == "S" || reference == "W" {
+                decimal = -decimal;
+            }
+
+            return Some(decimal);
+        }
+    }
+    None
 }
 
 /// 動画ファイルかどうかを判定
@@ -174,8 +173,6 @@ pub fn is_video_file(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_image_dimensions() {
         // テスト画像がないため、実際のテストはスキップ
