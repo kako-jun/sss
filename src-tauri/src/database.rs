@@ -64,7 +64,7 @@ impl Database {
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS scan_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                folder_path TEXT,
+                directory_path TEXT,
                 total_files INTEGER,
                 new_files INTEGER,
                 deleted_files INTEGER,
@@ -211,17 +211,17 @@ impl Database {
     /// スキャン履歴を記録
     pub fn record_scan_history(
         &self,
-        folder_path: &str,
+        directory_path: &str,
         total_files: i32,
         new_files: i32,
         deleted_files: i32,
         scan_duration_ms: i64,
     ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO scan_history (folder_path, total_files, new_files, deleted_files, scan_duration_ms)
+            "INSERT INTO scan_history (directory_path, total_files, new_files, deleted_files, scan_duration_ms)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             [
-                folder_path,
+                directory_path,
                 &total_files.to_string(),
                 &new_files.to_string(),
                 &deleted_files.to_string(),

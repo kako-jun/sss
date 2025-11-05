@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { ImageInfo } from '../types';
+import logoBg from '../assets/logo-bg.webp';
 
 interface SlideshowProps {
   image: ImageInfo | null;
@@ -30,7 +31,16 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
   });
 
   return (
-    <div className="w-screen h-screen bg-black overflow-hidden">
+    <div className="w-screen h-screen bg-black overflow-hidden relative">
+      {/* 背景ロゴ */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <img
+          src={logoBg}
+          alt="SSS Logo"
+          className="w-1/3 h-auto opacity-5"
+        />
+      </div>
+
       <AnimatePresence mode="wait">
         {image.isVideo ? (
           // 動画の場合

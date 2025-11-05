@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::State;
 
-/// デフォルトのシェアフォルダパスを取得
+/// デフォルトのシェアディレクトリパスを取得
 #[tauri::command]
-pub async fn get_default_share_folder() -> Result<String, String> {
+pub async fn get_default_share_directory() -> Result<String, String> {
     let pictures_dir = if cfg!(windows) {
         std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
     } else {
@@ -15,8 +15,8 @@ pub async fn get_default_share_folder() -> Result<String, String> {
     }
     .map_err(|_| "Failed to get home directory".to_string())?;
 
-    let share_folder = pictures_dir.join("sss");
-    Ok(share_folder.to_str().unwrap_or("").to_string())
+    let share_directory = pictures_dir.join("sss");
+    Ok(share_directory.to_str().unwrap_or("").to_string())
 }
 
 /// ファイラで画像を選択状態で開く（OS別）
@@ -53,7 +53,7 @@ pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         // Try nautilus first (GNOME), then dolphin (KDE), then fallback to xdg-open
-        let folder = path.parent().ok_or("Failed to get parent folder")?;
+        let directory = path.parent().ok_or("Failed to get parent directory")?;
 
         let result = Command::new("nautilus")
             .args(["--select", &image_path])
@@ -66,7 +66,7 @@ pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
 
             if result.is_err() {
                 Command::new("xdg-open")
-                    .arg(folder)
+                    .arg(directory)
                     .spawn()
                     .map_err(|e| format!("Failed to open file manager: {}", e))?;
             }
@@ -93,10 +93,10 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
         return Err("Image file does not exist".to_string());
     }
 
-    // コピー先フォルダを取得（設定から、なければデフォルト）
+    // コピー先ディレクトリを取得（設定から、なければデフォルト）
     let db = state.db.lock().unwrap();
-    let share_folder = match db
-        .get_setting("share_folder_path")
+    let share_directory = match db
+        .get_setting("share_directory_path")
         .map_err(|e| e.to_string())?
     {
         Some(path) => PathBuf::from(path),
@@ -114,16 +114,16 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
     };
     drop(db);
 
-    // フォルダが存在しない場合は作成
-    if !share_folder.exists() {
-        fs::create_dir_all(&share_folder)
-            .map_err(|e| format!("Failed to create share folder: {}", e))?;
+    // ディレクトリが存在しない場合は作成
+    if !share_directory.exists() {
+        fs::create_dir_all(&share_directory)
+            .map_err(|e| format!("Failed to create share directory: {}", e))?;
     }
 
     // ファイル名を取得
     let file_name = source_path.file_name().ok_or("Failed to get file name")?;
 
-    let dest_path = share_folder.join(file_name);
+    let dest_path = share_directory.join(file_name);
 
     // 重複チェック：同名ファイルがある場合はタイムスタンプを付与
     let final_dest_path = if dest_path.exists() {
@@ -133,7 +133,7 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        share_folder.join(format!("{}_{}.{}", stem, timestamp, ext))
+        share_directory.join(format!("{}_{}.{}", stem, timestamp, ext))
     } else {
         dest_path
     };
@@ -148,7 +148,7 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
 #[tauri::command]
 pub async fn exclude_image(
     image_path: String,
-    exclude_type: String, // "date", "file", "folder"
+    exclude_type: String, // "date", "file", "directory"
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let path = Path::new(&image_path);
@@ -186,12 +186,12 @@ pub async fn exclude_image(
             // ファイル名パターン
             path.to_string_lossy().to_string()
         }
-        "folder" => {
-            // フォルダパターン
+        "directory" => {
+            // ディレクトリパターン
             if let Some(parent) = path.parent() {
                 format!("{}/*", parent.to_string_lossy())
             } else {
-                return Err("Failed to get parent folder".to_string());
+                return Err("Failed to get parent directory".to_string());
             }
         }
         _ => return Err("Invalid exclude type".to_string()),
@@ -217,7 +217,7 @@ pub async fn exclude_image(
         drop(playlist_lock);
         Ok(format!("除外パターン追加: {}", pattern))
     } else {
-        // 日付・フォルダ除外は再スキャンが必要
+        // 日付・ディレクトリ除外は再スキャンが必要
         Ok(format!(
             "除外パターン追加: {} (変更を反映するには再スキャンしてください)",
             pattern

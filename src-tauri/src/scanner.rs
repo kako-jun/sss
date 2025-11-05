@@ -41,10 +41,10 @@ impl ImageScanner {
         ImageScanner { ignore_filter }
     }
 
-    /// フォルダをスキャン（進捗コールバック付き）
-    pub fn scan_folder_with_progress<F>(
+    /// ディレクトリをスキャン（進捗コールバック付き）
+    pub fn scan_directory_with_progress<F>(
         &self,
-        folder: &Path,
+        directory: &Path,
         mut progress_callback: F,
     ) -> Result<Vec<FileMetadata>, String>
     where
@@ -53,16 +53,16 @@ impl ImageScanner {
         let start_time = std::time::Instant::now();
 
         // ディレクトリが存在するかチェック
-        if !folder.exists() {
-            return Err(format!("Folder does not exist: {:?}", folder));
+        if !directory.exists() {
+            return Err(format!("Directory does not exist: {:?}", directory));
         }
 
-        if !folder.is_dir() {
-            return Err(format!("Path is not a directory: {:?}", folder));
+        if !directory.is_dir() {
+            return Err(format!("Path is not a directory: {:?}", directory));
         }
 
         // WalkDirでファイルエントリを収集
-        let entries: Vec<_> = WalkDir::new(folder)
+        let entries: Vec<_> = WalkDir::new(directory)
             .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -118,10 +118,10 @@ impl ImageScanner {
         Ok(files)
     }
 
-    /// フォルダをスキャン（差分検出あり、進捗コールバック付き）
-    pub fn scan_folder_incremental_with_progress<F>(
+    /// ディレクトリをスキャン（差分検出あり、進捗コールバック付き）
+    pub fn scan_directory_incremental_with_progress<F>(
         &self,
-        folder: &Path,
+        directory: &Path,
         previous_files: Vec<(String, i64, i64)>,
         progress_callback: F,
     ) -> Result<ScanResult, String>
@@ -137,7 +137,7 @@ impl ImageScanner {
             .collect();
 
         // 現在のファイルをスキャン（進捗コールバック付き）
-        let current_files = self.scan_folder_with_progress(folder, progress_callback)?;
+        let current_files = self.scan_directory_with_progress(directory, progress_callback)?;
 
         let mut new_files = Vec::new();
         let mut unchanged_count = 0;

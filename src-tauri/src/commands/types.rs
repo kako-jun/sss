@@ -8,7 +8,7 @@ use std::sync::Mutex;
 pub struct AppState {
     pub db: Mutex<Database>,
     pub playlist: Mutex<Option<Playlist>>,
-    pub folder_path: Mutex<Option<PathBuf>>,
+    pub directory_path: Mutex<Option<PathBuf>>,
     pub cache_dir: PathBuf,
     pub _keep_awake: keepawake::AwakeHandle,
 }

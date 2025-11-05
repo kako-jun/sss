@@ -65,7 +65,7 @@ fn main() {
             app.manage(AppState {
                 db: Mutex::new(db),
                 playlist: Mutex::new(None),
-                folder_path: Mutex::new(None),
+                directory_path: Mutex::new(None),
                 cache_dir,
                 _keep_awake: keep_awake,
             });
@@ -73,21 +73,21 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::scan::scan_folder,
+            commands::scan::scan_directory,
             commands::scan::init_playlist,
             commands::image::get_next_image,
             commands::image::get_previous_image,
             commands::file_operations::open_in_explorer,
             commands::stats::get_stats,
             commands::stats::get_playlist_info,
-            commands::settings::get_last_folder_path,
+            commands::settings::get_last_directory_path,
             commands::system::exit_app,
             commands::settings::save_setting,
             commands::settings::get_setting,
             commands::file_operations::share_image,
             commands::file_operations::exclude_image,
             commands::stats::get_display_stats,
-            commands::file_operations::get_default_share_folder,
+            commands::file_operations::get_default_share_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

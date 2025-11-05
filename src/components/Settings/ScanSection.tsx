@@ -1,7 +1,7 @@
 import { FolderOpen, RefreshCw } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { UnlistenFn, listen } from '@tauri-apps/api/event';
-import { selectFolder, scanFolder, getLastFolderPath } from '../../lib/tauri';
+import { selectDirectory, scanDirectory, getLastDirectoryPath } from '../../lib/tauri';
 import type { ScanProgress } from '../../types';
 
 interface ScanSectionProps {
@@ -17,22 +17,22 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
 
   // 前回のディレクトリパスを読み込む
   useEffect(() => {
-    const loadLastFolder = async () => {
+    const loadLastDirectory = async () => {
       try {
-        const lastFolder = await getLastFolderPath();
-        if (lastFolder) {
-          setSelectedDirectory(lastFolder);
+        const lastDirectory = await getLastDirectoryPath();
+        if (lastDirectory) {
+          setSelectedDirectory(lastDirectory);
         }
       } catch (err) {
-        console.error('Failed to load last folder path:', err);
+        console.error('Failed to load last directory path:', err);
       }
     };
-    loadLastFolder();
+    loadLastDirectory();
   }, []);
 
   const handleSelectDirectory = async () => {
     try {
-      const directory = await selectFolder();
+      const directory = await selectDirectory();
       if (directory) {
         setSelectedDirectory(directory);
         setError(null);
@@ -61,14 +61,14 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
         setRealtimeProgress(event.payload);
       });
 
-      const progress = await scanFolder(selectedDirectory);
+      const progress = await scanDirectory(selectedDirectory);
       setScanProgress(progress);
       setRealtimeProgress(null);
       // スキャン完了を通知するが、設定画面は閉じない
       onScanComplete();
     } catch (err) {
-      console.error('Failed to scan folder:', err);
-      setError(err instanceof Error ? err.message : 'Failed to scan folder');
+      console.error('Failed to scan directory:', err);
+      setError(err instanceof Error ? err.message : 'Failed to scan directory');
     } finally {
       setIsScanning(false);
       if (unlisten) {
