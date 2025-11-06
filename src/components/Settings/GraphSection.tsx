@@ -82,7 +82,7 @@ export function GraphSection() {
             stroke: '#6b7280',
             width: 1,
           },
-          values: (_u, vals) => vals.map(v => Math.round(v).toString()), // 整数のみ表示
+          values: (_u: uPlot, vals: number[]) => vals.map((v: number) => Math.round(v).toString()), // 整数のみ表示
         },
         {
           label: '表示回数',

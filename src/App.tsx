@@ -8,6 +8,7 @@ import { initPlaylist, getPlaylistInfo, getLastDirectoryPath, scanDirectory, get
 import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
 import { X, Settings as SettingsIcon } from 'lucide-react';
+import logoBg from './assets/logo-bg.webp';
 
 function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -102,19 +103,27 @@ function App() {
                 await updatePlaylistInfo();
               } catch (scanErr) {
                 console.error('Failed to scan last directory:', scanErr);
-                // エラーが発生してもボタンで開けるので自動的には開かない
+                // エラーが発生しても初期化を完了させ、設定画面を開けるようにする
+                setInitStatus('');
+                setIsInitialized(true);
               } finally {
                 // リスナーをクリーンアップ
                 if (unlisten) {
                   unlisten();
                 }
               }
+            } else {
+              // 最後のディレクトリもなければ、初期化を完了して設定画面を開けるようにする
+              console.log('No saved playlist or last directory found');
+              setInitStatus('');
+              setIsInitialized(true);
             }
-            // 最後のディレクトリもなければ、ボタンで設定を開けるようにする（自動的には開かない）
           }
         } catch (err) {
           console.error('Failed to initialize:', err);
-          // エラーが発生してもボタンで開けるので自動的には開かない
+          // エラーが発生しても初期化を完了させ、設定画面を開けるようにする
+          setInitStatus('');
+          setIsInitialized(true);
         }
       };
 
@@ -232,16 +241,39 @@ function App() {
   // エラー表示
   if (error && !isSettingsOpen) {
     return (
-      <div className="w-screen h-screen bg-black flex items-center justify-center">
-        <div className="text-white text-xl">
-          <div className="mb-4">エラーが発生しました</div>
-          <div className="text-red-400 mb-4">{error}</div>
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-          >
-            設定を開く
-          </button>
+      <div className="w-screen h-screen bg-black overflow-hidden relative">
+        {/* 背景ロゴ */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <img
+            src={logoBg}
+            alt="SSS Logo"
+            className="w-1/3 h-auto opacity-5"
+          />
+        </div>
+
+        {/* 終了ボタン（左上） */}
+        <button
+          onClick={() => exit(0)}
+          className="fixed top-4 left-4 z-50 p-2 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-gray-300 hover:text-white transition-colors group"
+          title="ESCで終了"
+        >
+          <X size={20} />
+          <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            ESCで終了
+          </span>
+        </button>
+
+        <div className="w-screen h-screen flex items-center justify-center relative z-10">
+          <div className="text-white text-xl text-center">
+            <div className="mb-4">エラーが発生しました</div>
+            <div className="text-red-400 mb-4">{error}</div>
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+            >
+              設定を開く
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -250,19 +282,42 @@ function App() {
   // 初期化前
   if (!isInitialized && !isSettingsOpen) {
     return (
-      <div className="w-screen h-screen bg-black flex items-center justify-center">
-        <div className="text-white text-center">
-          <div className="text-2xl mb-4">{initStatus || 'プレイリストを読み込んでいます...'}</div>
+      <div className="w-screen h-screen bg-black overflow-hidden relative">
+        {/* 背景ロゴ */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <img
+            src={logoBg}
+            alt="SSS Logo"
+            className="w-1/3 h-auto opacity-5"
+          />
+        </div>
 
-          {/* リアルタイム進捗表示 */}
-          {realtimeProgress && (
-            <div className="text-3xl font-mono text-blue-300 mb-4">
-              {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()} ファイル処理中
+        {/* 終了ボタン（左上） */}
+        <button
+          onClick={() => exit(0)}
+          className="fixed top-4 left-4 z-50 p-2 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-gray-300 hover:text-white transition-colors group"
+          title="ESCで終了"
+        >
+          <X size={20} />
+          <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            ESCで終了
+          </span>
+        </button>
+
+        <div className="w-screen h-screen flex items-center justify-center relative z-10">
+          <div className="text-white text-center">
+            <div className="text-2xl mb-4">{initStatus || 'プレイリストを読み込んでいます...'}</div>
+
+            {/* リアルタイム進捗表示 */}
+            {realtimeProgress && (
+              <div className="text-3xl font-mono text-blue-300 mb-4">
+                {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()} ファイル処理中
+              </div>
+            )}
+
+            <div className="text-gray-400 text-sm">
+              しばらくお待ちください
             </div>
-          )}
-
-          <div className="text-gray-400 text-sm">
-            しばらくお待ちください
           </div>
         </div>
       </div>
