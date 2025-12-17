@@ -32,3 +32,4 @@ src-tauri/target
 # Windows temporary files
 nul
 .serena/
+.mcp.json
