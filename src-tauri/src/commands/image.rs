@@ -42,6 +42,9 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
                 }
             }
 
+            // プレイリスト状態をロック保持中に取得（TOCTOU回避）
+            let state_data = playlist.get_state();
+
             drop(playlist_lock);
 
             // 5枚先まで先読みキャッシュ（バックグラウンドで直列処理）
@@ -56,18 +59,14 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             }
 
             // プレイリスト状態を保存
-            let playlist_lock = state.playlist.lock().unwrap();
-            if let Some(ref playlist) = *playlist_lock {
-                let state_data = playlist.get_state();
+            {
                 let db = state.db.lock().unwrap();
                 let _ = db.save_playlist_state(
                     state_data.current_index as i32,
                     &serde_json::to_string(&state_data.shuffled_list).unwrap(),
                     false,
                 );
-                drop(db);
             }
-            drop(playlist_lock);
 
             // 画像情報を取得
             get_image_info_internal(&path_str, &state)

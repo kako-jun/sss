@@ -125,7 +125,7 @@ pub async fn scan_directory(
         .map(|p| p == &directory)
         .unwrap_or(false);
 
-    // 設定を確認して表示回数をリセット（スキャン時は常にチェック）
+    // 設定を確認して表示回数をリセット（ディレクトリが変わった場合のみ）
     let db = state.db.lock().unwrap();
     let should_reset = db
         .get_setting("reset_on_directory_change")
@@ -134,9 +134,9 @@ pub async fn scan_directory(
         .map(|v| v == "true")
         .unwrap_or(true); // デフォルトはON
 
-    if should_reset {
+    if should_reset && !is_same_directory {
         let _ = db.reset_all_display_counts();
-        println!("Display counts reset on scan");
+        println!("Display counts reset on directory change");
     }
     drop(db);
 

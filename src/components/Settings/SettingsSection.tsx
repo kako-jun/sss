@@ -50,25 +50,25 @@ export function SettingsSection() {
   return (
     <div className="space-y-4">
       {/* 表示回数リセット設定 */}
-      <label className="flex items-start gap-3 cursor-pointer">
+      <label className="flex items-start gap-3 cursor-pointer group">
         <input
           type="checkbox"
           checked={resetOnDirectoryChange}
           onChange={(e) => handleResetChange(e.target.checked)}
-          className="mt-1 w-5 h-5 rounded border-gray-600 text-gray-600 focus:ring-gray-500"
+          className="mt-0.5 w-4 h-4 rounded border-white/20 bg-white/5 text-white/50 focus:ring-0 focus:ring-offset-0 accent-white/50"
         />
-        <div className="text-white font-medium">ディレクトリ変更時に表示回数をリセット</div>
+        <div className="text-white/55 text-sm group-hover:text-white/75 transition-colors">ディレクトリ変更時に表示回数をリセット</div>
       </label>
 
       {/* EXIF回転設定 */}
-      <label className="flex items-start gap-3 cursor-pointer">
+      <label className="flex items-start gap-3 cursor-pointer group">
         <input
           type="checkbox"
           checked={applyExifRotation}
           onChange={(e) => handleExifRotationChange(e.target.checked)}
-          className="mt-1 w-5 h-5 rounded border-gray-600 text-gray-600 focus:ring-gray-500"
+          className="mt-0.5 w-4 h-4 rounded border-white/20 bg-white/5 text-white/50 focus:ring-0 focus:ring-offset-0 accent-white/50"
         />
-        <div className="text-white font-medium">EXIF回転情報に従って画像を自動回転</div>
+        <div className="text-white/55 text-sm group-hover:text-white/75 transition-colors">EXIF回転情報に従って画像を自動回転</div>
       </label>
     </div>
   );

@@ -79,7 +79,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-semibold text-white">ディレクトリ選択</h3>
+      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">ディレクトリ選択</h3>
 
       <div className="flex gap-2">
         <input
@@ -87,11 +87,11 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
           value={selectedDirectory}
           readOnly
           placeholder=""
-          className="flex-1 px-3 py-2 bg-gray-800 text-gray-300 rounded border border-gray-700 focus:outline-none focus:border-gray-500"
+          className="flex-1 px-3 py-2 bg-black/40 text-white/60 rounded border border-white/8 focus:outline-none focus:border-white/20 text-sm"
         />
         <button
           onClick={handleSelectDirectory}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition shrink-0"
+          className="flex items-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded border border-white/8 transition shrink-0 text-sm"
         >
           <FolderOpen className="w-4 h-4" />
           選択
@@ -101,39 +101,39 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
       <button
         onClick={handleScan}
         disabled={!selectedDirectory || isScanning}
-        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white rounded transition"
+        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 disabled:bg-black/20 disabled:text-white/20 text-white/60 hover:text-white/80 rounded border border-white/8 disabled:border-white/5 transition text-sm"
       >
         <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
         {isScanning ? 'スキャン中...' : 'スキャン'}
       </button>
 
       {error && (
-        <div className="text-sm text-red-400">
+        <div className="text-sm text-red-400/70">
           {error}
         </div>
       )}
 
       {realtimeProgress && (
-        <div className="text-sm text-gray-400">
-          スキャン中: {realtimeProgress.current} / {realtimeProgress.total}
+        <div className="text-sm text-white/30 font-mono">
+          {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()}
         </div>
       )}
 
       {scanProgress && (
         <div className="space-y-2">
-          <h3 className="text-lg font-semibold text-white">スキャン結果</h3>
-          <div className="space-y-2 p-4 bg-gray-800 rounded">
-            <div className="text-sm text-gray-300">
-              ファイル数: {scanProgress.totalFiles}
+          <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">スキャン結果</h3>
+          <div className="space-y-2 p-4 bg-black/30 rounded border border-white/5">
+            <div className="text-sm text-white/50">
+              ファイル数: <span className="font-mono text-white/70">{scanProgress.totalFiles.toLocaleString()}</span>
             </div>
-            <div className="text-sm text-green-400">
-              新規: {scanProgress.newFiles}
+            <div className="text-sm text-white/40">
+              新規: <span className="font-mono text-white/60">{scanProgress.newFiles.toLocaleString()}</span>
             </div>
-            <div className="text-sm text-red-400">
-              削除: {scanProgress.deletedFiles}
+            <div className="text-sm text-white/40">
+              削除: <span className="font-mono text-white/60">{scanProgress.deletedFiles.toLocaleString()}</span>
             </div>
-            <div className="text-sm text-gray-400">
-              処理時間: {(scanProgress.durationMs / 1000).toFixed(2)}秒
+            <div className="text-sm text-white/30">
+              処理時間: <span className="font-mono">{(scanProgress.durationMs / 1000).toFixed(2)}秒</span>
             </div>
           </div>
         </div>

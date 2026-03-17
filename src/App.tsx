@@ -247,29 +247,29 @@ function App() {
           <img
             src={logoBg}
             alt="SSS Logo"
-            className="w-1/3 h-auto opacity-5"
+            className="w-1/3 h-auto opacity-3"
           />
         </div>
 
         {/* 終了ボタン（左上） */}
         <button
           onClick={() => exit(0)}
-          className="fixed top-4 left-4 z-50 p-2 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-gray-300 hover:text-white transition-colors group"
+          className="fixed top-4 left-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
           title="ESCで終了"
         >
-          <X size={20} />
-          <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <X size={18} />
+          <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
             ESCで終了
           </span>
         </button>
 
         <div className="w-screen h-screen flex items-center justify-center relative z-10">
-          <div className="text-white text-xl text-center">
+          <div className="text-white/70 text-lg text-center">
             <div className="mb-4">エラーが発生しました</div>
-            <div className="text-red-400 mb-4">{error}</div>
+            <div className="text-red-400/80 mb-6 text-sm">{error}</div>
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+              className="px-5 py-2 bg-white/8 hover:bg-white/15 border border-white/10 rounded text-white/60 hover:text-white/80 transition-colors text-sm"
             >
               設定を開く
             </button>
@@ -288,34 +288,34 @@ function App() {
           <img
             src={logoBg}
             alt="SSS Logo"
-            className="w-1/3 h-auto opacity-5"
+            className="w-1/3 h-auto opacity-3"
           />
         </div>
 
         {/* 終了ボタン（左上） */}
         <button
           onClick={() => exit(0)}
-          className="fixed top-4 left-4 z-50 p-2 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-gray-300 hover:text-white transition-colors group"
+          className="fixed top-4 left-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
           title="ESCで終了"
         >
-          <X size={20} />
-          <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <X size={18} />
+          <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
             ESCで終了
           </span>
         </button>
 
         <div className="w-screen h-screen flex items-center justify-center relative z-10">
-          <div className="text-white text-center">
-            <div className="text-2xl mb-4">{initStatus || 'プレイリストを読み込んでいます...'}</div>
+          <div className="text-white/50 text-center">
+            <div className="text-lg mb-4">{initStatus || 'プレイリストを読み込んでいます...'}</div>
 
             {/* リアルタイム進捗表示 */}
             {realtimeProgress && (
-              <div className="text-3xl font-mono text-blue-300 mb-4">
-                {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()} ファイル処理中
+              <div className="text-2xl font-mono text-white/40 mb-4">
+                {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()}
               </div>
             )}
 
-            <div className="text-gray-400 text-sm">
+            <div className="text-white/25 text-xs">
               しばらくお待ちください
             </div>
           </div>
@@ -332,11 +332,11 @@ function App() {
       {/* 終了ボタン（左上） */}
       <button
         onClick={() => exit(0)}
-        className="fixed top-4 left-4 z-50 p-2 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-gray-300 hover:text-white transition-colors group"
+        className="fixed top-4 left-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
         title="ESCで終了"
       >
-        <X size={20} />
-        <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <X size={18} />
+        <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
           ESCで終了
         </span>
       </button>
@@ -345,12 +345,12 @@ function App() {
       {!currentImage && !isLoading && !isSettingsOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-40">
           <div className="text-center">
-            <div className="text-white text-xl mb-4">画像が読み込まれていません</div>
+            <div className="text-white/50 text-lg mb-5">画像が読み込まれていません</div>
             <button
               onClick={handleSettings}
-              className="flex items-center gap-2 px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors mx-auto"
+              className="flex items-center gap-2 px-5 py-2 bg-white/8 hover:bg-white/15 border border-white/10 text-white/50 hover:text-white/80 rounded transition-colors mx-auto text-sm"
             >
-              <SettingsIcon size={20} />
+              <SettingsIcon size={16} />
               設定を開く
             </button>
           </div>

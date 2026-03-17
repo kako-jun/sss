@@ -20,7 +20,7 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.3",
     "framer-motion": "^12.23.24",
-    "lucide-react": "^0.552.0",
+    "lucide-react": "^0.577.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "uplot": "^1.6.32"

@@ -30,45 +30,45 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: MODAL_ANIMATION_DURATION }}
-      className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50"
       onClick={onClose}
     >
       <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
+        initial={{ scale: 0.97, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.95, opacity: 0 }}
+        exit={{ scale: 0.97, opacity: 0 }}
         transition={{ duration: MODAL_ANIMATION_DURATION }}
-        className="bg-gray-900 rounded-2xl shadow-2xl p-8 max-w-2xl w-full mx-8 max-h-[90vh] overflow-hidden border border-gray-700 flex flex-col"
+        className="bg-neutral-950 rounded-xl shadow-2xl p-7 max-w-2xl w-full mx-8 max-h-[90vh] overflow-hidden border border-white/8 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-white">設定</h2>
+          <h2 className="text-lg font-medium text-white/70">設定</h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-white/8 rounded transition-colors"
           >
-            <X className="w-6 h-6 text-gray-400" />
+            <X className="w-5 h-5 text-white/30 hover:text-white/60" />
           </button>
         </div>
 
         {/* タブナビゲーション */}
-        <div className="flex gap-2 mb-6 border-b border-gray-700">
+        <div className="flex gap-1 mb-6 border-b border-white/8">
           <button
             onClick={() => setActiveTab('scan')}
-            className={`px-4 py-2 font-medium transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors ${
               activeTab === 'scan'
-                ? 'text-white border-b-2 border-white'
-                : 'text-gray-400 hover:text-gray-300'
+                ? 'text-white/80 border-b border-white/50'
+                : 'text-white/30 hover:text-white/50'
             }`}
           >
             入力
           </button>
           <button
             onClick={() => setActiveTab('options')}
-            className={`px-4 py-2 font-medium transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors ${
               activeTab === 'options'
-                ? 'text-white border-b-2 border-white'
-                : 'text-gray-400 hover:text-gray-300'
+                ? 'text-white/80 border-b border-white/50'
+                : 'text-white/30 hover:text-white/50'
             }`}
           >
             オプション
@@ -78,20 +78,20 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
               setActiveTab('stats');
               setStatsKey(prev => prev + 1); // タブを開くたびにkeyを変更して再マウント
             }}
-            className={`px-4 py-2 font-medium transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors ${
               activeTab === 'stats'
-                ? 'text-white border-b-2 border-white'
-                : 'text-gray-400 hover:text-gray-300'
+                ? 'text-white/80 border-b border-white/50'
+                : 'text-white/30 hover:text-white/50'
             }`}
           >
             統計グラフ
           </button>
           <button
             onClick={() => setActiveTab('info')}
-            className={`px-4 py-2 font-medium transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors ${
               activeTab === 'info'
-                ? 'text-white border-b-2 border-white'
-                : 'text-gray-400 hover:text-gray-300'
+                ? 'text-white/80 border-b border-white/50'
+                : 'text-white/30 hover:text-white/50'
             }`}
           >
             情報

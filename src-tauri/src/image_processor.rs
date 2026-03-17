@@ -148,6 +148,11 @@ fn parse_gps_coordinate(value: &exif::Value, reference: &str) -> Option<f64> {
     // GPS座標は度・分・秒の3つの有理数で表現される
     if let exif::Value::Rational(coords) = value {
         if coords.len() >= 3 {
+            // 0除算チェック（不正なEXIFデータ対策）
+            if coords[0].denom == 0 || coords[1].denom == 0 || coords[2].denom == 0 {
+                return None;
+            }
+
             let degrees = coords[0].to_f64();
             let minutes = coords[1].to_f64();
             let seconds = coords[2].to_f64();
@@ -155,7 +160,9 @@ fn parse_gps_coordinate(value: &exif::Value, reference: &str) -> Option<f64> {
             let mut decimal = degrees + (minutes / 60.0) + (seconds / 3600.0);
 
             // 南緯または西経の場合は負の値にする
-            if reference == "S" || reference == "W" {
+            // display_value()の出力が余分な空白や引用符を含む場合に備えてtrimする
+            let reference_trimmed = reference.trim().trim_matches('"');
+            if reference_trimmed == "S" || reference_trimmed == "W" {
                 decimal = -decimal;
             }
 

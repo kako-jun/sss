@@ -38,11 +38,11 @@ export function StatsSection({ isOpen, onStatsLoad }: StatsSectionProps) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-semibold text-white">スキャン結果</h3>
-      <div className="space-y-2 p-4 bg-gray-800 rounded">
-        <div className="flex justify-between text-gray-300">
+      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">スキャン結果</h3>
+      <div className="space-y-2 p-4 bg-black/30 rounded border border-white/5">
+        <div className="flex justify-between text-white/50 text-sm">
           <span>画像数:</span>
-          <span className="font-mono">{stats.totalImages.toLocaleString()}</span>
+          <span className="font-mono text-white/70">{stats.totalImages.toLocaleString()}</span>
         </div>
       </div>
     </div>

@@ -31,7 +31,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-semibold text-white">表示間隔</h3>
+      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">表示間隔</h3>
       <div className="flex items-center gap-4">
         <input
           type="range"
@@ -39,7 +39,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
           max={MAX_DISPLAY_INTERVAL}
           value={displayInterval / 1000}
           onChange={(e) => handleIntervalChange(parseInt(e.target.value) * 1000)}
-          className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+          className="flex-1 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white/60"
         />
         <div className="flex items-center gap-2">
           <input
@@ -51,9 +51,9 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
               const value = Math.max(MIN_DISPLAY_INTERVAL, Math.min(MAX_DISPLAY_INTERVAL, parseInt(e.target.value) || MIN_DISPLAY_INTERVAL));
               handleIntervalChange(value * 1000);
             }}
-            className="w-16 px-2 py-1 bg-gray-700 text-white rounded text-center"
+            className="w-14 px-2 py-1 bg-black/40 text-white/60 rounded border border-white/8 text-center text-sm focus:outline-none focus:border-white/20"
           />
-          <span className="text-gray-400 text-sm">秒</span>
+          <span className="text-white/30 text-sm">秒</span>
         </div>
       </div>
     </div>

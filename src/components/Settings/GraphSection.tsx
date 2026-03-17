@@ -59,9 +59,9 @@ export function GraphSection() {
         },
         {
           label: '表示回数',
-          stroke: 'rgb(59, 130, 246)', // blue-500
-          fill: 'rgba(59, 130, 246, 0.1)',
-          width: 2,
+          stroke: 'rgba(255, 255, 255, 0.5)',
+          fill: 'rgba(255, 255, 255, 0.05)',
+          width: 1,
           points: {
             show: displayStats.length <= 50, // 50ファイル以下の場合のみポイント表示
           },
@@ -70,32 +70,32 @@ export function GraphSection() {
       axes: [
         {
           label: 'ファイルID (A-Z順)',
-          stroke: '#d1d5db', // gray-300
-          labelFont: '12px sans-serif',
+          stroke: 'rgba(255,255,255,0.3)',
+          labelFont: '11px sans-serif',
           labelSize: 12,
           labelGap: 8,
           grid: {
-            stroke: '#374151',
+            stroke: 'rgba(255,255,255,0.05)',
             width: 1,
           },
           ticks: {
-            stroke: '#6b7280',
+            stroke: 'rgba(255,255,255,0.1)',
             width: 1,
           },
           values: (_u: uPlot, vals: number[]) => vals.map((v: number) => Math.round(v).toString()), // 整数のみ表示
         },
         {
           label: '表示回数',
-          stroke: '#d1d5db', // gray-300
-          labelFont: '12px sans-serif',
+          stroke: 'rgba(255,255,255,0.3)',
+          labelFont: '11px sans-serif',
           labelSize: 12,
           labelGap: 8,
           grid: {
-            stroke: '#374151',
+            stroke: 'rgba(255,255,255,0.05)',
             width: 1,
           },
           ticks: {
-            stroke: '#6b7280',
+            stroke: 'rgba(255,255,255,0.1)',
             width: 1,
           },
         },
@@ -137,7 +137,7 @@ export function GraphSection() {
 
   if (isLoading) {
     return (
-      <div className="p-4 bg-gray-800 rounded text-center text-gray-400">
+      <div className="p-4 bg-black/30 rounded text-center text-white/30 text-sm border border-white/5">
         読み込み中...
       </div>
     );
@@ -145,7 +145,7 @@ export function GraphSection() {
 
   if (displayStats.length === 0) {
     return (
-      <div className="p-4 bg-gray-800 rounded text-center text-gray-400">
+      <div className="p-4 bg-black/30 rounded text-center text-white/30 text-sm border border-white/5">
         データがありません。スキャンを実行してください。
       </div>
     );
@@ -154,17 +154,17 @@ export function GraphSection() {
   return (
     <div className="space-y-4">
       {stats && (
-        <div className="flex justify-between text-gray-300">
+        <div className="flex justify-between text-white/40 text-sm">
           <span>1回でも表示済みのファイル数:</span>
-          <span className="font-mono">{stats.displayedImages.toLocaleString()} / {stats.totalImages.toLocaleString()}</span>
+          <span className="font-mono text-white/60">{stats.displayedImages.toLocaleString()} / {stats.totalImages.toLocaleString()}</span>
         </div>
       )}
 
-      <div className="bg-gray-800 rounded p-4">
-        <h3 className="text-lg font-semibold text-white mb-4">画像ごとの表示回数</h3>
+      <div className="bg-black/30 rounded p-4 border border-white/5">
+        <h3 className="text-sm font-medium text-white/50 mb-4 uppercase tracking-wider">画像ごとの表示回数</h3>
         <div ref={chartRef} className="w-full" />
-        <div className="mt-2 text-xs text-gray-400">
-          完全平等ランダムアルゴリズムが正しく動作していれば、全てのファイルが均等に表示されます（全て0→全て1→全て2...）
+        <div className="mt-3 text-xs text-white/25">
+          完全平等ランダムアルゴリズムが正しく動作していれば、全てのファイルが均等に表示されます
         </div>
       </div>
     </div>

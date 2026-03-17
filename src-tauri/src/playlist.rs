@@ -82,15 +82,23 @@ impl Playlist {
         // 次のインデックスに進む
         self.current_index = (self.current_index + 1) % self.shuffled_list.len();
 
-        // リストの最後まで到達したら再シャッフル
+        // リストの最後まで到達したら再シャッフル（先頭が直前の末尾と同じにならないよう保証）
         if self.current_index == 0 && self.shuffled_list.len() > 1 {
             println!("Reshuffling playlist...");
+            // シャッフル前に末尾の画像を記録（直前に表示した画像）
+            let last_image = self.shuffled_list.last().cloned();
             let mut rng = thread_rng();
             self.shuffled_list.shuffle(&mut rng);
+            // 先頭が直前の画像と同じなら2番目と入れ替えて連続表示を防ぐ
+            if let Some(ref last) = last_image {
+                if self.shuffled_list.first() == Some(last) {
+                    self.shuffled_list.swap(0, 1);
+                }
+            }
         }
 
         // 履歴に追加（最大100件）
-        if self.history.len() > 100 {
+        if self.history.len() >= 100 {
             self.history.remove(0);
         }
         self.history.push(self.current_index);
