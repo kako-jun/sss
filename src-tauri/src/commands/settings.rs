@@ -20,7 +20,7 @@ pub fn get_setting(state: State<AppState>, key: String) -> Result<Option<String>
 /// 最後に選択したディレクトリパスを取得
 #[tauri::command]
 pub async fn get_last_directory_path(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let path = db
         .get_setting("last_directory_path")
         .map_err(|e| format!("Database error: {}", e))?;

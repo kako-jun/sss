@@ -66,7 +66,7 @@ pub async fn scan_directory(
     let scanner = ImageScanner::new(&sssignore_path);
 
     // データベースから前回のファイルメタデータを取得
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let previous_files = db.get_all_file_metadata().unwrap_or_default();
     drop(db);
 
@@ -87,7 +87,7 @@ pub async fn scan_directory(
     )?;
 
     // データベースを更新
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // 新規ファイルを追加
     for file in &scan_result.files {
@@ -116,17 +116,17 @@ pub async fn scan_directory(
     // プレイリストを作成または更新
     let image_paths: Vec<String> = scan_result.files.iter().map(|f| f.path.clone()).collect();
 
-    let mut playlist_lock = state.playlist.lock().unwrap();
+    let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
 
     // ディレクトリパスを確認
-    let current_directory = state.directory_path.lock().unwrap().clone();
+    let current_directory = state.directory_path.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let is_same_directory = current_directory
         .as_ref()
         .map(|p| p == &directory)
         .unwrap_or(false);
 
     // 設定を確認して表示回数をリセット（ディレクトリが変わった場合のみ）
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let should_reset = db
         .get_setting("reset_on_directory_change")
         .ok()
@@ -157,10 +157,10 @@ pub async fn scan_directory(
     // プレイリスト状態をDBに保存
     if let Some(ref playlist) = *playlist_lock {
         let state_data = playlist.get_state();
-        let db = state.db.lock().unwrap();
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
         let _ = db.save_playlist_state(
             state_data.current_index as i32,
-            &serde_json::to_string(&state_data.shuffled_list).unwrap(),
+            &serde_json::to_string(&state_data.shuffled_list).unwrap_or_default(),
             false,
         );
     }
@@ -168,10 +168,10 @@ pub async fn scan_directory(
     drop(playlist_lock);
 
     // ディレクトリパスを保存
-    *state.directory_path.lock().unwrap() = Some(directory.clone());
+    *state.directory_path.lock().unwrap_or_else(|e| e.into_inner()) = Some(directory.clone());
 
     // ディレクトリパスをデータベースに永続化
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let _ = db.save_setting("last_directory_path", &directory_path);
     drop(db);
 
@@ -186,7 +186,7 @@ pub async fn scan_directory(
 /// プレイリストを初期化（保存された状態から復元）
 #[tauri::command]
 pub async fn init_playlist(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let playlist_state = db
         .get_playlist_state()
         .map_err(|e| format!("Database error: {}", e))?;
@@ -201,7 +201,7 @@ pub async fn init_playlist(state: State<'_, AppState>) -> Result<Option<String>,
             let playlist = Playlist::from_state(shuffled_list, current_index as usize);
             let current_image = playlist.current().map(|s| s.clone());
 
-            *state.playlist.lock().unwrap() = Some(playlist);
+            *state.playlist.lock().unwrap_or_else(|e| e.into_inner()) = Some(playlist);
 
             return Ok(current_image);
         }

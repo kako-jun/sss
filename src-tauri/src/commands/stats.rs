@@ -4,7 +4,7 @@ use tauri::State;
 /// 統計情報を取得
 #[tauri::command]
 pub async fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
 
     let total_images = db
         .get_total_image_count()
@@ -25,7 +25,7 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
 pub async fn get_playlist_info(
     state: State<'_, AppState>,
 ) -> Result<Option<(usize, usize, bool)>, String> {
-    let playlist_lock = state.playlist.lock().unwrap();
+    let playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
 
     if let Some(ref playlist) = *playlist_lock {
         Ok(Some((
@@ -41,7 +41,7 @@ pub async fn get_playlist_info(
 /// 統計データを取得（グラフ用）
 #[tauri::command]
 pub async fn get_display_stats(state: State<'_, AppState>) -> Result<Vec<(String, i32)>, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     db.get_all_display_counts()
         .map_err(|e| format!("Failed to get display stats: {}", e))
 }

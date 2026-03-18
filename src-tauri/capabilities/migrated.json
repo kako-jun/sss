@@ -19,7 +19,12 @@
     {
       "identifier": "fs:scope",
       "allow": [
-        "**"
+        "$HOME/Pictures/**",
+        "$HOME/Desktop/**",
+        "$HOME/Documents/**",
+        "$HOME/Downloads/**",
+        "$APPDATA/**",
+        "/Volumes/**"
       ]
     },
     "shell:allow-open",

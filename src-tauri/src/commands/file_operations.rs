@@ -94,7 +94,7 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
     }
 
     // コピー先ディレクトリを取得（設定から、なければデフォルト）
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let share_directory = match db
         .get_setting("share_directory_path")
         .map_err(|e| e.to_string())?
@@ -127,11 +127,11 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
 
     // 重複チェック：同名ファイルがある場合はタイムスタンプを付与
     let final_dest_path = if dest_path.exists() {
-        let stem = dest_path.file_stem().unwrap().to_string_lossy();
+        let stem = dest_path.file_stem().unwrap_or_default().to_string_lossy();
         let ext = dest_path.extension().unwrap_or_default().to_string_lossy();
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         share_directory.join(format!("{}_{}.{}", stem, timestamp, ext))
     } else {
@@ -209,7 +209,7 @@ pub async fn exclude_image(
 
     // プレイリストから該当画像を削除（ファイル除外の場合のみ即座に削除）
     if exclude_type == "file" {
-        let mut playlist_lock = state.playlist.lock().unwrap();
+        let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(ref mut playlist) = *playlist_lock {
             playlist.update_images(vec![], vec![image_path.clone()]);
             println!("Removed {} from playlist", image_path);

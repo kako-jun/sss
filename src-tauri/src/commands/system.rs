@@ -1,9 +1,9 @@
 use tauri::{AppHandle, Manager};
 
-/// アプリケーションを終了
+/// アプリケーションを終了（DB書き込み完了を待ってから安全に終了）
 #[tauri::command]
-pub fn exit_app() {
-    std::process::exit(0);
+pub fn exit_app(app: AppHandle) {
+    app.exit(0);
 }
 
 /// すべての設定とデータを初期化（データベースとキャッシュを削除）

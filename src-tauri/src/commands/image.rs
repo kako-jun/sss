@@ -10,7 +10,7 @@ use tauri::State;
 #[tauri::command]
 pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
     println!("get_next_image called");
-    let mut playlist_lock = state.playlist.lock().unwrap();
+    let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
 
     if let Some(ref mut playlist) = *playlist_lock {
         // プレイリストが空の場合はエラー
@@ -53,17 +53,17 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
 
             // 表示回数を増やす（新しい画像の場合のみ）
             if should_count {
-                let db = state.db.lock().unwrap();
+                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = db.increment_display_count(&path_str);
                 drop(db);
             }
 
             // プレイリスト状態を保存
             {
-                let db = state.db.lock().unwrap();
+                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = db.save_playlist_state(
                     state_data.current_index as i32,
-                    &serde_json::to_string(&state_data.shuffled_list).unwrap(),
+                    &serde_json::to_string(&state_data.shuffled_list).unwrap_or_default(),
                     false,
                 );
             }
@@ -81,7 +81,7 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
 /// 前の画像を取得（カウント増やさない）
 #[tauri::command]
 pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
-    let mut playlist_lock = state.playlist.lock().unwrap();
+    let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
 
     if let Some(ref mut playlist) = *playlist_lock {
         // プレイリストが空の場合はエラー
@@ -100,10 +100,10 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
             let state_data = playlist.get_state();
             drop(playlist_lock);
 
-            let db = state.db.lock().unwrap();
+            let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
             let _ = db.save_playlist_state(
                 state_data.current_index as i32,
-                &serde_json::to_string(&state_data.shuffled_list).unwrap(),
+                &serde_json::to_string(&state_data.shuffled_list).unwrap_or_default(),
                 false,
             );
             drop(db);
@@ -205,7 +205,7 @@ fn get_image_info_internal(
     };
 
     // データベースから統計情報を取得
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let (display_count, last_displayed) = db.get_image_stats(image_path).unwrap_or((0, None));
     drop(db);
 
