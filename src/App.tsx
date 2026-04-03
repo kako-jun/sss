@@ -57,27 +57,35 @@ function App() {
 
   // フルスクリーン状態をOSの実態と同期
   useEffect(() => {
+    let cancelled = false;
     const win = getCurrentWindow();
     // 初期値を実態から取得
     win
       .isFullscreen()
-      .then(setIsFullscreen)
+      .then((v) => {
+        if (!cancelled) setIsFullscreen(v);
+      })
       .catch(() => {});
-    // OSによるフルスクリーン変化（ESC等）を検知して同期
-    let unlisten: (() => void) | null = null;
-    win
+    // OSによるフルスクリーン変化を検知して同期
+    // （Tauri v2 にフルスクリーン専用イベントがないため onResized で近似）
+    let cleanup: (() => void) | null = null;
+    const listenerPromise = win
       .onResized(() => {
         win
           .isFullscreen()
-          .then(setIsFullscreen)
+          .then((v) => {
+            if (!cancelled) setIsFullscreen(v);
+          })
           .catch(() => {});
       })
       .then((fn) => {
-        unlisten = fn;
+        cleanup = fn;
       })
       .catch(() => {});
     return () => {
-      if (unlisten) unlisten();
+      cancelled = true;
+      // 非同期登録が完了してからクリーンアップ（Strict Mode での漏れを防ぐ）
+      listenerPromise.finally(() => cleanup?.());
     };
   }, []);
 
