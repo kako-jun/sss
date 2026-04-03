@@ -99,6 +99,10 @@ impl Playlist {
         // 履歴に追加（最大100件）
         if self.history.len() >= 100 {
             self.history.remove(0);
+            // 先頭削除により全要素が1つ前にシフトするため history_position を補正
+            if self.history_position > 0 {
+                self.history_position -= 1;
+            }
         }
         self.history.push(self.current_index);
         self.history_position = self.history.len() - 1;
@@ -270,5 +274,32 @@ mod tests {
         // 画像を削除
         playlist.update_images(vec![], vec!["img2.jpg".to_string()]);
         assert_eq!(playlist.total_count(), 2);
+    }
+
+    #[test]
+    fn test_history_position_after_overflow() {
+        // 100件超で履歴が溢れたとき、go_back() → advance() が should_count=false を返すことを確認
+        // 200枚の画像でプレイリストを作成
+        let images: Vec<String> = (0..200).map(|i| format!("img{}.jpg", i)).collect();
+        let mut playlist = Playlist::new(images);
+
+        // 101回 advance() して履歴を溢れさせる
+        for _ in 0..101 {
+            playlist.advance();
+        }
+
+        // この時点で履歴は100件満杯
+        assert!(playlist.can_go_back());
+
+        // 1つ戻る（履歴内に入る）
+        playlist.go_back();
+
+        // 再度 advance() → 履歴内の移動なので should_count = false であるべき
+        let (img, should_count) = playlist.advance();
+        assert!(img.is_some());
+        assert!(
+            !should_count,
+            "履歴内を進む場合は should_count=false であるべき（history_position ズレバグの検証）"
+        );
     }
 }
