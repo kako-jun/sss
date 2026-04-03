@@ -34,10 +34,17 @@ pub struct ImageInfo {
     pub last_displayed: Option<String>,
 }
 
-/// 画像を最適化（4K用にリサイズ）
-pub fn optimize_image_for_4k(image_path: &Path) -> Result<Vec<u8>, String> {
+/// 画像を最適化（EXIF回転適用 + 4Kリサイズ）
+pub fn optimize_image_for_4k(image_path: &Path, apply_rotation: bool) -> Result<Vec<u8>, String> {
     // 画像を読み込む
     let img = image::open(image_path).map_err(|e| format!("Failed to open image: {}", e))?;
+
+    // EXIF Orientationに基づいて回転・反転を適用（リサイズ前）
+    let img = if apply_rotation {
+        apply_exif_orientation(image_path, img)
+    } else {
+        img
+    };
 
     let (width, height) = img.dimensions();
 
@@ -55,6 +62,31 @@ pub fn optimize_image_for_4k(image_path: &Path) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Failed to encode image: {}", e))?;
 
     Ok(buffer)
+}
+
+/// EXIF Orientationタグを読み取り、画像に回転・反転を適用する
+fn apply_exif_orientation(image_path: &Path, img: image::DynamicImage) -> image::DynamicImage {
+    // ファイルを開いてEXIFを読み取る
+    let orientation = (|| -> Option<u32> {
+        let file = File::open(image_path).ok()?;
+        let mut buf_reader = BufReader::new(file);
+        let exif_reader = exif::Reader::new();
+        let exif = exif_reader.read_from_container(&mut buf_reader).ok()?;
+        let field = exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY)?;
+        field.value.get_uint(0)
+    })();
+
+    match orientation {
+        Some(1) | None => img,             // そのまま（変換不要 / EXIFなし）
+        Some(2) => img.fliph(),            // 水平反転
+        Some(3) => img.rotate180(),        // 180度回転
+        Some(4) => img.flipv(),            // 垂直反転
+        Some(5) => img.rotate90().flipv(), // transpose: 90度時計回り + 垂直反転
+        Some(6) => img.rotate90(),         // 90度時計回り回転
+        Some(7) => img.rotate90().fliph(), // transverse: 90度時計回り + 水平反転
+        Some(8) => img.rotate270(),        // 90度反時計回り回転
+        _ => img,                          // 未知の値はそのまま
+    }
 }
 
 /// 画像の基本情報を取得
