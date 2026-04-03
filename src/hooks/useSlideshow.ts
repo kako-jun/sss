@@ -76,13 +76,6 @@ export function useSlideshow(interval: number = 10000) {
   }, []);
 
   /**
-   * スライドショーを切り替え
-   */
-  const togglePlayPause = useCallback(() => {
-    setIsPlaying((prev) => !prev);
-  }, []);
-
-  /**
    * 自動進行のタイマーとプログレスバー
    */
   useEffect(() => {
@@ -137,7 +130,6 @@ export function useSlideshow(interval: number = 10000) {
     progress,
     play,
     pause,
-    togglePlayPause,
     loadNextImage,
     loadPreviousImage,
     initialize,

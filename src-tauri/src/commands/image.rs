@@ -1,6 +1,7 @@
 use crate::commands::types::AppState;
 use crate::image_processor::{
     get_exif_info, get_image_dimensions, is_video_file, optimize_image_for_4k, ImageInfo,
+    MAX_HEIGHT_4K, MAX_WIDTH_4K,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -143,7 +144,7 @@ fn get_image_info_internal(
     };
 
     // 4K最適化：画像が4K(3840x2160)を超える場合はリサイズしてキャッシュ（動画は除く）
-    let optimized_path = if !is_video && (width > 3840 || height > 2160) {
+    let optimized_path = if !is_video && (width > MAX_WIDTH_4K || height > MAX_HEIGHT_4K) {
         // キャッシュファイル名を生成（元のファイル名のハッシュを使用）
         let hash = format!("{:x}", md5::compute(image_path));
         let cache_file = state.cache_dir.join(format!("{}.jpg", hash));
@@ -241,7 +242,7 @@ fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf) {
             };
 
             // 4Kを超える場合のみキャッシュ作成
-            if width > 3840 || height > 2160 {
+            if width > MAX_WIDTH_4K || height > MAX_HEIGHT_4K {
                 let hash = format!("{:x}", md5::compute(&image_path));
                 let cache_file = cache_dir.join(format!("{}.jpg", hash));
 
