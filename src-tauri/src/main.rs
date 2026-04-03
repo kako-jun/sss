@@ -19,8 +19,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
-        }))
+        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
         .setup(|app| {
             // スクリーンセーバーとディスプレイスリープを抑制（クロスプラットフォーム対応）
             // sleep(false)によりノートPC蓋閉じ時のシステムスリープは許可

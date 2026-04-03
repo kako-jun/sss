@@ -118,25 +118,15 @@ pub async fn scan_directory(
     let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
 
     // ディレクトリパスを確認
-    let current_directory = state.directory_path.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let current_directory = state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     let is_same_directory = current_directory
         .as_ref()
         .map(|p| p == &directory)
         .unwrap_or(false);
-
-    // 設定を確認して表示回数をリセット（ディレクトリが変わった場合のみ）
-    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    let should_reset = db
-        .get_setting("reset_on_directory_change")
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(true); // デフォルトはON
-
-    if should_reset && !is_same_directory {
-        let _ = db.reset_all_display_counts();
-    }
-    drop(db);
 
     if is_same_directory && playlist_lock.is_some() {
         // 同じディレクトリの場合のみ既存のプレイリストを更新
@@ -165,7 +155,10 @@ pub async fn scan_directory(
     drop(playlist_lock);
 
     // ディレクトリパスを保存
-    *state.directory_path.lock().unwrap_or_else(|e| e.into_inner()) = Some(directory.clone());
+    *state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(directory.clone());
 
     // ディレクトリパスをデータベースに永続化
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
