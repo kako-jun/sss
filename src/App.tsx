@@ -24,7 +24,7 @@ function App() {
     total: number;
   } | null>(null);
   const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
-  const [isFullscreen, setIsFullscreen] = useState(true); // フルスクリーン状態
+  const [isFullscreen, setIsFullscreen] = useState(true); // フルスクリーン状態（起動時の設定値に合わせた初期値）
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
 
   const {
@@ -54,6 +54,32 @@ function App() {
       console.error('Failed to get playlist info:', err);
     }
   };
+
+  // フルスクリーン状態をOSの実態と同期
+  useEffect(() => {
+    const win = getCurrentWindow();
+    // 初期値を実態から取得
+    win
+      .isFullscreen()
+      .then(setIsFullscreen)
+      .catch(() => {});
+    // OSによるフルスクリーン変化（ESC等）を検知して同期
+    let unlisten: (() => void) | null = null;
+    win
+      .onResized(() => {
+        win
+          .isFullscreen()
+          .then(setIsFullscreen)
+          .catch(() => {});
+      })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   // 初期化（React Strict Modeで2回実行されるのを防ぐ）
   useEffect(() => {
@@ -210,8 +236,9 @@ function App() {
       const win = getCurrentWindow();
       const next = !isFullscreen;
       await win.setFullscreen(next);
-      // decorations: false のためタイトルバーは出ないが、ウィンドウモード時は
-      // OSのタスクバーが見える状態になる
+      // ウィンドウモード時はタイトルバーを表示してウィンドウを掴めるようにする
+      // フルスクリーン時は decorations を非表示に戻す
+      await win.setDecorations(!next);
       setIsFullscreen(next);
     } catch (err) {
       console.error('Failed to toggle window mode:', err);
