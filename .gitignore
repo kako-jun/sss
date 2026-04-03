@@ -28,6 +28,7 @@ dist-ssr
 
 # Tauri
 src-tauri/target
+src-tauri/gen/schemas/linux-schema.json
 
 # Windows temporary files
 nul

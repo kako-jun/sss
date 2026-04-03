@@ -20,8 +20,7 @@ pub async fn reset_all_data(app: AppHandle) -> Result<(), String> {
 
     // データベースファイルを削除
     if db_path.exists() {
-        std::fs::remove_file(&db_path)
-            .map_err(|e| format!("Failed to delete database: {}", e))?;
+        std::fs::remove_file(&db_path).map_err(|e| format!("Failed to delete database: {}", e))?;
     }
 
     // キャッシュディレクトリを削除
