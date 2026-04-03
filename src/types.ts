@@ -34,8 +34,3 @@ export interface Stats {
   displayedImages: number;
 }
 
-// プレイリスト情報
-export interface PlaylistInfo {
-  currentPosition: number;
-  totalCount: number;
-}
