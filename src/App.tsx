@@ -89,7 +89,6 @@ function App() {
 
                 // リアルタイム進捗イベントをリッスン
                 unlisten = await listen<{ current: number; total: number }>('scan-progress', (event) => {
-                  console.log('Init: Received scan progress:', event.payload);
                   setRealtimeProgress(event.payload);
                 });
 
@@ -114,7 +113,6 @@ function App() {
               }
             } else {
               // 最後のディレクトリもなければ、初期化を完了して設定画面を開けるようにする
-              console.log('No saved playlist or last directory found');
               setInitStatus('');
               setIsInitialized(true);
             }
@@ -147,13 +145,11 @@ function App() {
     if (isOverlayHovered || isSettingsOpen) {
       // オーバーレイにマウスオーバーまたは設定画面表示 → 一時停止
       if (isPlaying) {
-        console.log('Pausing slideshow (overlay hovered or settings open)');
         pause();
       }
     } else {
       // オーバーレイから離れた かつ 設定画面が閉じている → 自動再開
       if (!isPlaying && isInitialized) {
-        console.log('Resuming slideshow (overlay not hovered and settings closed)');
         play();
       }
     }
@@ -164,7 +160,6 @@ function App() {
   };
 
   const handleNext = async () => {
-    console.log('handleNext called');
     // すぐに次の画像を読み込む
     await loadNextImage();
   };
@@ -174,7 +169,6 @@ function App() {
     const handleKeyDown = async (e: KeyboardEvent) => {
       // ESCキーでアプリ終了
       if (e.key === 'Escape') {
-        console.log('ESC key pressed, exiting app...');
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
@@ -187,14 +181,12 @@ function App() {
 
       // 左矢印キーで前の画像へ
       if (e.key === 'ArrowLeft' && canGoBack && !isSettingsOpen) {
-        console.log('Left arrow key pressed, going to previous image');
         e.preventDefault();
         await handlePrevious();
       }
 
       // 右矢印キーで次の画像へ
       if (e.key === 'ArrowRight' && !isSettingsOpen) {
-        console.log('Right arrow key pressed, going to next image');
         e.preventDefault();
         handleNext();
       }
