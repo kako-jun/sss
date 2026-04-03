@@ -68,7 +68,6 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::scan::scan_directory,
-            commands::scan::init_playlist,
             commands::image::get_next_image,
             commands::image::get_previous_image,
             commands::file_operations::open_in_explorer,

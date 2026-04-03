@@ -1,6 +1,5 @@
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use serde::{Deserialize, Serialize};
 
 /// プレイリスト管理
 #[derive(Debug, Clone)]
@@ -15,12 +14,6 @@ pub struct Playlist {
     history_position: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PlaylistState {
-    pub shuffled_list: Vec<String>,
-    pub current_index: usize,
-}
-
 impl Playlist {
     /// 新しいプレイリストを作成（シャッフルあり）
     pub fn new(mut images: Vec<String>) -> Self {
@@ -31,18 +24,6 @@ impl Playlist {
             shuffled_list: images,
             current_index: 0,
             history: vec![0],
-            history_position: 0,
-        }
-    }
-
-    /// 既存の状態からプレイリストを復元
-    pub fn from_state(shuffled_list: Vec<String>, current_index: usize) -> Self {
-        let current_index = current_index.min(shuffled_list.len().saturating_sub(1));
-
-        Playlist {
-            shuffled_list,
-            current_index,
-            history: vec![current_index],
             history_position: 0,
         }
     }
@@ -136,14 +117,6 @@ impl Playlist {
             0
         } else {
             self.current_index + 1
-        }
-    }
-
-    /// プレイリスト状態を取得（保存用）
-    pub fn get_state(&self) -> PlaylistState {
-        PlaylistState {
-            shuffled_list: self.shuffled_list.clone(),
-            current_index: self.current_index,
         }
     }
 

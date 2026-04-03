@@ -4,7 +4,7 @@ import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
-import { initPlaylist, getPlaylistInfo, getLastDirectoryPath, scanDirectory, getSetting } from './lib/tauri';
+import { getPlaylistInfo, getLastDirectoryPath, scanDirectory, getSetting } from './lib/tauri';
 import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
 import { X, Settings as SettingsIcon } from 'lucide-react';
@@ -18,7 +18,10 @@ function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [displayInterval, setDisplayInterval] = useState<number>(10000); // デフォルト10秒
   const [initStatus, setInitStatus] = useState<string>(''); // 初期化状態メッセージ
-  const [realtimeProgress, setRealtimeProgress] = useState<{ current: number; total: number } | null>(null);
+  const [realtimeProgress, setRealtimeProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
   const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
 
@@ -69,53 +72,45 @@ function App() {
             setDisplayInterval(parseInt(intervalSetting, 10));
           }
 
-          setInitStatus('プレイリストを確認しています...');
-          // 保存されたプレイリストを復元
-          const savedImagePath = await initPlaylist();
+          setInitStatus('前回フォルダを確認しています...');
+          // 前回ディレクトリがあれば差分スキャンして最新ファイル一覧を取得
+          const lastDirectory = await getLastDirectoryPath();
+          if (lastDirectory) {
+            let unlisten: UnlistenFn | null = null;
+            try {
+              setInitStatus('ディレクトリをスキャンしています...');
 
-          if (savedImagePath) {
-            setInitStatus('画像を読み込んでいます...');
-            // 既存のプレイリストがあれば初期化
-            await initialize(true);
-            setIsInitialized(true);
-            await updatePlaylistInfo();
-          } else {
-            // プレイリストがない場合、最後のディレクトリがあれば自動スキャン
-            const lastDirectory = await getLastDirectoryPath();
-            if (lastDirectory) {
-              let unlisten: UnlistenFn | null = null;
-              try {
-                setInitStatus('ディレクトリをスキャンしています...');
-
-                // リアルタイム進捗イベントをリッスン
-                unlisten = await listen<{ current: number; total: number }>('scan-progress', (event) => {
+              // リアルタイム進捗イベントをリッスン
+              unlisten = await listen<{ current: number; total: number }>(
+                'scan-progress',
+                (event) => {
                   setRealtimeProgress(event.payload);
-                });
+                },
+              );
 
-                const progress = await scanDirectory(lastDirectory);
-                setRealtimeProgress(null); // スキャン完了後はリアルタイム進捗をクリア
-                setInitStatus(`スキャン完了: ${progress.totalFiles.toLocaleString()}ファイル検出`);
+              const progress = await scanDirectory(lastDirectory);
+              setRealtimeProgress(null); // スキャン完了後はリアルタイム進捗をクリア
+              setInitStatus(`スキャン完了: ${progress.totalFiles.toLocaleString()}ファイル検出`);
 
-                setInitStatus('画像を読み込んでいます...');
-                await initialize(true);
-                setIsInitialized(true);
-                await updatePlaylistInfo();
-              } catch (scanErr) {
-                console.error('Failed to scan last directory:', scanErr);
-                // エラーが発生しても初期化を完了させ、設定画面を開けるようにする
-                setInitStatus('');
-                setIsInitialized(true);
-              } finally {
-                // リスナーをクリーンアップ
-                if (unlisten) {
-                  unlisten();
-                }
-              }
-            } else {
-              // 最後のディレクトリもなければ、初期化を完了して設定画面を開けるようにする
+              setInitStatus('画像を読み込んでいます...');
+              await initialize(true);
+              setIsInitialized(true);
+              await updatePlaylistInfo();
+            } catch (scanErr) {
+              console.error('Failed to scan last directory:', scanErr);
+              // エラーが発生しても初期化を完了させ、設定画面を開けるようにする
               setInitStatus('');
               setIsInitialized(true);
+            } finally {
+              // リスナーをクリーンアップ
+              if (unlisten) {
+                unlisten();
+              }
             }
+          } else {
+            // 前回ディレクトリがなければ初回起動として設定画面を開けるようにする
+            setInitStatus('');
+            setIsInitialized(true);
           }
         } catch (err) {
           console.error('Failed to initialize:', err);
@@ -236,11 +231,7 @@ function App() {
       <div className="w-screen h-screen bg-black overflow-hidden relative">
         {/* 背景ロゴ */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <img
-            src={logoBg}
-            alt="SSS Logo"
-            className="w-1/3 h-auto opacity-3"
-          />
+          <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-3" />
         </div>
 
         {/* 終了ボタン（左上） */}
@@ -277,11 +268,7 @@ function App() {
       <div className="w-screen h-screen bg-black overflow-hidden relative">
         {/* 背景ロゴ */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <img
-            src={logoBg}
-            alt="SSS Logo"
-            className="w-1/3 h-auto opacity-3"
-          />
+          <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-3" />
         </div>
 
         {/* 終了ボタン（左上） */}
@@ -303,13 +290,12 @@ function App() {
             {/* リアルタイム進捗表示 */}
             {realtimeProgress && (
               <div className="text-2xl font-mono text-white/40 mb-4">
-                {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()}
+                {realtimeProgress.current.toLocaleString()} /{' '}
+                {realtimeProgress.total.toLocaleString()}
               </div>
             )}
 
-            <div className="text-white/25 text-xs">
-              しばらくお待ちください
-            </div>
+            <div className="text-white/25 text-xs">しばらくお待ちください</div>
           </div>
         </div>
       </div>

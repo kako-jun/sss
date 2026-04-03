@@ -141,17 +141,6 @@ pub async fn scan_directory(
         *playlist_lock = Some(Playlist::new(image_paths));
     }
 
-    // プレイリスト状態をDBに保存
-    if let Some(ref playlist) = *playlist_lock {
-        let state_data = playlist.get_state();
-        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = db.save_playlist_state(
-            state_data.current_index as i32,
-            &serde_json::to_string(&state_data.shuffled_list).unwrap_or_default(),
-            false,
-        );
-    }
-
     drop(playlist_lock);
 
     // ディレクトリパスを保存
@@ -171,31 +160,4 @@ pub async fn scan_directory(
         deleted_files: scan_result.deleted_count,
         duration_ms: scan_result.duration_ms,
     })
-}
-
-/// プレイリストを初期化（保存された状態から復元）
-#[tauri::command]
-pub async fn init_playlist(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    let playlist_state = db
-        .get_playlist_state()
-        .map_err(|e| format!("Database error: {}", e))?;
-
-    drop(db);
-
-    if let Some((current_index, shuffled_list_json, _is_paused)) = playlist_state {
-        let shuffled_list: Vec<String> = serde_json::from_str(&shuffled_list_json)
-            .map_err(|e| format!("Failed to parse playlist: {}", e))?;
-
-        if !shuffled_list.is_empty() {
-            let playlist = Playlist::from_state(shuffled_list, current_index as usize);
-            let current_image = playlist.current().map(|s| s.clone());
-
-            *state.playlist.lock().unwrap_or_else(|e| e.into_inner()) = Some(playlist);
-
-            return Ok(current_image);
-        }
-    }
-
-    Ok(None)
 }
