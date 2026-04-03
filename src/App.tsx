@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
@@ -23,6 +24,7 @@ function App() {
     total: number;
   } | null>(null);
   const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
+  const [isFullscreen, setIsFullscreen] = useState(true); // フルスクリーン状態（起動時の設定値に合わせた初期値）
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
 
   const {
@@ -52,6 +54,40 @@ function App() {
       console.error('Failed to get playlist info:', err);
     }
   };
+
+  // フルスクリーン状態をOSの実態と同期
+  useEffect(() => {
+    let cancelled = false;
+    const win = getCurrentWindow();
+    // 初期値を実態から取得
+    win
+      .isFullscreen()
+      .then((v) => {
+        if (!cancelled) setIsFullscreen(v);
+      })
+      .catch(() => {});
+    // OSによるフルスクリーン変化を検知して同期
+    // （Tauri v2 にフルスクリーン専用イベントがないため onResized で近似）
+    let cleanup: (() => void) | null = null;
+    const listenerPromise = win
+      .onResized(() => {
+        win
+          .isFullscreen()
+          .then((v) => {
+            if (!cancelled) setIsFullscreen(v);
+          })
+          .catch(() => {});
+      })
+      .then((fn) => {
+        cleanup = fn;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      // 非同期登録が完了してからクリーンアップ（Strict Mode での漏れを防ぐ）
+      listenerPromise.finally(() => cleanup?.());
+    };
+  }, []);
 
   // 初期化（React Strict Modeで2回実行されるのを防ぐ）
   useEffect(() => {
@@ -203,6 +239,20 @@ function App() {
     setIsSettingsOpen(true);
   };
 
+  const handleToggleWindowMode = async () => {
+    try {
+      const win = getCurrentWindow();
+      const next = !isFullscreen;
+      await win.setFullscreen(next);
+      // ウィンドウモード時はタイトルバーを表示してウィンドウを掴めるようにする
+      // フルスクリーン時は decorations を非表示に戻す
+      await win.setDecorations(!next);
+      setIsFullscreen(next);
+    } catch (err) {
+      console.error('Failed to toggle window mode:', err);
+    }
+  };
+
   const handleOverlayMouseEnter = () => {
     setIsOverlayHovered(true);
   };
@@ -345,9 +395,11 @@ function App() {
         currentPosition={currentPosition}
         totalImages={totalImages}
         progress={progress}
+        isFullscreen={isFullscreen}
         onPrevious={handlePrevious}
         onNext={handleNext}
         onSettings={handleSettings}
+        onToggleWindowMode={handleToggleWindowMode}
         onMouseEnter={handleOverlayMouseEnter}
         onMouseLeave={handleOverlayMouseLeave}
         onTogglePause={handleTogglePause}
