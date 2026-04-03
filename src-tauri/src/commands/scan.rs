@@ -72,8 +72,7 @@ pub async fn scan_directory(
     // DB から除外ルールを取得して IgnoreFilter を作成
     let patterns = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        db.get_ignore_rules()
-            .unwrap_or_default()
+        db.get_ignore_rules().unwrap_or_default()
     };
     let ignore_filter = IgnoreFilter::from_patterns(&patterns);
 
