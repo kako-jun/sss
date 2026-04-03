@@ -30,9 +30,6 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
                 }
             }
 
-            // プレイリスト状態をロック保持中に取得（TOCTOU回避）
-            let state_data = playlist.get_state();
-
             drop(playlist_lock);
 
             // 5枚先まで先読みキャッシュ（バックグラウンドで直列処理）
@@ -54,16 +51,6 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
                 let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = db.increment_display_count(&path_str);
                 drop(db);
-            }
-
-            // プレイリスト状態を保存
-            {
-                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-                let _ = db.save_playlist_state(
-                    state_data.current_index as i32,
-                    &serde_json::to_string(&state_data.shuffled_list).unwrap_or_default(),
-                    false,
-                );
             }
 
             // 画像情報を取得
@@ -94,17 +81,10 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
         if let Some(image_path) = playlist.go_back() {
             let path_str = image_path.clone();
 
-            // プレイリスト状態を保存
-            let state_data = playlist.get_state();
             drop(playlist_lock);
 
             let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = db.save_playlist_state(
-                state_data.current_index as i32,
-                &serde_json::to_string(&state_data.shuffled_list).unwrap_or_default(),
-                false,
-            );
-            // apply_exif_rotation 設定を同じロック内で取得（デフォルト true）
+            // apply_exif_rotation 設定を取得（デフォルト true）
             let apply_rotation = db
                 .get_setting("apply_exif_rotation")
                 .ok()

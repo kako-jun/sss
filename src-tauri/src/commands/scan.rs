@@ -141,17 +141,6 @@ pub async fn scan_directory(
         *playlist_lock = Some(Playlist::new(image_paths));
     }
 
-    // プレイリスト状態をDBに保存
-    if let Some(ref playlist) = *playlist_lock {
-        let state_data = playlist.get_state();
-        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = db.save_playlist_state(
-            state_data.current_index as i32,
-            &serde_json::to_string(&state_data.shuffled_list).unwrap_or_default(),
-            false,
-        );
-    }
-
     drop(playlist_lock);
 
     // ディレクトリパスを保存

@@ -191,41 +191,6 @@ impl Database {
         }
     }
 
-    /// プレイリスト状態を保存
-    pub fn save_playlist_state(
-        &self,
-        current_index: i32,
-        shuffled_list: &str,
-        is_paused: bool,
-    ) -> Result<()> {
-        self.conn.execute(
-            "INSERT OR REPLACE INTO playlist_state (id, current_index, shuffled_list, last_shuffled, is_paused)
-             VALUES (1, ?1, ?2, datetime('now', 'localtime'), ?3)",
-            [
-                &current_index.to_string(),
-                shuffled_list,
-                &(is_paused as i32).to_string(),
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// プレイリスト状態を取得
-    pub fn get_playlist_state(&self) -> Result<Option<(i32, String, bool)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT current_index, shuffled_list, is_paused FROM playlist_state WHERE id = 1",
-        )?;
-        let result = stmt.query_row([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get::<_, i32>(2)? != 0))
-        });
-
-        match result {
-            Ok(data) => Ok(Some(data)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
-
     /// スキャン履歴を記録
     pub fn record_scan_history(
         &self,

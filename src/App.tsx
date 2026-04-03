@@ -18,7 +18,10 @@ function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [displayInterval, setDisplayInterval] = useState<number>(10000); // デフォルト10秒
   const [initStatus, setInitStatus] = useState<string>(''); // 初期化状態メッセージ
-  const [realtimeProgress, setRealtimeProgress] = useState<{ current: number; total: number } | null>(null);
+  const [realtimeProgress, setRealtimeProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
   const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
 
@@ -69,8 +72,8 @@ function App() {
             setDisplayInterval(parseInt(intervalSetting, 10));
           }
 
-          setInitStatus('プレイリストを確認しています...');
-          // 前回ディレクトリがあれば常に差分スキャンして最新状態に更新
+          setInitStatus('前回フォルダを確認しています...');
+          // 前回ディレクトリがあれば差分スキャンして最新ファイル一覧を取得
           const lastDirectory = await getLastDirectoryPath();
           if (lastDirectory) {
             let unlisten: UnlistenFn | null = null;
@@ -78,9 +81,12 @@ function App() {
               setInitStatus('ディレクトリをスキャンしています...');
 
               // リアルタイム進捗イベントをリッスン
-              unlisten = await listen<{ current: number; total: number }>('scan-progress', (event) => {
-                setRealtimeProgress(event.payload);
-              });
+              unlisten = await listen<{ current: number; total: number }>(
+                'scan-progress',
+                (event) => {
+                  setRealtimeProgress(event.payload);
+                },
+              );
 
               const progress = await scanDirectory(lastDirectory);
               setRealtimeProgress(null); // スキャン完了後はリアルタイム進捗をクリア
@@ -225,11 +231,7 @@ function App() {
       <div className="w-screen h-screen bg-black overflow-hidden relative">
         {/* 背景ロゴ */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <img
-            src={logoBg}
-            alt="SSS Logo"
-            className="w-1/3 h-auto opacity-3"
-          />
+          <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-3" />
         </div>
 
         {/* 終了ボタン（左上） */}
@@ -266,11 +268,7 @@ function App() {
       <div className="w-screen h-screen bg-black overflow-hidden relative">
         {/* 背景ロゴ */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <img
-            src={logoBg}
-            alt="SSS Logo"
-            className="w-1/3 h-auto opacity-3"
-          />
+          <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-3" />
         </div>
 
         {/* 終了ボタン（左上） */}
@@ -292,13 +290,12 @@ function App() {
             {/* リアルタイム進捗表示 */}
             {realtimeProgress && (
               <div className="text-2xl font-mono text-white/40 mb-4">
-                {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()}
+                {realtimeProgress.current.toLocaleString()} /{' '}
+                {realtimeProgress.total.toLocaleString()}
               </div>
             )}
 
-            <div className="text-white/25 text-xs">
-              しばらくお待ちください
-            </div>
+            <div className="text-white/25 text-xs">しばらくお待ちください</div>
           </div>
         </div>
       </div>
