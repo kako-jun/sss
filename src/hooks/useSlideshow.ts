@@ -115,12 +115,15 @@ export function useSlideshow(interval: number = 10000) {
   /**
    * 初回画像読み込み
    */
-  const initialize = useCallback(async (autoPlay: boolean = true) => {
-    await loadNextImage();
-    if (autoPlay) {
-      setIsPlaying(true);
-    }
-  }, [loadNextImage]);
+  const initialize = useCallback(
+    async (autoPlay: boolean = true) => {
+      await loadNextImage();
+      if (autoPlay) {
+        setIsPlaying(true);
+      }
+    },
+    [loadNextImage],
+  );
 
   return {
     currentImage,

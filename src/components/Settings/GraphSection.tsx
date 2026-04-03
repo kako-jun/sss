@@ -16,10 +16,7 @@ export function GraphSection() {
     const loadStats = async () => {
       setIsLoading(true);
       try {
-        const [graphStats, summaryStats] = await Promise.all([
-          getDisplayStats(),
-          getStats(),
-        ]);
+        const [graphStats, summaryStats] = await Promise.all([getDisplayStats(), getStats()]);
         setDisplayStats(graphStats);
         setStats(summaryStats);
       } catch (err) {
@@ -156,12 +153,16 @@ export function GraphSection() {
       {stats && (
         <div className="flex justify-between text-white/40 text-sm">
           <span>1回でも表示済みのファイル数:</span>
-          <span className="font-mono text-white/60">{stats.displayedImages.toLocaleString()} / {stats.totalImages.toLocaleString()}</span>
+          <span className="font-mono text-white/60">
+            {stats.displayedImages.toLocaleString()} / {stats.totalImages.toLocaleString()}
+          </span>
         </div>
       )}
 
       <div className="bg-black/30 rounded p-4 border border-white/5">
-        <h3 className="text-sm font-medium text-white/50 mb-4 uppercase tracking-wider">画像ごとの表示回数</h3>
+        <h3 className="text-sm font-medium text-white/50 mb-4 uppercase tracking-wider">
+          画像ごとの表示回数
+        </h3>
         <div ref={chartRef} className="w-full" />
         <div className="mt-3 text-xs text-white/25">
           完全平等ランダムアルゴリズムが正しく動作していれば、全てのファイルが均等に表示されます

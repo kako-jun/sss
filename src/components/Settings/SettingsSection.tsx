@@ -36,7 +36,9 @@ export function SettingsSection() {
           onChange={(e) => handleExifRotationChange(e.target.checked)}
           className="mt-0.5 w-4 h-4 rounded border-white/20 bg-white/5 text-white/50 focus:ring-0 focus:ring-offset-0 accent-white/50"
         />
-        <div className="text-white/55 text-sm group-hover:text-white/75 transition-colors">EXIF回転情報に従って画像を自動回転</div>
+        <div className="text-white/55 text-sm group-hover:text-white/75 transition-colors">
+          EXIF回転情報に従って画像を自動回転
+        </div>
       </label>
     </div>
   );

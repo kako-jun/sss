@@ -1,8 +1,8 @@
 // 画像情報
 export interface ImageInfo {
   path: string;
-  optimizedPath: string | null;  // 4K最適化された画像のパス
-  isVideo: boolean;  // 動画ファイルかどうか
+  optimizedPath: string | null; // 4K最適化された画像のパス
+  isVideo: boolean; // 動画ファイルかどうか
   width: number;
   height: number;
   fileSize: number;
@@ -33,4 +33,3 @@ export interface Stats {
   totalImages: number;
   displayedImages: number;
 }
-

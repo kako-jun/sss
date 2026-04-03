@@ -12,7 +12,10 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
   const [selectedDirectory, setSelectedDirectory] = useState<string>('');
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
-  const [realtimeProgress, setRealtimeProgress] = useState<{ current: number; total: number } | null>(null);
+  const [realtimeProgress, setRealtimeProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // 前回のディレクトリパスを読み込む
@@ -79,7 +82,9 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">ディレクトリ選択</h3>
+      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
+        ディレクトリ選択
+      </h3>
 
       <div className="flex gap-2">
         <input
@@ -107,11 +112,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
         {isScanning ? 'スキャン中...' : 'スキャン'}
       </button>
 
-      {error && (
-        <div className="text-sm text-red-400/70">
-          {error}
-        </div>
-      )}
+      {error && <div className="text-sm text-red-400/70">{error}</div>}
 
       {realtimeProgress && (
         <div className="text-sm text-white/30 font-mono">
@@ -121,19 +122,31 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
 
       {scanProgress && (
         <div className="space-y-2">
-          <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">スキャン結果</h3>
+          <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
+            スキャン結果
+          </h3>
           <div className="space-y-2 p-4 bg-black/30 rounded border border-white/5">
             <div className="text-sm text-white/50">
-              ファイル数: <span className="font-mono text-white/70">{scanProgress.totalFiles.toLocaleString()}</span>
+              ファイル数:{' '}
+              <span className="font-mono text-white/70">
+                {scanProgress.totalFiles.toLocaleString()}
+              </span>
             </div>
             <div className="text-sm text-white/40">
-              新規: <span className="font-mono text-white/60">{scanProgress.newFiles.toLocaleString()}</span>
+              新規:{' '}
+              <span className="font-mono text-white/60">
+                {scanProgress.newFiles.toLocaleString()}
+              </span>
             </div>
             <div className="text-sm text-white/40">
-              削除: <span className="font-mono text-white/60">{scanProgress.deletedFiles.toLocaleString()}</span>
+              削除:{' '}
+              <span className="font-mono text-white/60">
+                {scanProgress.deletedFiles.toLocaleString()}
+              </span>
             </div>
             <div className="text-sm text-white/30">
-              処理時間: <span className="font-mono">{(scanProgress.durationMs / 1000).toFixed(2)}秒</span>
+              処理時間:{' '}
+              <span className="font-mono">{(scanProgress.durationMs / 1000).toFixed(2)}秒</span>
             </div>
           </div>
         </div>

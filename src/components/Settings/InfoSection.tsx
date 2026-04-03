@@ -16,7 +16,11 @@ export function InfoSection() {
   };
 
   const handleResetSettings = async () => {
-    if (!confirm('全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。')) {
+    if (
+      !confirm(
+        '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。',
+      )
+    ) {
       return;
     }
 
@@ -58,7 +62,9 @@ export function InfoSection() {
 
       {/* 設定の初期化 */}
       <div className="border-t border-white/8 pt-6">
-        <h4 className="text-xs font-medium text-white/25 uppercase tracking-wider mb-3">危険な操作</h4>
+        <h4 className="text-xs font-medium text-white/25 uppercase tracking-wider mb-3">
+          危険な操作
+        </h4>
         <button
           onClick={handleResetSettings}
           disabled={isResetting}
@@ -68,9 +74,7 @@ export function InfoSection() {
           {isResetting ? '初期化中...' : '設定を初期化'}
         </button>
         {resetMessage && (
-          <div className="mt-2 text-xs text-white/30 whitespace-pre-line">
-            {resetMessage}
-          </div>
+          <div className="mt-2 text-xs text-white/30 whitespace-pre-line">{resetMessage}</div>
         )}
       </div>
     </div>

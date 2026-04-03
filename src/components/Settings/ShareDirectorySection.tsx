@@ -1,6 +1,11 @@
 import { FolderOpen } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { selectDirectory, getSetting, saveSetting, getDefaultShareDirectory } from '../../lib/tauri';
+import {
+  selectDirectory,
+  getSetting,
+  saveSetting,
+  getDefaultShareDirectory,
+} from '../../lib/tauri';
 
 export function ShareDirectorySection() {
   const [shareDirectoryPath, setShareDirectoryPath] = useState<string>('');
@@ -38,7 +43,9 @@ export function ShareDirectorySection() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">シェア先ディレクトリ</h3>
+      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
+        シェア先ディレクトリ
+      </h3>
 
       <div className="flex gap-2">
         <input

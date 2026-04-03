@@ -43,10 +43,7 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
       >
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-medium text-white/70">設定</h2>
-          <button
-            onClick={onClose}
-            className="p-1.5 hover:bg-white/8 rounded transition-colors"
-          >
+          <button onClick={onClose} className="p-1.5 hover:bg-white/8 rounded transition-colors">
             <X className="w-5 h-5 text-white/30 hover:text-white/60" />
           </button>
         </div>
@@ -76,7 +73,7 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
           <button
             onClick={() => {
               setActiveTab('stats');
-              setStatsKey(prev => prev + 1); // タブを開くたびにkeyを変更して再マウント
+              setStatsKey((prev) => prev + 1); // タブを開くたびにkeyを変更して再マウント
             }}
             className={`px-4 py-2 text-sm transition-colors ${
               activeTab === 'stats'
@@ -100,9 +97,7 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
 
         {/* タブコンテンツ */}
         <div className="flex-1 overflow-y-auto">
-          {activeTab === 'scan' && (
-            <ScanSection onScanComplete={onScanComplete} />
-          )}
+          {activeTab === 'scan' && <ScanSection onScanComplete={onScanComplete} />}
           {activeTab === 'options' && (
             <div className="space-y-8">
               <IntervalSection onIntervalChange={onIntervalChange} />

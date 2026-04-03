@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { getSetting, saveSetting } from '../../lib/tauri';
-import { DEFAULT_DISPLAY_INTERVAL, MIN_DISPLAY_INTERVAL, MAX_DISPLAY_INTERVAL } from '../../constants';
+import {
+  DEFAULT_DISPLAY_INTERVAL,
+  MIN_DISPLAY_INTERVAL,
+  MAX_DISPLAY_INTERVAL,
+} from '../../constants';
 
 interface IntervalSectionProps {
   onIntervalChange?: (interval: number) => void;
@@ -10,11 +14,13 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
   const [displayInterval, setDisplayInterval] = useState<number>(DEFAULT_DISPLAY_INTERVAL);
 
   useEffect(() => {
-    getSetting('display_interval').then((value) => {
-      if (value) {
-        setDisplayInterval(parseInt(value, 10));
-      }
-    }).catch(console.error);
+    getSetting('display_interval')
+      .then((value) => {
+        if (value) {
+          setDisplayInterval(parseInt(value, 10));
+        }
+      })
+      .catch(console.error);
   }, []);
 
   const handleIntervalChange = async (value: number) => {
@@ -48,7 +54,10 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
             max={MAX_DISPLAY_INTERVAL}
             value={displayInterval / 1000}
             onChange={(e) => {
-              const value = Math.max(MIN_DISPLAY_INTERVAL, Math.min(MAX_DISPLAY_INTERVAL, parseInt(e.target.value) || MIN_DISPLAY_INTERVAL));
+              const value = Math.max(
+                MIN_DISPLAY_INTERVAL,
+                Math.min(MAX_DISPLAY_INTERVAL, parseInt(e.target.value) || MIN_DISPLAY_INTERVAL),
+              );
               handleIntervalChange(value * 1000);
             }}
             className="w-14 px-2 py-1 bg-black/40 text-white/60 rounded border border-white/8 text-center text-sm focus:outline-none focus:border-white/20"
