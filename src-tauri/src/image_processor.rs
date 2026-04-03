@@ -81,9 +81,9 @@ fn apply_exif_orientation(image_path: &Path, img: image::DynamicImage) -> image:
         Some(2) => img.fliph(),            // 水平反転
         Some(3) => img.rotate180(),        // 180度回転
         Some(4) => img.flipv(),            // 垂直反転
-        Some(5) => img.rotate90().fliph(), // 90度回転 + 水平反転
+        Some(5) => img.rotate90().flipv(), // transpose: 90度時計回り + 垂直反転
         Some(6) => img.rotate90(),         // 90度時計回り回転
-        Some(7) => img.rotate90().flipv(), // 90度回転 + 垂直反転
+        Some(7) => img.rotate90().fliph(), // transverse: 90度時計回り + 水平反転
         Some(8) => img.rotate270(),        // 90度反時計回り回転
         _ => img,                          // 未知の値はそのまま
     }

@@ -103,17 +103,14 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
                 &serde_json::to_string(&state_data.shuffled_list).unwrap_or_default(),
                 false,
             );
+            // apply_exif_rotation 設定を同じロック内で取得（デフォルト true）
+            let apply_rotation = db
+                .get_setting("apply_exif_rotation")
+                .ok()
+                .flatten()
+                .map(|v| v != "false")
+                .unwrap_or(true);
             drop(db);
-
-            // apply_exif_rotation 設定を取得（デフォルト true）
-            let apply_rotation = {
-                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-                db.get_setting("apply_exif_rotation")
-                    .ok()
-                    .flatten()
-                    .map(|v| v != "false")
-                    .unwrap_or(true)
-            };
 
             // 画像情報を取得（カウントは増やさない）
             get_image_info_internal(&path_str, &state, apply_rotation)
