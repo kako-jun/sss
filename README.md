@@ -133,6 +133,18 @@ screenshot_*.png
 
 詳細は `CLAUDE.md` を参照してください。
 
+## 関連ツール
+
+### photo-returns との組み合わせ
+
+[photo-returns](https://github.com/kako-jun/photo-returns) は、EXIFメタデータに基づいて写真・動画を `YYYY/YYYYMM/YYYYMMDD` 形式のフォルダ構造へ整理するツールです。
+
+**推奨フロー:**
+1. **photo-returns** でカメラやスマートフォンから取り込んだ写真を年月日フォルダへ整理
+2. **sss** で整理済みフォルダをスライドショーとして鑑賞
+
+どの写真にも公平に出番が来る sss と、写真を見つけやすく整理する photo-returns は姉妹アプリとして設計されています。
+
 ## ライセンス
 
 MIT
