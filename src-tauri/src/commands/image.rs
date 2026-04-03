@@ -9,7 +9,6 @@ use tauri::State;
 /// 次の画像を取得（カウント+1）
 #[tauri::command]
 pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
-    println!("get_next_image called");
     let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
 
     if let Some(ref mut playlist) = *playlist_lock {
@@ -18,21 +17,9 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             return Err("Playlist is empty".to_string());
         }
 
-        println!(
-            "Current position before advance: {}/{}",
-            playlist.current_position(),
-            playlist.total_count()
-        );
         let (image_path, should_count) = playlist.advance();
         if let Some(image_path) = image_path {
             let path_str = image_path.clone();
-            println!(
-                "Advanced to: {} (position: {}/{}, should_count: {})",
-                path_str,
-                playlist.current_position(),
-                playlist.total_count(),
-                should_count
-            );
 
             // 5枚先までのパスを取得（先読み用）
             let mut prefetch_paths = Vec::new();
@@ -48,8 +35,18 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             drop(playlist_lock);
 
             // 5枚先まで先読みキャッシュ（バックグラウンドで直列処理）
+            // apply_exif_rotation 設定を取得（デフォルト true）
+            let apply_rotation = {
+                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+                db.get_setting("apply_exif_rotation")
+                    .ok()
+                    .flatten()
+                    .map(|v| v != "false")
+                    .unwrap_or(true)
+            };
+
             let cache_dir = state.cache_dir.clone();
-            prefetch_and_cache_multiple(prefetch_paths, cache_dir);
+            prefetch_and_cache_multiple(prefetch_paths, cache_dir, apply_rotation);
 
             // 表示回数を増やす（新しい画像の場合のみ）
             if should_count {
@@ -129,6 +126,16 @@ fn get_image_info_internal(
         return Ok(None);
     }
 
+    // apply_exif_rotation 設定を取得（デフォルト true）
+    let apply_rotation = {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.get_setting("apply_exif_rotation")
+            .ok()
+            .flatten()
+            .map(|v| v != "false")
+            .unwrap_or(true)
+    };
+
     // 動画ファイルかどうかを判定
     let is_video = is_video_file(path);
 
@@ -142,34 +149,28 @@ fn get_image_info_internal(
         (0, 0)
     };
 
-    // 4K最適化：画像が4K(3840x2160)を超える場合はリサイズしてキャッシュ（動画は除く）
-    let optimized_path = if !is_video && (width > 3840 || height > 2160) {
+    // キャッシュ対象の判定：
+    //   - 4K超の場合は常にキャッシュ
+    //   - 4K未満でも apply_rotation=true の場合はキャッシュ経由で回転を適用
+    let needs_cache = !is_video && (width > 3840 || height > 2160 || apply_rotation);
+
+    let optimized_path = if needs_cache {
         // キャッシュファイル名を生成（元のファイル名のハッシュを使用）
         let hash = format!("{:x}", md5::compute(image_path));
         let cache_file = state.cache_dir.join(format!("{}.jpg", hash));
 
         // キャッシュが存在する場合は使用
         if cache_file.exists() {
-            println!("Using cached optimized image: {:?}", cache_file);
             Some(cache_file.to_string_lossy().to_string())
         } else {
             // キャッシュがない場合は、バックグラウンドで作成して元画像を返す
-            println!(
-                "Cache not found, scheduling optimization for: {}",
-                image_path
-            );
             let cache_file_clone = cache_file.clone();
             let path_clone = path.to_path_buf();
 
-            std::thread::spawn(move || match optimize_image_for_4k(&path_clone) {
+            std::thread::spawn(move || match optimize_image_for_4k(&path_clone, apply_rotation) {
                 Ok(optimized_data) => {
                     if let Err(e) = fs::write(&cache_file_clone, optimized_data) {
                         eprintln!("Failed to write optimized image: {}", e);
-                    } else {
-                        println!(
-                            "Created optimized image in background: {:?}",
-                            cache_file_clone
-                        );
                     }
                 }
                 Err(e) => {
@@ -187,18 +188,8 @@ fn get_image_info_internal(
     // EXIF情報（画像のみ）
     let exif = if !is_video {
         match get_exif_info(path) {
-            Ok(info) => {
-                if let Some(ref dt) = info.date_time {
-                    println!("EXIF info loaded for {} - DateTime: {}", image_path, dt);
-                } else {
-                    println!("EXIF info loaded for {} - No DateTime field", image_path);
-                }
-                Some(info)
-            }
-            Err(e) => {
-                println!("Failed to get EXIF info for {}: {}", image_path, e);
-                None
-            }
+            Ok(info) => Some(info),
+            Err(_) => None,
         }
     } else {
         None
@@ -223,7 +214,7 @@ fn get_image_info_internal(
 }
 
 /// 複数の画像を先読みしてキャッシュ作成（バックグラウンドで直列処理）
-fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf) {
+fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf, apply_rotation: bool) {
     use std::thread;
 
     thread::spawn(move || {
@@ -240,19 +231,17 @@ fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf) {
                 Err(_) => continue,
             };
 
-            // 4Kを超える場合のみキャッシュ作成
-            if width > 3840 || height > 2160 {
+            // 4Kを超える場合、または回転が必要な場合はキャッシュ作成
+            if width > 3840 || height > 2160 || apply_rotation {
                 let hash = format!("{:x}", md5::compute(&image_path));
                 let cache_file = cache_dir.join(format!("{}.jpg", hash));
 
                 // キャッシュが既に存在する場合はスキップ
                 if !cache_file.exists() {
-                    match optimize_image_for_4k(path) {
+                    match optimize_image_for_4k(path, apply_rotation) {
                         Ok(optimized_data) => {
                             if let Err(e) = fs::write(&cache_file, optimized_data) {
                                 eprintln!("Failed to write prefetched cache: {}", e);
-                            } else {
-                                println!("Prefetched and cached: {:?}", cache_file);
                             }
                         }
                         Err(e) => {
