@@ -34,13 +34,6 @@ export async function scanDirectory(directoryPath: string): Promise<ScanProgress
 }
 
 /**
- * プレイリストを初期化（保存された状態から復元）
- */
-export async function initPlaylist(): Promise<string | null> {
-  return await invoke<string | null>('init_playlist');
-}
-
-/**
  * 次の画像を取得
  */
 export async function getNextImage(): Promise<ImageInfo | null> {
@@ -106,7 +99,10 @@ export async function shareImage(imagePath: string): Promise<string> {
 /**
  * 除外：画像を.sssignoreに追加
  */
-export async function excludeImage(imagePath: string, excludeType: 'date' | 'file' | 'directory'): Promise<string> {
+export async function excludeImage(
+  imagePath: string,
+  excludeType: 'date' | 'file' | 'directory',
+): Promise<string> {
   return await invoke<string>('exclude_image', { imagePath, excludeType });
 }
 

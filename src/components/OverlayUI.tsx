@@ -3,7 +3,7 @@ import {
   ChevronRight,
   FolderOpen,
   Settings,
-  ClipboardCopy,
+  HandGrab,
   Ban,
   File,
   Hash,
@@ -326,7 +326,7 @@ export function OverlayUI({
           className="p-3 rounded transition-colors text-white/30 hover:text-white/60 hover:bg-white/5 flex items-center justify-center"
           title="ピック（コピー）"
         >
-          <ClipboardCopy size={16} />
+          <HandGrab size={16} />
         </button>
 
         {/* 3行目：除外、設定 */}
