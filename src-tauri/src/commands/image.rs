@@ -17,19 +17,9 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             return Err("Playlist is empty".to_string());
         }
 
-            "Current position before advance: {}/{}",
-            playlist.current_position(),
-            playlist.total_count()
-        );
         let (image_path, should_count) = playlist.advance();
         if let Some(image_path) = image_path {
             let path_str = image_path.clone();
-                "Advanced to: {} (position: {}/{}, should_count: {})",
-                path_str,
-                playlist.current_position(),
-                playlist.total_count(),
-                should_count
-            );
 
             // 5枚先までのパスを取得（先読み用）
             let mut prefetch_paths = Vec::new();
@@ -150,9 +140,6 @@ fn get_image_info_internal(
             Some(cache_file.to_string_lossy().to_string())
         } else {
             // キャッシュがない場合は、バックグラウンドで作成して元画像を返す
-                "Cache not found, scheduling optimization for: {}",
-                image_path
-            );
             let cache_file_clone = cache_file.clone();
             let path_clone = path.to_path_buf();
 
@@ -160,10 +147,6 @@ fn get_image_info_internal(
                 Ok(optimized_data) => {
                     if let Err(e) = fs::write(&cache_file_clone, optimized_data) {
                         eprintln!("Failed to write optimized image: {}", e);
-                    } else {
-                            "Created optimized image in background: {:?}",
-                            cache_file_clone
-                        );
                     }
                 }
                 Err(e) => {
@@ -181,15 +164,8 @@ fn get_image_info_internal(
     // EXIF情報（画像のみ）
     let exif = if !is_video {
         match get_exif_info(path) {
-            Ok(info) => {
-                if let Some(ref dt) = info.date_time {
-                } else {
-                }
-                Some(info)
-            }
-            Err(e) => {
-                None
-            }
+            Ok(info) => Some(info),
+            Err(_) => None,
         }
     } else {
         None
@@ -242,7 +218,6 @@ fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf) {
                         Ok(optimized_data) => {
                             if let Err(e) = fs::write(&cache_file, optimized_data) {
                                 eprintln!("Failed to write prefetched cache: {}", e);
-                            } else {
                             }
                         }
                         Err(e) => {

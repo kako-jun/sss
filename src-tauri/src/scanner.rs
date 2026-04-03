@@ -112,7 +112,6 @@ impl ImageScanner {
             })
             .collect();
 
-
         Ok(files)
     }
 
@@ -163,14 +162,6 @@ impl ImageScanner {
         let deleted_files: Vec<String> = previous_map.keys().cloned().collect();
 
         let duration_ms = start_time.elapsed().as_millis();
-
-            "Scan completed: {} total, {} new, {} deleted, {} unchanged in {}ms",
-            current_files.len(),
-            new_files.len(),
-            deleted_files.len(),
-            unchanged_count,
-            duration_ms
-        );
 
         Ok(ScanResult {
             total_count: current_files.len(),
