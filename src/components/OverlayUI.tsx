@@ -1,4 +1,15 @@
-import { ChevronLeft, ChevronRight, FolderOpen, Settings, Share2, Ban, File, Hash, MapPin, ExternalLink } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+  Settings,
+  ClipboardCopy,
+  Ban,
+  File,
+  Hash,
+  MapPin,
+  ExternalLink,
+} from 'lucide-react';
 import type { ImageInfo } from '../types';
 import { openInExplorer, shareImage, excludeImage } from '../lib/tauri';
 import { useState } from 'react';
@@ -135,7 +146,7 @@ export function OverlayUI({
         <div
           className="h-full bg-white/40 transition-all duration-300"
           style={{
-            width: `${progress}%`
+            width: `${progress}%`,
           }}
         />
       </div>
@@ -152,10 +163,16 @@ export function OverlayUI({
         {/* 撮影日時（デジタル時計風） */}
         {image.exif?.dateTime && (
           <div className="text-center border-b border-white/5 pb-4">
-            <div className="text-white/80 font-mono font-medium whitespace-nowrap overflow-hidden" style={{ fontSize: 'clamp(1rem, 4vw, 1.5rem)' }}>
+            <div
+              className="text-white/80 font-mono font-medium whitespace-nowrap overflow-hidden"
+              style={{ fontSize: 'clamp(1rem, 4vw, 1.5rem)' }}
+            >
               {formatDateTime(image.exif.dateTime).split(' ')[0] || '----/--/--'}
             </div>
-            <div className="text-white/40 font-mono mt-1 whitespace-nowrap" style={{ fontSize: '1.1rem' }}>
+            <div
+              className="text-white/40 font-mono mt-1 whitespace-nowrap"
+              style={{ fontSize: '1.1rem' }}
+            >
               {formatDateTime(image.exif.dateTime).split(' ')[1] || '--:--:--'}
             </div>
           </div>
@@ -172,7 +189,9 @@ export function OverlayUI({
           <div className="text-white/30 space-y-2">
             <div className="flex items-center gap-2 group relative">
               <Hash size={13} className="text-white/20" />
-              <span>{currentPosition.toLocaleString()} / {totalImages.toLocaleString()}</span>
+              <span>
+                {currentPosition.toLocaleString()} / {totalImages.toLocaleString()}
+              </span>
               <span className="absolute left-0 bottom-full mb-1 px-2 py-1 bg-black/90 text-white/70 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                 プレイリスト位置
               </span>
@@ -202,8 +221,17 @@ export function OverlayUI({
                         const lat = image.exif.gpsLatitude;
                         const lon = image.exif.gpsLongitude;
                         const zoom = 13;
-                        const x = Math.floor((lon! + 180) / 360 * Math.pow(2, zoom));
-                        const y = Math.floor((1 - Math.log(Math.tan(lat! * Math.PI / 180) + 1 / Math.cos(lat! * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
+                        const x = Math.floor(((lon! + 180) / 360) * Math.pow(2, zoom));
+                        const y = Math.floor(
+                          ((1 -
+                            Math.log(
+                              Math.tan((lat! * Math.PI) / 180) +
+                                1 / Math.cos((lat! * Math.PI) / 180),
+                            ) /
+                              Math.PI) /
+                            2) *
+                            Math.pow(2, zoom),
+                        );
                         return `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
                       })()}
                       alt="Location Map"
@@ -213,14 +241,27 @@ export function OverlayUI({
                         const zoom = 13;
                         const lat = image.exif!.gpsLatitude!;
                         const lon = image.exif!.gpsLongitude!;
-                        const x = Math.floor((lon + 180) / 360 * Math.pow(2, zoom));
-                        const y = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
-                        (e.target as HTMLImageElement).src = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+                        const x = Math.floor(((lon + 180) / 360) * Math.pow(2, zoom));
+                        const y = Math.floor(
+                          ((1 -
+                            Math.log(
+                              Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180),
+                            ) /
+                              Math.PI) /
+                            2) *
+                            Math.pow(2, zoom),
+                        );
+                        (e.target as HTMLImageElement).src =
+                          `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
                       }}
                     />
                     {/* マップピンオーバーレイ */}
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <MapPin size={20} className="text-white/40 group-hover:text-white/70 drop-shadow-lg transition-colors" fill="currentColor" />
+                      <MapPin
+                        size={20}
+                        className="text-white/40 group-hover:text-white/70 drop-shadow-lg transition-colors"
+                        fill="currentColor"
+                      />
                     </div>
                     {/* 外部リンクアイコン（右下） */}
                     <div className="absolute bottom-1 right-1 bg-black/50 rounded p-0.5">
@@ -247,7 +288,9 @@ export function OverlayUI({
           onClick={onPrevious}
           disabled={!canGoBack}
           className={`relative p-3 rounded transition-colors flex items-center justify-center group ${
-            canGoBack ? 'text-white/40 hover:text-white/70 hover:bg-white/5' : 'text-white/15 cursor-not-allowed'
+            canGoBack
+              ? 'text-white/40 hover:text-white/70 hover:bg-white/5'
+              : 'text-white/15 cursor-not-allowed'
           }`}
           title="前へ (←)"
         >
@@ -281,9 +324,9 @@ export function OverlayUI({
         <button
           onClick={handleShare}
           className="p-3 rounded transition-colors text-white/30 hover:text-white/60 hover:bg-white/5 flex items-center justify-center"
-          title="シェア用にコピー"
+          title="ピック（コピー）"
         >
-          <Share2 size={16} />
+          <ClipboardCopy size={16} />
         </button>
 
         {/* 3行目：除外、設定 */}
@@ -300,10 +343,7 @@ export function OverlayUI({
           {showExcludeMenu && (
             <>
               {/* 背景オーバーレイ */}
-              <div
-                className="fixed inset-0 z-40"
-                onClick={handleExcludeMenuBackdropClick}
-              />
+              <div className="fixed inset-0 z-40" onClick={handleExcludeMenuBackdropClick} />
               {/* メニュー本体 */}
               <div className="absolute bottom-full right-0 mb-2 bg-black/90 rounded shadow-xl border border-white/8 p-2 space-y-1 w-48 z-50 backdrop-blur-sm">
                 <button
