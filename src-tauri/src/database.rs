@@ -122,6 +122,28 @@ impl Database {
                 .execute("ALTER TABLE file_metadata DROP COLUMN is_valid", [])?;
         }
 
+        // ignore_rules が空の場合のみデフォルト除外ルールを挿入
+        let rule_count: i32 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM ignore_rules", [], |row| row.get(0))
+            .unwrap_or(0);
+        if rule_count == 0 {
+            let default_rules = [
+                "**/.thumbnails/",
+                "**/Thumbs.db",
+                "**/.DS_Store",
+                "**/@eaDir/",
+                "**/desktop.ini",
+                "**/.**/",
+            ];
+            for rule in &default_rules {
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO ignore_rules (pattern) VALUES (?1)",
+                    [rule],
+                )?;
+            }
+        }
+
         Ok(())
     }
 
@@ -260,6 +282,28 @@ impl Database {
     pub fn reset_all_display_counts(&self) -> Result<()> {
         self.conn
             .execute("UPDATE image_stats SET display_count = 0", [])?;
+        Ok(())
+    }
+
+    /// 除外ルール一覧を取得
+    pub fn get_ignore_rules(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT pattern FROM ignore_rules ORDER BY added_at ASC")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        let mut patterns = Vec::new();
+        for row in rows {
+            patterns.push(row?);
+        }
+        Ok(patterns)
+    }
+
+    /// 除外ルールを追加
+    pub fn add_ignore_rule(&self, pattern: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO ignore_rules (pattern) VALUES (?1)",
+            [pattern],
+        )?;
         Ok(())
     }
 

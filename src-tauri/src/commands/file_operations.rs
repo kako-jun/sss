@@ -144,7 +144,7 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
     Ok(final_dest_path.to_string_lossy().to_string())
 }
 
-/// 除外機能：画像を.sssignoreに追加
+/// 除外機能：画像をDBのignore_rulesに追加
 #[tauri::command]
 pub async fn exclude_image(
     image_path: String,
@@ -156,14 +156,6 @@ pub async fn exclude_image(
     if !path.exists() {
         return Err("Image file does not exist".to_string());
     }
-
-    // .sssignoreのパス
-    let ignore_path = if cfg!(windows) {
-        std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join(".sssignore"))
-    } else {
-        std::env::var("HOME").map(|p| PathBuf::from(p).join(".sssignore"))
-    }
-    .map_err(|_| "Failed to get home directory".to_string())?;
 
     let pattern = match exclude_type.as_str() {
         "date" => {
@@ -197,15 +189,11 @@ pub async fn exclude_image(
         _ => return Err("Invalid exclude type".to_string()),
     };
 
-    // .sssignoreに追記
-    use std::io::Write;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&ignore_path)
-        .map_err(|e| format!("Failed to open .sssignore: {}", e))?;
-
-    writeln!(file, "{}", pattern).map_err(|e| format!("Failed to write to .sssignore: {}", e))?;
+    // DB に除外ルールを追加
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    db.add_ignore_rule(&pattern)
+        .map_err(|e| format!("Failed to add ignore rule: {}", e))?;
+    drop(db);
 
     // プレイリストから該当画像を削除（ファイル除外の場合のみ即座に削除）
     if exclude_type == "file" {

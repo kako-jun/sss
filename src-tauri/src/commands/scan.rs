@@ -1,9 +1,54 @@
 use crate::commands::types::{AppState, ScanProgress};
+use crate::ignore::IgnoreFilter;
 use crate::playlist::Playlist;
 use crate::scanner::ImageScanner;
-use std::fs;
 use std::path::PathBuf;
 use tauri::{Emitter, State};
+
+/// ~/.sssignore が存在する場合、内容を DB にインポートして .sssignore.bak にリネーム
+fn migrate_sssignore_to_db(db: &crate::database::Database) {
+    let home_dir = if cfg!(windows) {
+        std::env::var("USERPROFILE").ok().map(PathBuf::from)
+    } else {
+        std::env::var("HOME").ok().map(PathBuf::from)
+    };
+
+    let home_dir = match home_dir {
+        Some(p) => p,
+        None => return,
+    };
+
+    let sssignore_path = home_dir.join(".sssignore");
+
+    if !sssignore_path.exists() {
+        return;
+    }
+
+    // ファイルを読み込んでパターンをDBにインポート
+    match std::fs::read_to_string(&sssignore_path) {
+        Ok(content) => {
+            for line in content.lines() {
+                let line = line.trim();
+                // コメントと空行をスキップ
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if let Err(e) = db.add_ignore_rule(line) {
+                    eprintln!("Failed to import ignore rule '{}': {}", line, e);
+                }
+            }
+
+            // .sssignore を .sssignore.bak にリネーム
+            let bak_path = home_dir.join(".sssignore.bak");
+            if let Err(e) = std::fs::rename(&sssignore_path, &bak_path) {
+                eprintln!("Failed to rename .sssignore to .sssignore.bak: {}", e);
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to read .sssignore for migration: {}", e);
+        }
+    }
+}
 
 /// ディレクトリをスキャンしてプレイリストを初期化
 #[tauri::command]
@@ -18,51 +63,22 @@ pub async fn scan_directory(
         return Err(format!("Directory does not exist: {}", directory_path));
     }
 
-    // .sssignoreのパス（ユーザーホームディレクトリに保存）
-    let home_dir = if cfg!(windows) {
-        std::env::var("USERPROFILE")
-            .map(PathBuf::from)
-            .map_err(|_| "Failed to get home directory")?
-    } else {
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .map_err(|_| "Failed to get home directory")?
-    };
-    let sssignore_path = home_dir.join(".sssignore");
-
-    // .sssignoreファイルが存在しない場合はデフォルトルールを作成
-    if !sssignore_path.exists() {
-        let default_content = r#"# Smart Slide Show (sss) - Default Ignore Rules
-# このファイルはgitignore形式で除外ルールを記述します
-
-# サムネイルキャッシュ
-**/.thumbnails/
-**/Thumbs.db
-**/.DS_Store
-
-# システムファイル
-**/@eaDir/
-**/desktop.ini
-
-# 隠しフォルダ（Linuxの慣例）
-**/.**/
-
-# 例：特定のフォルダを除外
-# **/private/
-# **/2023-05-15/
-
-# 例：特定のファイル名パターンを除外
-# screenshot_*.png
-# *_draft.jpg
-"#;
-        if let Err(e) = fs::write(&sssignore_path, default_content) {
-            eprintln!("Failed to create default .sssignore: {}", e);
-        } else {
-        }
+    // マイグレーション処理：~/.sssignore が存在する場合は DB にインポート
+    {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        migrate_sssignore_to_db(&db);
     }
 
+    // DB から除外ルールを取得して IgnoreFilter を作成
+    let patterns = {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.get_ignore_rules()
+            .unwrap_or_default()
+    };
+    let ignore_filter = IgnoreFilter::from_patterns(&patterns);
+
     // スキャナーを作成
-    let scanner = ImageScanner::new(&sssignore_path);
+    let scanner = ImageScanner::new(ignore_filter);
 
     // データベースから前回のファイルメタデータを取得
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
