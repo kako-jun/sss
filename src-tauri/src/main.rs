@@ -20,8 +20,6 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|_app, argv, cwd| {
-            println!("Already running instance detected");
-            println!("Args: {:?}, CWD: {:?}", argv, cwd);
         }))
         .setup(|app| {
             // スクリーンセーバーとディスプレイスリープを抑制（クロスプラットフォーム対応）
@@ -34,7 +32,6 @@ fn main() {
                 .app_name("Smart Slide Show")
                 .create()
                 .expect("Failed to initialize keep awake");
-            println!("Screen saver prevention enabled (system sleep allowed)");
 
             // データベースパスを取得
             let app_data_dir = app
@@ -46,7 +43,6 @@ fn main() {
             std::fs::create_dir_all(&app_data_dir).expect("failed to create app data directory");
 
             let db_path = app_data_dir.join("sss.db");
-            println!("Database path: {:?}", db_path);
 
             // キャッシュディレクトリを削除して再作成（起動時にクリア）
             let cache_dir = app_data_dir.join("cache");
@@ -56,7 +52,6 @@ fn main() {
                 }
             }
             std::fs::create_dir_all(&cache_dir).expect("failed to create cache directory");
-            println!("Cache directory cleared and created: {:?}", cache_dir);
 
             // データベースを初期化
             let db = Database::new(db_path).expect("failed to initialize database");

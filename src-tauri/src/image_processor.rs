@@ -43,7 +43,6 @@ pub fn optimize_image_for_4k(image_path: &Path) -> Result<Vec<u8>, String> {
 
     // 4K解像度を超える場合はリサイズ
     let resized_img = if width > MAX_WIDTH_4K || height > MAX_HEIGHT_4K {
-        println!("Resizing image from {}x{} to fit 4K", width, height);
         img.resize(MAX_WIDTH_4K, MAX_HEIGHT_4K, FilterType::Lanczos3)
     } else {
         img

@@ -212,7 +212,6 @@ pub async fn exclude_image(
         let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(ref mut playlist) = *playlist_lock {
             playlist.update_images(vec![], vec![image_path.clone()]);
-            println!("Removed {} from playlist", image_path);
         }
         drop(playlist_lock);
         Ok(format!("除外パターン追加: {}", pattern))
