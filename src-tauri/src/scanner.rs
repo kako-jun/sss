@@ -36,8 +36,7 @@ pub struct ImageScanner {
 
 impl ImageScanner {
     /// スキャナーを作成
-    pub fn new(sssignore_path: &Path) -> Self {
-        let ignore_filter = IgnoreFilter::from_file(sssignore_path);
+    pub fn new(ignore_filter: IgnoreFilter) -> Self {
         ImageScanner { ignore_filter }
     }
 
@@ -191,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_is_image_file() {
-        let scanner = ImageScanner::new(Path::new(""));
+        let scanner = ImageScanner::new(IgnoreFilter::from_patterns(&[]));
 
         assert!(scanner.is_image_file(Path::new("test.jpg")));
         assert!(scanner.is_image_file(Path::new("test.JPG")));

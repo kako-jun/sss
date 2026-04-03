@@ -1,5 +1,4 @@
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use std::fs;
 use std::path::Path;
 
 pub struct IgnoreFilter {
@@ -7,31 +6,16 @@ pub struct IgnoreFilter {
 }
 
 impl IgnoreFilter {
-    /// .sssignoreファイルから除外ルールを読み込む
-    pub fn from_file(ignore_file_path: &Path) -> Self {
-        if !ignore_file_path.exists() {
-            return IgnoreFilter { globset: None };
-        }
-
-        match fs::read_to_string(ignore_file_path) {
-            Ok(content) => Self::from_content(&content),
-            Err(e) => {
-                eprintln!("Failed to read .sssignore: {}", e);
-                IgnoreFilter { globset: None }
-            }
-        }
-    }
-
-    /// .sssignoreの内容から除外ルールを作成
-    pub fn from_content(content: &str) -> Self {
+    /// DBから取得したパターン一覧から除外ルールを作成
+    pub fn from_patterns(patterns: &[String]) -> Self {
         let mut builder = GlobSetBuilder::new();
         let mut has_patterns = false;
 
-        for line in content.lines() {
-            let line = line.trim();
+        for pattern in patterns {
+            let line = pattern.trim();
 
-            // コメントと空行をスキップ
-            if line.is_empty() || line.starts_with('#') {
+            // 空行をスキップ
+            if line.is_empty() {
                 continue;
             }
 
@@ -98,19 +82,14 @@ mod tests {
 
     #[test]
     fn test_ignore_filter_basic() {
-        let content = r#"
-# コメント
-*.tmp
+        let patterns = vec![
+            "*.tmp".to_string(),
+            "**/private/**".to_string(),
+            "**/2023-05-15/**".to_string(),
+            "screenshot_*.png".to_string(),
+        ];
 
-# 特定のフォルダ
-**/private/**
-**/2023-05-15/**
-
-# パターンマッチ
-screenshot_*.png
-"#;
-
-        let filter = IgnoreFilter::from_content(content);
+        let filter = IgnoreFilter::from_patterns(&patterns);
         assert!(filter.has_patterns());
 
         // .tmpファイルは除外
@@ -131,12 +110,9 @@ screenshot_*.png
 
     #[test]
     fn test_empty_ignore_filter() {
-        let content = r#"
-# コメントのみ
+        let patterns: Vec<String> = vec![];
 
-"#;
-
-        let filter = IgnoreFilter::from_content(content);
+        let filter = IgnoreFilter::from_patterns(&patterns);
         assert!(!filter.has_patterns());
         assert!(!filter.is_ignored(Path::new("/photos/image.jpg")));
     }

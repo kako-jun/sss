@@ -263,6 +263,28 @@ impl Database {
         Ok(())
     }
 
+    /// 除外ルール一覧を取得
+    pub fn get_ignore_rules(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT pattern FROM ignore_rules ORDER BY added_at ASC")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        let mut patterns = Vec::new();
+        for row in rows {
+            patterns.push(row?);
+        }
+        Ok(patterns)
+    }
+
+    /// 除外ルールを追加
+    pub fn add_ignore_rule(&self, pattern: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO ignore_rules (pattern) VALUES (?1)",
+            [pattern],
+        )?;
+        Ok(())
+    }
+
     /// 全画像の表示回数を取得（グラフ用、パスでソート）
     pub fn get_all_display_counts(&self) -> Result<Vec<(String, i32)>> {
         let mut stmt = self
