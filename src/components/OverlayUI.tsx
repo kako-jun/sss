@@ -9,6 +9,8 @@ import {
   Hash,
   MapPin,
   ExternalLink,
+  Minimize2,
+  Maximize2,
 } from 'lucide-react';
 import type { ImageInfo } from '../types';
 import { openInExplorer, shareImage, excludeImage } from '../lib/tauri';
@@ -21,9 +23,11 @@ interface OverlayUIProps {
   currentPosition: number;
   totalImages: number;
   progress: number; // 0-100のプログレス値
+  isFullscreen: boolean; // フルスクリーン状態
   onPrevious: () => void;
   onNext: () => void;
   onSettings: () => void;
+  onToggleWindowMode: () => void; // フルスクリーン⇔ウィンドウモードトグル
   onMouseEnter: () => void; // スライドショー一時停止
   onMouseLeave: () => void; // スライドショー再開
   onTogglePause: () => void; // タップで一時停止トグル
@@ -35,9 +39,11 @@ export function OverlayUI({
   currentPosition,
   totalImages,
   progress,
+  isFullscreen,
   onPrevious,
   onNext,
   onSettings,
+  onToggleWindowMode,
   onMouseEnter,
   onMouseLeave,
   onTogglePause,
@@ -94,18 +100,6 @@ export function OverlayUI({
     } catch (err) {
       console.error('Failed to exclude image:', err);
       setStatusMessage('エラー: 除外失敗');
-      setTimeout(() => setStatusMessage(''), 3000);
-    }
-  };
-
-  const handleOpenSssignore = async () => {
-    try {
-      // ホームディレクトリの.sssignoreファイルパスを取得して開く
-      await openInExplorer('~/.sssignore');
-      setShowExcludeMenu(false);
-    } catch (err) {
-      console.error('Failed to open .sssignore:', err);
-      setStatusMessage('エラー: .sssignoreを開けませんでした');
       setTimeout(() => setStatusMessage(''), 3000);
     }
   };
@@ -364,14 +358,6 @@ export function OverlayUI({
                 >
                   このファイルを除外
                 </button>
-                {/* セパレータ */}
-                <div className="border-t border-white/8 my-1" />
-                <button
-                  onClick={handleOpenSssignore}
-                  className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/35 hover:text-white/60 transition-colors"
-                >
-                  .sssignoreを開く
-                </button>
               </div>
             </>
           )}
@@ -382,6 +368,16 @@ export function OverlayUI({
           title="設定"
         >
           <Settings size={16} />
+        </button>
+
+        {/* 4行目：ウィンドウモードトグル（全幅） */}
+        <button
+          onClick={onToggleWindowMode}
+          className="col-span-2 p-3 rounded transition-colors text-white/20 hover:text-white/50 hover:bg-white/5 flex items-center justify-center gap-2"
+          title={isFullscreen ? 'ウィンドウモードに切り替え' : 'フルスクリーンに戻す'}
+        >
+          {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          <span className="text-xs">{isFullscreen ? 'ウィンドウ' : 'フルスクリーン'}</span>
         </button>
       </div>
     </div>

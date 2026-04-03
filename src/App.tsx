@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
@@ -23,6 +24,7 @@ function App() {
     total: number;
   } | null>(null);
   const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
+  const [isFullscreen, setIsFullscreen] = useState(true); // フルスクリーン状態
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
 
   const {
@@ -203,6 +205,19 @@ function App() {
     setIsSettingsOpen(true);
   };
 
+  const handleToggleWindowMode = async () => {
+    try {
+      const win = getCurrentWindow();
+      const next = !isFullscreen;
+      await win.setFullscreen(next);
+      // decorations: false のためタイトルバーは出ないが、ウィンドウモード時は
+      // OSのタスクバーが見える状態になる
+      setIsFullscreen(next);
+    } catch (err) {
+      console.error('Failed to toggle window mode:', err);
+    }
+  };
+
   const handleOverlayMouseEnter = () => {
     setIsOverlayHovered(true);
   };
@@ -345,9 +360,11 @@ function App() {
         currentPosition={currentPosition}
         totalImages={totalImages}
         progress={progress}
+        isFullscreen={isFullscreen}
         onPrevious={handlePrevious}
         onNext={handleNext}
         onSettings={handleSettings}
+        onToggleWindowMode={handleToggleWindowMode}
         onMouseEnter={handleOverlayMouseEnter}
         onMouseLeave={handleOverlayMouseLeave}
         onTogglePause={handleTogglePause}

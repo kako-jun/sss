@@ -27,7 +27,6 @@
       {
         "fullscreen": true,
         "resizable": true,
-        "maximized": true,
         "title": "sss - Smart Slide Show",
         "width": 1920,
         "height": 1080,
