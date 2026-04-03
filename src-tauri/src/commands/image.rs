@@ -66,7 +66,7 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             }
 
             // 画像情報を取得
-            get_image_info_internal(&path_str, &state)
+            get_image_info_internal(&path_str, &state, apply_rotation)
         } else {
             Ok(None)
         }
@@ -105,8 +105,18 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
             );
             drop(db);
 
+            // apply_exif_rotation 設定を取得（デフォルト true）
+            let apply_rotation = {
+                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+                db.get_setting("apply_exif_rotation")
+                    .ok()
+                    .flatten()
+                    .map(|v| v != "false")
+                    .unwrap_or(true)
+            };
+
             // 画像情報を取得（カウントは増やさない）
-            get_image_info_internal(&path_str, &state)
+            get_image_info_internal(&path_str, &state, apply_rotation)
         } else {
             Ok(None)
         }
@@ -119,22 +129,13 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
 fn get_image_info_internal(
     image_path: &str,
     state: &State<AppState>,
+    apply_rotation: bool,
 ) -> Result<Option<ImageInfo>, String> {
     let path = Path::new(image_path);
 
     if !path.exists() {
         return Ok(None);
     }
-
-    // apply_exif_rotation 設定を取得（デフォルト true）
-    let apply_rotation = {
-        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        db.get_setting("apply_exif_rotation")
-            .ok()
-            .flatten()
-            .map(|v| v != "false")
-            .unwrap_or(true)
-    };
 
     // 動画ファイルかどうかを判定
     let is_video = is_video_file(path);
@@ -156,7 +157,10 @@ fn get_image_info_internal(
 
     let optimized_path = if needs_cache {
         // キャッシュファイル名を生成（元のファイル名のハッシュを使用）
-        let hash = format!("{:x}", md5::compute(image_path));
+        let hash = format!(
+            "{:x}",
+            md5::compute(format!("{}:{}", image_path, apply_rotation))
+        );
         let cache_file = state.cache_dir.join(format!("{}.jpg", hash));
 
         // キャッシュが存在する場合は使用
@@ -167,16 +171,18 @@ fn get_image_info_internal(
             let cache_file_clone = cache_file.clone();
             let path_clone = path.to_path_buf();
 
-            std::thread::spawn(move || match optimize_image_for_4k(&path_clone, apply_rotation) {
-                Ok(optimized_data) => {
-                    if let Err(e) = fs::write(&cache_file_clone, optimized_data) {
-                        eprintln!("Failed to write optimized image: {}", e);
+            std::thread::spawn(
+                move || match optimize_image_for_4k(&path_clone, apply_rotation) {
+                    Ok(optimized_data) => {
+                        if let Err(e) = fs::write(&cache_file_clone, optimized_data) {
+                            eprintln!("Failed to write optimized image: {}", e);
+                        }
                     }
-                }
-                Err(e) => {
-                    eprintln!("Failed to optimize image: {}", e);
-                }
-            });
+                    Err(e) => {
+                        eprintln!("Failed to optimize image: {}", e);
+                    }
+                },
+            );
 
             // 元画像を返す（すぐに表示）
             None
@@ -233,7 +239,10 @@ fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf, app
 
             // 4Kを超える場合、または回転が必要な場合はキャッシュ作成
             if width > 3840 || height > 2160 || apply_rotation {
-                let hash = format!("{:x}", md5::compute(&image_path));
+                let hash = format!(
+                    "{:x}",
+                    md5::compute(format!("{}:{}", image_path, apply_rotation))
+                );
                 let cache_file = cache_dir.join(format!("{}.jpg", hash));
 
                 // キャッシュが既に存在する場合はスキップ

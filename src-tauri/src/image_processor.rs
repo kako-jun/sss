@@ -34,7 +34,7 @@ pub struct ImageInfo {
     pub last_displayed: Option<String>,
 }
 
-/// 画像を最適化（4K用にリサイズ）
+/// 画像を最適化（EXIF回転適用 + 4Kリサイズ）
 pub fn optimize_image_for_4k(image_path: &Path, apply_rotation: bool) -> Result<Vec<u8>, String> {
     // 画像を読み込む
     let img = image::open(image_path).map_err(|e| format!("Failed to open image: {}", e))?;
