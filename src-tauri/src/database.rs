@@ -108,7 +108,11 @@ impl Database {
             .unwrap_or(0)
             > 0;
         if has_is_valid {
-            // is_valid = 0 の行（論理削除済み）を物理削除
+            // is_valid = 0 の行（論理削除済み）とその image_stats を物理削除
+            self.conn.execute(
+                "DELETE FROM image_stats WHERE path IN (SELECT path FROM file_metadata WHERE is_valid = 0)",
+                [],
+            )?;
             self.conn
                 .execute("DELETE FROM file_metadata WHERE is_valid = 0", [])?;
             // is_valid インデックスを削除
