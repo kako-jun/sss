@@ -23,13 +23,6 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
   const displayPath = image.optimizedPath || image.path;
   const srcUrl = convertFileSrc(displayPath);
 
-  console.log('Displaying:', {
-    path: image.path,
-    isVideo: image.isVideo,
-    optimizedPath: image.optimizedPath,
-    srcUrl,
-  });
-
   return (
     <div className="w-screen h-screen bg-black overflow-hidden relative">
       {/* 背景ロゴ */}
@@ -63,7 +56,6 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
               console.error('Error event:', e);
             }}
             onLoadedData={() => {
-              console.log('Video loaded successfully:', image.path);
             }}
           />
         ) : (
@@ -86,7 +78,6 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
               console.error('Error event:', e);
             }}
             onLoad={() => {
-              console.log('Image loaded successfully:', image.path);
             }}
           />
         )}

@@ -84,7 +84,6 @@ impl Playlist {
 
         // リストの最後まで到達したら再シャッフル（先頭が直前の末尾と同じにならないよう保証）
         if self.current_index == 0 && self.shuffled_list.len() > 1 {
-            println!("Reshuffling playlist...");
             // シャッフル前に末尾の画像を記録（直前に表示した画像）
             let last_image = self.shuffled_list.last().cloned();
             let mut rng = thread_rng();

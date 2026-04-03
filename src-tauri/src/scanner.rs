@@ -72,7 +72,6 @@ impl ImageScanner {
             .collect();
 
         let total = entries.len();
-        println!("Found {} image files in {:?}", total, start_time.elapsed());
 
         // 初回の進捗報告
         progress_callback(0, total);
@@ -112,8 +111,6 @@ impl ImageScanner {
                 })
             })
             .collect();
-
-        println!("Processed metadata in {:?}", start_time.elapsed());
 
         Ok(files)
     }
@@ -165,15 +162,6 @@ impl ImageScanner {
         let deleted_files: Vec<String> = previous_map.keys().cloned().collect();
 
         let duration_ms = start_time.elapsed().as_millis();
-
-        println!(
-            "Scan completed: {} total, {} new, {} deleted, {} unchanged in {}ms",
-            current_files.len(),
-            new_files.len(),
-            deleted_files.len(),
-            unchanged_count,
-            duration_ms
-        );
 
         Ok(ScanResult {
             total_count: current_files.len(),

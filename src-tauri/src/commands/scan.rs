@@ -58,7 +58,6 @@ pub async fn scan_directory(
         if let Err(e) = fs::write(&sssignore_path, default_content) {
             eprintln!("Failed to create default .sssignore: {}", e);
         } else {
-            println!("Created default .sssignore file at {:?}", sssignore_path);
         }
     }
 
@@ -136,7 +135,6 @@ pub async fn scan_directory(
 
     if should_reset && !is_same_directory {
         let _ = db.reset_all_display_counts();
-        println!("Display counts reset on directory change");
     }
     drop(db);
 
@@ -150,7 +148,6 @@ pub async fn scan_directory(
         }
     } else {
         // 別のディレクトリまたは初回の場合は新規プレイリストを作成
-        println!("Creating new playlist for directory: {:?}", directory);
         *playlist_lock = Some(Playlist::new(image_paths));
     }
 

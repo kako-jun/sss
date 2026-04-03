@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import type { ImageInfo, ScanProgress, Stats } from '../types';
 
 /**
@@ -74,14 +73,6 @@ export async function getStats(): Promise<Stats> {
  */
 export async function getPlaylistInfo(): Promise<[number, number, boolean] | null> {
   return await invoke<[number, number, boolean] | null>('get_playlist_info');
-}
-
-/**
- * 画像パスをTauriのURLに変換
- */
-export function getImageUrl(imagePath: string): string {
-  // Tauri v2ではデフォルトプロトコルを使用
-  return convertFileSrc(imagePath);
 }
 
 /**
