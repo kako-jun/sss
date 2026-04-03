@@ -193,6 +193,9 @@ function App() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
     };
+    // handleNext/handlePrevious は毎レンダーで再生成されるが deps に含めると
+    // リスナーが毎回張り直されるため意図的に除外
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canGoBack, isSettingsOpen]);
 
   const handleSettings = () => {

@@ -99,7 +99,10 @@ export async function shareImage(imagePath: string): Promise<string> {
 /**
  * 除外：画像を.sssignoreに追加
  */
-export async function excludeImage(imagePath: string, excludeType: 'date' | 'file' | 'directory'): Promise<string> {
+export async function excludeImage(
+  imagePath: string,
+  excludeType: 'date' | 'file' | 'directory',
+): Promise<string> {
   return await invoke<string>('exclude_image', { imagePath, excludeType });
 }
 
