@@ -242,9 +242,9 @@ CREATE TABLE scan_history (
 - EXIF情報抽出
 - 画像サイズ取得
 
-### src-tauri/src/commands.rs
+### src-tauri/src/commands/
 
-- Tauriコマンドハンドラ（15個）
+- Tauriコマンドハンドラ（16個）
   1. `scan_directory`: フォルダスキャン（リアルタイム進捗イベント付き）
   2. `init_playlist`: プレイリスト初期化（保存された状態から復元）
   3. `get_next_image`: 次の画像/動画取得（5枚先読みキャッシュ）
