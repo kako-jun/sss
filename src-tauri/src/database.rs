@@ -22,7 +22,6 @@ impl Database {
                 path TEXT PRIMARY KEY,
                 modified_time INTEGER NOT NULL,
                 file_size INTEGER NOT NULL,
-                is_valid BOOLEAN DEFAULT 1,
                 added_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
@@ -90,10 +89,6 @@ impl Database {
             [],
         )?;
         self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_is_valid ON file_metadata(is_valid)",
-            [],
-        )?;
-        self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_display_count ON image_stats(display_count)",
             [],
         )?;
@@ -101,6 +96,31 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_last_displayed ON image_stats(last_displayed)",
             [],
         )?;
+
+        // 旧スキーマからのマイグレーション: is_valid カラムが残っている場合は論理削除行を物理削除して廃止
+        let has_is_valid: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('file_metadata') WHERE name = 'is_valid'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if has_is_valid {
+            // is_valid = 0 の行（論理削除済み）とその image_stats を物理削除
+            self.conn.execute(
+                "DELETE FROM image_stats WHERE path IN (SELECT path FROM file_metadata WHERE is_valid = 0)",
+                [],
+            )?;
+            self.conn
+                .execute("DELETE FROM file_metadata WHERE is_valid = 0", [])?;
+            // is_valid インデックスを削除
+            self.conn.execute("DROP INDEX IF EXISTS idx_is_valid", [])?;
+            // is_valid カラムを削除（SQLite 3.35.0+）
+            self.conn
+                .execute("ALTER TABLE file_metadata DROP COLUMN is_valid", [])?;
+        }
 
         Ok(())
     }
@@ -113,8 +133,8 @@ impl Database {
         file_size: i64,
     ) -> Result<()> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO file_metadata (path, modified_time, file_size, is_valid)
-             VALUES (?1, ?2, ?3, 1)",
+            "INSERT OR REPLACE INTO file_metadata (path, modified_time, file_size)
+             VALUES (?1, ?2, ?3)",
             [path, &modified_time.to_string(), &file_size.to_string()],
         )?;
         Ok(())
@@ -122,9 +142,9 @@ impl Database {
 
     /// ファイルメタデータを取得
     pub fn get_all_file_metadata(&self) -> Result<Vec<(String, i64, i64)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT path, modified_time, file_size FROM file_metadata WHERE is_valid = 1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, modified_time, file_size FROM file_metadata")?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
 
         let mut result = Vec::new();
@@ -134,14 +154,12 @@ impl Database {
         Ok(result)
     }
 
-    /// 削除されたファイルをマーク
+    /// 削除されたファイルをDBから物理削除する
     pub fn mark_deleted(&self, paths: &[String]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         for path in paths {
-            tx.execute(
-                "UPDATE file_metadata SET is_valid = 0 WHERE path = ?1",
-                [path],
-            )?;
+            tx.execute("DELETE FROM file_metadata WHERE path = ?1", [path])?;
+            tx.execute("DELETE FROM image_stats WHERE path = ?1", [path])?;
         }
         tx.commit()?;
         Ok(())
@@ -233,11 +251,9 @@ impl Database {
 
     /// 総画像数を取得
     pub fn get_total_image_count(&self) -> Result<i32> {
-        let count: i32 = self.conn.query_row(
-            "SELECT COUNT(*) FROM file_metadata WHERE is_valid = 1",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i32 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM file_metadata", [], |row| row.get(0))?;
         Ok(count)
     }
 
