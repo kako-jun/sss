@@ -5,8 +5,8 @@ use std::io::BufReader;
 use std::path::Path;
 
 /// 4K解像度用の最大サイズ
-const MAX_WIDTH_4K: u32 = 3840;
-const MAX_HEIGHT_4K: u32 = 2160;
+pub const MAX_WIDTH_4K: u32 = 3840;
+pub const MAX_HEIGHT_4K: u32 = 2160;
 
 /// EXIF情報
 #[derive(Debug, Clone, Serialize, Deserialize)]

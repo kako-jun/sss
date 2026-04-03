@@ -1,6 +1,7 @@
 use crate::commands::types::AppState;
 use crate::image_processor::{
     get_exif_info, get_image_dimensions, is_video_file, optimize_image_for_4k, ImageInfo,
+    MAX_HEIGHT_4K, MAX_WIDTH_4K,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -150,7 +151,8 @@ fn get_image_info_internal(
     // キャッシュ対象の判定：
     //   - 4K超の場合は常にキャッシュ
     //   - 4K未満でも apply_rotation=true の場合はキャッシュ経由で回転を適用
-    let needs_cache = !is_video && (width > 3840 || height > 2160 || apply_rotation);
+    let needs_cache =
+        !is_video && (width > MAX_WIDTH_4K || height > MAX_HEIGHT_4K || apply_rotation);
 
     let optimized_path = if needs_cache {
         // キャッシュファイル名を生成（元のファイル名のハッシュを使用）
@@ -235,7 +237,7 @@ fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf, app
             };
 
             // 4Kを超える場合、または回転が必要な場合はキャッシュ作成
-            if width > 3840 || height > 2160 || apply_rotation {
+            if width > MAX_WIDTH_4K || height > MAX_HEIGHT_4K || apply_rotation {
                 let hash = format!(
                     "{:x}",
                     md5::compute(format!("{}:{}", image_path, apply_rotation))
