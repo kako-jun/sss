@@ -287,14 +287,14 @@ function App() {
           <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-3" />
         </div>
 
-        {/* 終了ボタン（左上） */}
+        {/* 終了ボタン（右上） */}
         <button
           onClick={() => exit(0)}
-          className="fixed top-4 left-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
+          className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
           title="ESCで終了"
         >
           <X size={18} />
-          <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
             ESCで終了
           </span>
         </button>
@@ -324,14 +324,14 @@ function App() {
           <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-3" />
         </div>
 
-        {/* 終了ボタン（左上） */}
+        {/* 終了ボタン（右上） */}
         <button
           onClick={() => exit(0)}
-          className="fixed top-4 left-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
+          className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
           title="ESCで終了"
         >
           <X size={18} />
-          <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
             ESCで終了
           </span>
         </button>
@@ -360,14 +360,14 @@ function App() {
       {/* スライドショー */}
       <Slideshow image={currentImage} isLoading={isLoading} />
 
-      {/* 終了ボタン（左上） */}
+      {/* 終了ボタン（右上） */}
       <button
         onClick={() => exit(0)}
-        className="fixed top-4 left-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
+        className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
         title="ESCで終了"
       >
         <X size={18} />
-        <span className="absolute top-full left-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
           ESCで終了
         </span>
       </button>
