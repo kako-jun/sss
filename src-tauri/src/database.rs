@@ -307,6 +307,15 @@ impl Database {
         Ok(())
     }
 
+    /// 除外ルールを削除
+    pub fn remove_ignore_rule(&self, pattern: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM ignore_rules WHERE pattern = ?1",
+            [pattern],
+        )?;
+        Ok(())
+    }
+
     /// 全画像の表示回数を取得（グラフ用、パスでソート）
     pub fn get_all_display_counts(&self) -> Result<Vec<(String, i32)>> {
         let mut stmt = self
