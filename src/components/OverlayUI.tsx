@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import type { ImageInfo } from '../types';
 import { openInExplorer, shareImage, excludeImage } from '../lib/tauri';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { open } from '@tauri-apps/plugin-shell';
 
 interface OverlayUIProps {
@@ -136,6 +136,21 @@ export function OverlayUI({
 
   const formattedDate = image?.exif?.dateTime ? formatDateTime(image.exif.dateTime) : '';
 
+  const tileUrl = useMemo(() => {
+    if (!hasGps || !image?.exif?.gpsLatitude || !image?.exif?.gpsLongitude) return null;
+    const lat = image.exif.gpsLatitude;
+    const lon = image.exif.gpsLongitude;
+    const zoom = 13;
+    const x = Math.floor(((lon + 180) / 360) * Math.pow(2, zoom));
+    const y = Math.floor(
+      ((1 -
+        Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) /
+        2) *
+        Math.pow(2, zoom),
+    );
+    return `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+  }, [hasGps, image?.exif?.gpsLatitude, image?.exif?.gpsLongitude]);
+
   if (!image) return null;
 
   return (
@@ -175,23 +190,10 @@ export function OverlayUI({
                 }}
                 className="relative w-full h-14 bg-black/30 hover:bg-black/50 rounded border border-white/5 overflow-hidden transition-colors group"
               >
+                {/* OpenStreetMap Tile Usage Policy: img タグではカスタム User-Agent を送れないため、
+                    高速に写真をスキップするとレート制限を受ける可能性がある */}
                 <img
-                  src={(() => {
-                    const lat = image.exif!.gpsLatitude!;
-                    const lon = image.exif!.gpsLongitude!;
-                    const zoom = 13;
-                    const x = Math.floor(((lon + 180) / 360) * Math.pow(2, zoom));
-                    const y = Math.floor(
-                      ((1 -
-                        Math.log(
-                          Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180),
-                        ) /
-                          Math.PI) /
-                        2) *
-                        Math.pow(2, zoom),
-                    );
-                    return `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
-                  })()}
+                  src={tileUrl!}
                   alt="Location Map"
                   className="w-full h-full object-cover grayscale opacity-60 group-hover:opacity-80 group-hover:grayscale-0 transition-all"
                 />

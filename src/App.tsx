@@ -25,6 +25,7 @@ function App() {
     total: number;
   } | null>(null);
   const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
+  const [isPausedByUser, setIsPausedByUser] = useState(false); // ユーザーが明示的に一時停止したか
   const [isFullscreen, setIsFullscreen] = useState(true); // フルスクリーン状態（起動時の設定値に合わせた初期値）
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
   const { isIdle, setIsHovering } = useMouseIdle(3000);
@@ -174,19 +175,28 @@ function App() {
   }, [currentImage]);
 
   // オーバーレイホバーと設定画面で自動一時停止/再開
+  // isPlaying を deps に含めない（play/pause が isPlaying を変更するため無限ループになる）
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
+
   useEffect(() => {
-    if (isOverlayHovered || isSettingsOpen) {
+    if (isPausedByUser) {
+      // ユーザーが明示的に一時停止 → 何もしない
+      if (isPlayingRef.current) {
+        pause();
+      }
+    } else if (isOverlayHovered || isSettingsOpen) {
       // オーバーレイにマウスオーバーまたは設定画面表示 → 一時停止
-      if (isPlaying) {
+      if (isPlayingRef.current) {
         pause();
       }
     } else {
       // オーバーレイから離れた かつ 設定画面が閉じている → 自動再開
-      if (!isPlaying && isInitialized) {
+      if (!isPlayingRef.current && isInitialized) {
         play();
       }
     }
-  }, [isOverlayHovered, isSettingsOpen, isPlaying, isInitialized, pause, play]);
+  }, [isOverlayHovered, isSettingsOpen, isPausedByUser, isInitialized, pause, play]);
 
   const handlePrevious = async () => {
     await loadPreviousImage();
@@ -267,7 +277,7 @@ function App() {
 
   const handleTogglePause = () => {
     // タッチデバイス対応：タップで一時停止/再生をトグル
-    setIsOverlayHovered(!isOverlayHovered);
+    setIsPausedByUser(!isPausedByUser);
   };
 
   const handleScanComplete = async () => {

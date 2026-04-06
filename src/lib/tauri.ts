@@ -90,7 +90,7 @@ export async function getSetting(key: string): Promise<string | null> {
 }
 
 /**
- * シェアマーク：画像をPictures/sssフォルダにコピー
+ * ピック：画像をPictures/sssフォルダにコピー
  */
 export async function shareImage(imagePath: string): Promise<string> {
   return await invoke<string>('share_image', { imagePath });
