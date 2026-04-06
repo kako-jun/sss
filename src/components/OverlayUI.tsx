@@ -65,7 +65,7 @@ export function OverlayUI({
     }
   };
 
-  const handleShare = async () => {
+  const handlePick = async () => {
     if (!image) return;
 
     try {
@@ -328,7 +328,7 @@ export function OverlayUI({
           {/* ピックボタン（直接） */}
           <div className="p-1 flex items-center justify-center">
             <button
-              onClick={handleShare}
+              onClick={handlePick}
               className="p-2 rounded transition-colors text-white/30 hover:text-white/60 hover:bg-white/5"
               title="ピック（コピー）"
             >

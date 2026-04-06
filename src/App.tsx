@@ -4,6 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
+import type { TabType } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
 import { useMouseIdle } from './hooks/useMouseIdle';
 import { getPlaylistInfo, getLastDirectoryPath, scanDirectory, getSetting } from './lib/tauri';
@@ -14,9 +15,8 @@ import logoBg from './assets/logo-bg.webp';
 
 function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<
-    'scan' | 'options' | 'exclude' | 'pick' | 'history' | 'stats' | 'info'
-  >('scan');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<TabType>('scan');
+  const [settingsKey, setSettingsKey] = useState(0);
   const [currentPosition, setCurrentPosition] = useState(0);
   const [totalImages, setTotalImages] = useState(0);
   const [canGoBack, setCanGoBack] = useState(false);
@@ -249,17 +249,15 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canGoBack, isSettingsOpen]);
 
-  const handleSettings = () => {
+  const openSettings = (tab: TabType = 'scan') => {
     pause();
-    setSettingsInitialTab('scan');
+    setSettingsInitialTab(tab);
+    setSettingsKey((k) => k + 1);
     setIsSettingsOpen(true);
   };
 
-  const handleOpenPickTab = () => {
-    pause();
-    setSettingsInitialTab('pick');
-    setIsSettingsOpen(true);
-  };
+  const handleSettings = () => openSettings('scan');
+  const handleOpenPickTab = () => openSettings('pick');
 
   const handleToggleWindowMode = async () => {
     try {
@@ -476,7 +474,7 @@ function App() {
 
       {/* 設定画面 */}
       <Settings
-        key={settingsInitialTab}
+        key={settingsKey}
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onScanComplete={handleScanComplete}

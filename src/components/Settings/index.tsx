@@ -20,7 +20,7 @@ interface SettingsProps {
   initialTab?: TabType;
 }
 
-type TabType = 'scan' | 'options' | 'exclude' | 'pick' | 'history' | 'stats' | 'info';
+export type TabType = 'scan' | 'options' | 'exclude' | 'pick' | 'history' | 'stats' | 'info';
 
 export function Settings({
   isOpen,
