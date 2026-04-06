@@ -9,7 +9,7 @@ import { useMouseIdle } from './hooks/useMouseIdle';
 import { getPlaylistInfo, getLastDirectoryPath, scanDirectory, getSetting } from './lib/tauri';
 import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
-import { X, Settings as SettingsIcon } from 'lucide-react';
+import { X, Settings as SettingsIcon, Minimize2, Maximize2 } from 'lucide-react';
 import logoBg from './assets/logo-bg.webp';
 
 function App() {
@@ -415,6 +415,18 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* ウィンドウモード切り替え（右上） */}
+      <button
+        onClick={handleToggleWindowMode}
+        className="fixed top-4 right-24 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/20 hover:text-white/50 transition-colors group"
+        title={isFullscreen ? 'ウィンドウモードに切り替え' : 'フルスクリーンに戻す'}
+      >
+        {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+        <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          {isFullscreen ? 'ウィンドウモード' : 'フルスクリーン'}
+        </span>
+      </button>
 
       {/* 設定ボタン（右上、×ボタンの左隣） */}
       <button

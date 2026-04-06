@@ -176,7 +176,7 @@ export function OverlayUI({
 
       {/* メインバー */}
       <div className="bg-black/50 backdrop-blur-md border-t border-white/5">
-        {/* 4列×2行グリッド */}
+        {/* 上行: 情報（4列） */}
         <div className="grid grid-cols-4 gap-px">
           {/* === 上行: 情報 === */}
 
@@ -252,10 +252,11 @@ export function OverlayUI({
               <span>×{image.displayCount}</span>
             </div>
           </div>
+        </div>
 
-          {/* === 下行: 操作 === */}
-
-          {/* … メニューボタン */}
+        {/* 下行: 操作（5列） */}
+        <div className="grid grid-cols-5 gap-px">
+          {/* … メニューボタン（除外 + ファイルマネージャー） */}
           <div className="p-1 flex items-center justify-center relative">
             <button
               onClick={() => {
@@ -280,13 +281,6 @@ export function OverlayUI({
                   >
                     <FolderOpen size={14} />
                     ファイルマネージャーで開く
-                  </button>
-                  <button
-                    onClick={handleShare}
-                    className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/50 hover:text-white/80 transition-colors flex items-center gap-2"
-                  >
-                    <HandGrab size={14} />
-                    ピック（コピー）
                   </button>
 
                   {/* 除外サブメニュー */}
@@ -322,35 +316,20 @@ export function OverlayUI({
                       </div>
                     )}
                   </div>
-
-                  <div className="border-t border-white/5 my-1" />
-
-                  {/* ウィンドウモード切り替え */}
-                  <button
-                    onClick={() => {
-                      onToggleWindowMode();
-                      setShowMoreMenu(false);
-                    }}
-                    className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/50 hover:text-white/80 transition-colors flex items-center gap-2"
-                  >
-                    {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                    {isFullscreen ? 'ウィンドウモード' : 'フルスクリーン'}
-                  </button>
-
-                  {/* 設定 */}
-                  <button
-                    onClick={() => {
-                      onSettings();
-                      setShowMoreMenu(false);
-                    }}
-                    className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/50 hover:text-white/80 transition-colors flex items-center gap-2"
-                  >
-                    <Settings size={14} />
-                    設定
-                  </button>
                 </div>
               </>
             )}
+          </div>
+
+          {/* ピックボタン（直接） */}
+          <div className="p-1 flex items-center justify-center">
+            <button
+              onClick={handleShare}
+              className="p-2 rounded transition-colors text-white/30 hover:text-white/60 hover:bg-white/5"
+              title="ピック（コピー）"
+            >
+              <HandGrab size={18} />
+            </button>
           </div>
 
           {/* ⏸/▶ ボタン */}
