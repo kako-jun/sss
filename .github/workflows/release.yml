@@ -58,6 +58,6 @@ jobs:
           tagName: ${{ github.event.inputs.version }}
           releaseName: 'sss ${{ github.event.inputs.version }}'
           releaseBody: 'See the CHANGELOG for details.'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
