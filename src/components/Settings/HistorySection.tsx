@@ -57,7 +57,7 @@ export function HistorySection() {
               />
               {/* 表示回数 */}
               <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white/50 text-xs text-center py-0.5 rounded-b">
-                &times;{img.display_count}
+                &times;{img.displayCount}
               </div>
               {/* 除外ボタン */}
               <button

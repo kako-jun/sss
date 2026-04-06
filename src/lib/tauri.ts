@@ -3,7 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import type { ImageInfo, RecentImage, ScanProgress, Stats } from '../types';
 
 /**
- * デフォルトのシェアディレクトリパスを取得
+ * デフォルトのピック先ディレクトリパスを取得
  */
 export async function getDefaultShareDirectory(): Promise<string> {
   return await invoke<string>('get_default_share_directory');

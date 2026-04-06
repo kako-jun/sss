@@ -20,6 +20,7 @@ export function PickSection() {
   }, []);
 
   const handleDelete = async (path: string) => {
+    if (!window.confirm('この写真をピックフォルダから削除しますか？')) return;
     try {
       await deletePickedImage(path);
       setImages((prev) => prev.filter((p) => p !== path));

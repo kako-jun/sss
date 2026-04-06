@@ -7,13 +7,14 @@ use std::process::Command;
 use tauri::State;
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecentImage {
     pub path: String,
     pub display_count: i32,
     pub last_displayed: String,
 }
 
-/// デフォルトのシェアディレクトリパスを取得
+/// デフォルトのピック先ディレクトリパスを取得
 #[tauri::command]
 pub async fn get_default_share_directory() -> Result<String, String> {
     let pictures_dir = if cfg!(windows) {
@@ -23,7 +24,7 @@ pub async fn get_default_share_directory() -> Result<String, String> {
     }
     .map_err(|_| "Failed to get home directory".to_string())?;
 
-    let share_directory = pictures_dir.join("sss");
+    let share_directory = pictures_dir.join("sss-picked");
     Ok(share_directory.to_str().unwrap_or("").to_string())
 }
 
@@ -258,9 +259,10 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
         .map_err(|e| format!("Failed to get ignore rules: {}", e))?;
     let ignore_filter = IgnoreFilter::from_patterns(&patterns);
 
-    // 最近表示した画像を多めに取得（除外フィルタ後に100件になるよう余裕を持つ）
+    // 最近表示した画像を多めに取得（除外フィルタ後に最大100件を返す。
+    // 除外率が高い場合は100件未満になりうる）
     let all_recent = db
-        .get_recent_images(200)
+        .get_recent_images(500)
         .map_err(|e| format!("Failed to get recent images: {}", e))?;
     drop(db);
 
