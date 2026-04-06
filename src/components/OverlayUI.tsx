@@ -8,12 +8,9 @@ import {
   Hash,
   MapPin,
   ExternalLink,
-  Minimize2,
-  Maximize2,
   Pause,
   Play,
   Ellipsis,
-  Settings,
 } from 'lucide-react';
 import type { ImageInfo } from '../types';
 import { openInExplorer, pickImage, excludeImage } from '../lib/tauri';
@@ -26,12 +23,9 @@ interface OverlayUIProps {
   currentPosition: number;
   totalImages: number;
   progress: number; // 0-100のプログレス値
-  isFullscreen: boolean; // フルスクリーン状態
   isPlaying: boolean; // 再生中かどうか
   onPrevious: () => void;
   onNext: () => void;
-  onSettings: () => void;
-  onToggleWindowMode: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onTogglePause: () => void;
@@ -43,12 +37,9 @@ export function OverlayUI({
   currentPosition,
   totalImages,
   progress,
-  isFullscreen,
   isPlaying,
   onPrevious,
   onNext,
-  onSettings,
-  onToggleWindowMode,
   onMouseEnter,
   onMouseLeave,
   onTogglePause,

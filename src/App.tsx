@@ -454,12 +454,9 @@ function App() {
           currentPosition={currentPosition}
           totalImages={totalImages}
           progress={progress}
-          isFullscreen={isFullscreen}
           isPlaying={isPlaying}
           onPrevious={handlePrevious}
           onNext={handleNext}
-          onSettings={handleSettings}
-          onToggleWindowMode={handleToggleWindowMode}
           onMouseEnter={handleOverlayMouseEnter}
           onMouseLeave={handleOverlayMouseLeave}
           onTogglePause={handleTogglePause}
