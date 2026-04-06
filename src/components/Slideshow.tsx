@@ -27,7 +27,7 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
     <div className="w-screen h-screen bg-black overflow-hidden relative">
       {/* 背景ロゴ */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-5" />
+        <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-2" />
       </div>
 
       <AnimatePresence mode="wait">
