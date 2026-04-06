@@ -30,7 +30,7 @@ export function ExcludeRulesSection() {
 
   const handleAdd = async () => {
     const trimmed = newPattern.trim();
-    if (!trimmed) return;
+    if (!trimmed || patterns.includes(trimmed)) return;
 
     try {
       await addIgnorePattern(trimmed);

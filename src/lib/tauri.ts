@@ -97,7 +97,7 @@ export async function shareImage(imagePath: string): Promise<string> {
 }
 
 /**
- * 除外：画像を.sssignoreに追加
+ * 除外：画像をDBの除外ルールに追加
  */
 export async function excludeImage(
   imagePath: string,
