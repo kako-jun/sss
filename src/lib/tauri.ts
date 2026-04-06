@@ -114,6 +114,27 @@ export async function getDisplayStats(): Promise<Array<[string, number]>> {
 }
 
 /**
+ * 除外ルール一覧を取得
+ */
+export async function getIgnorePatterns(): Promise<string[]> {
+  return await invoke<string[]>('get_ignore_patterns');
+}
+
+/**
+ * 除外ルールを削除
+ */
+export async function removeIgnorePattern(pattern: string): Promise<void> {
+  await invoke('remove_ignore_pattern', { pattern });
+}
+
+/**
+ * 除外ルールを手動追加
+ */
+export async function addIgnorePattern(pattern: string): Promise<void> {
+  await invoke('add_ignore_pattern', { pattern });
+}
+
+/**
  * すべての設定とデータを初期化（データベースとキャッシュを削除）
  */
 export async function resetAllData(): Promise<void> {
