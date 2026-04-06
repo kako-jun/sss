@@ -5,6 +5,7 @@ import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import { Settings } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
+import { useMouseIdle } from './hooks/useMouseIdle';
 import { getPlaylistInfo, getLastDirectoryPath, scanDirectory, getSetting } from './lib/tauri';
 import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
@@ -26,6 +27,7 @@ function App() {
   const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
   const [isFullscreen, setIsFullscreen] = useState(true); // フルスクリーン状態（起動時の設定値に合わせた初期値）
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
+  const { isIdle, setIsHovering } = useMouseIdle(3000);
 
   const {
     currentImage,
@@ -255,10 +257,12 @@ function App() {
 
   const handleOverlayMouseEnter = () => {
     setIsOverlayHovered(true);
+    setIsHovering(true);
   };
 
   const handleOverlayMouseLeave = () => {
     setIsOverlayHovered(false);
+    setIsHovering(false);
   };
 
   const handleTogglePause = () => {
@@ -402,22 +406,43 @@ function App() {
         </div>
       )}
 
-      {/* オーバーレイUI（常時表示） */}
-      <OverlayUI
-        image={currentImage}
-        canGoBack={canGoBack}
-        currentPosition={currentPosition}
-        totalImages={totalImages}
-        progress={progress}
-        isFullscreen={isFullscreen}
-        onPrevious={handlePrevious}
-        onNext={handleNext}
-        onSettings={handleSettings}
-        onToggleWindowMode={handleToggleWindowMode}
-        onMouseEnter={handleOverlayMouseEnter}
-        onMouseLeave={handleOverlayMouseLeave}
-        onTogglePause={handleTogglePause}
-      />
+      {/* 設定ボタン（右上、×ボタンの左隣） */}
+      <button
+        onClick={handleSettings}
+        className="fixed top-4 right-14 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/20 hover:text-white/50 transition-colors group"
+        title="設定"
+      >
+        <SettingsIcon size={16} />
+        <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          設定
+        </span>
+      </button>
+
+      {/* オーバーレイUI（フェードイン/アウト） */}
+      <div
+        className="transition-opacity duration-300"
+        style={{
+          opacity: isIdle ? 0 : 1,
+          pointerEvents: isIdle ? 'none' : 'auto',
+        }}
+      >
+        <OverlayUI
+          image={currentImage}
+          canGoBack={canGoBack}
+          currentPosition={currentPosition}
+          totalImages={totalImages}
+          progress={progress}
+          isFullscreen={isFullscreen}
+          isPlaying={isPlaying}
+          onPrevious={handlePrevious}
+          onNext={handleNext}
+          onSettings={handleSettings}
+          onToggleWindowMode={handleToggleWindowMode}
+          onMouseEnter={handleOverlayMouseEnter}
+          onMouseLeave={handleOverlayMouseLeave}
+          onTogglePause={handleTogglePause}
+        />
+      </div>
 
       {/* 設定画面 */}
       <Settings
