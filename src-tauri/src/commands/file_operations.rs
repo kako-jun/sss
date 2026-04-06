@@ -144,6 +144,36 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
     Ok(final_dest_path.to_string_lossy().to_string())
 }
 
+/// 除外ルール一覧を取得
+#[tauri::command]
+pub async fn get_ignore_patterns(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    db.get_ignore_rules()
+        .map_err(|e| format!("Failed to get ignore rules: {}", e))
+}
+
+/// 除外ルールを削除
+#[tauri::command]
+pub async fn remove_ignore_pattern(
+    pattern: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    db.remove_ignore_rule(&pattern)
+        .map_err(|e| format!("Failed to remove ignore rule: {}", e))
+}
+
+/// 除外ルールを手動追加
+#[tauri::command]
+pub async fn add_ignore_pattern(
+    pattern: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    db.add_ignore_rule(&pattern)
+        .map_err(|e| format!("Failed to add ignore rule: {}", e))
+}
+
 /// 除外機能：画像をDBのignore_rulesに追加
 #[tauri::command]
 pub async fn exclude_image(

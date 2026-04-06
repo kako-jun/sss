@@ -97,7 +97,7 @@ export async function shareImage(imagePath: string): Promise<string> {
 }
 
 /**
- * 除外：画像を.sssignoreに追加
+ * 除外：画像をDBの除外ルールに追加
  */
 export async function excludeImage(
   imagePath: string,
@@ -111,6 +111,27 @@ export async function excludeImage(
  */
 export async function getDisplayStats(): Promise<Array<[string, number]>> {
   return await invoke<Array<[string, number]>>('get_display_stats');
+}
+
+/**
+ * 除外ルール一覧を取得
+ */
+export async function getIgnorePatterns(): Promise<string[]> {
+  return await invoke<string[]>('get_ignore_patterns');
+}
+
+/**
+ * 除外ルールを削除
+ */
+export async function removeIgnorePattern(pattern: string): Promise<void> {
+  await invoke('remove_ignore_pattern', { pattern });
+}
+
+/**
+ * 除外ルールを手動追加
+ */
+export async function addIgnorePattern(pattern: string): Promise<void> {
+  await invoke('add_ignore_pattern', { pattern });
 }
 
 /**

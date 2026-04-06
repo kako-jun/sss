@@ -5,6 +5,7 @@ import { ScanSection } from './ScanSection';
 import { IntervalSection } from './IntervalSection';
 import { SettingsSection } from './SettingsSection';
 import { ShareDirectorySection } from './ShareDirectorySection';
+import { ExcludeRulesSection } from './ExcludeRulesSection';
 import { GraphSection } from './GraphSection';
 import { InfoSection } from './InfoSection';
 import { MODAL_ANIMATION_DURATION } from '../../constants';
@@ -16,7 +17,7 @@ interface SettingsProps {
   onIntervalChange?: (interval: number) => void;
 }
 
-type TabType = 'scan' | 'options' | 'stats' | 'info';
+type TabType = 'scan' | 'options' | 'exclude' | 'stats' | 'info';
 
 export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>('scan');
@@ -71,6 +72,16 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
             オプション
           </button>
           <button
+            onClick={() => setActiveTab('exclude')}
+            className={`px-4 py-2 text-sm transition-colors ${
+              activeTab === 'exclude'
+                ? 'text-white/80 border-b border-white/50'
+                : 'text-white/30 hover:text-white/50'
+            }`}
+          >
+            除外ルール
+          </button>
+          <button
             onClick={() => {
               setActiveTab('stats');
               setStatsKey((prev) => prev + 1); // タブを開くたびにkeyを変更して再マウント
@@ -103,6 +114,11 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
               <IntervalSection onIntervalChange={onIntervalChange} />
               <SettingsSection />
               <ShareDirectorySection />
+            </div>
+          )}
+          {activeTab === 'exclude' && (
+            <div className="space-y-8">
+              <ExcludeRulesSection />
             </div>
           )}
           {activeTab === 'stats' && (
