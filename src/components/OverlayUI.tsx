@@ -26,6 +26,7 @@ interface OverlayUIProps {
   isPlaying: boolean; // 再生中かどうか
   onPrevious: () => void;
   onNext: () => void;
+  onOpenPickTab: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onTogglePause: () => void;
@@ -40,6 +41,7 @@ export function OverlayUI({
   isPlaying,
   onPrevious,
   onNext,
+  onOpenPickTab,
   onMouseEnter,
   onMouseLeave,
   onTogglePause,
@@ -63,7 +65,7 @@ export function OverlayUI({
     }
   };
 
-  const handleShare = async () => {
+  const handlePick = async () => {
     if (!image) return;
 
     try {
@@ -274,6 +276,17 @@ export function OverlayUI({
                     ファイルマネージャーで開く
                   </button>
 
+                  <button
+                    onClick={() => {
+                      onOpenPickTab();
+                      setShowMoreMenu(false);
+                    }}
+                    className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/50 hover:text-white/80 transition-colors flex items-center gap-2"
+                  >
+                    <HandGrab size={14} />
+                    ピックを見る
+                  </button>
+
                   {/* 除外サブメニュー */}
                   <div className="relative">
                     <button
@@ -315,22 +328,11 @@ export function OverlayUI({
           {/* ピックボタン（直接） */}
           <div className="p-1 flex items-center justify-center">
             <button
-              onClick={handleShare}
+              onClick={handlePick}
               className="p-2 rounded transition-colors text-white/30 hover:text-white/60 hover:bg-white/5"
               title="ピック（コピー）"
             >
               <HandGrab size={18} />
-            </button>
-          </div>
-
-          {/* ⏸/▶ ボタン */}
-          <div className="p-1 flex items-center justify-center">
-            <button
-              onClick={onTogglePause}
-              className="p-2 rounded transition-colors text-white/40 hover:text-white/70 hover:bg-white/5"
-              title={isPlaying ? '一時停止' : '再生'}
-            >
-              {isPlaying ? <Pause size={18} /> : <Play size={18} />}
             </button>
           </div>
 
@@ -347,6 +349,17 @@ export function OverlayUI({
               title="前へ (←)"
             >
               <ChevronLeft size={18} />
+            </button>
+          </div>
+
+          {/* ⏸/▶ ボタン */}
+          <div className="p-1 flex items-center justify-center">
+            <button
+              onClick={onTogglePause}
+              className="p-2 rounded transition-colors text-white/40 hover:text-white/70 hover:bg-white/5"
+              title={isPlaying ? '一時停止' : '再生'}
+            >
+              {isPlaying ? <Pause size={18} /> : <Play size={18} />}
             </button>
           </div>
 

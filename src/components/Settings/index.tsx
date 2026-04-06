@@ -17,12 +17,19 @@ interface SettingsProps {
   onClose: () => void;
   onScanComplete: () => void;
   onIntervalChange?: (interval: number) => void;
+  initialTab?: TabType;
 }
 
-type TabType = 'scan' | 'options' | 'exclude' | 'pick' | 'history' | 'stats' | 'info';
+export type TabType = 'scan' | 'options' | 'exclude' | 'pick' | 'history' | 'stats' | 'info';
 
-export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('scan');
+export function Settings({
+  isOpen,
+  onClose,
+  onScanComplete,
+  onIntervalChange,
+  initialTab,
+}: SettingsProps) {
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'scan');
   const [statsKey, setStatsKey] = useState(0); // 統計グラフの強制再マウント用
 
   if (!isOpen) return null;
