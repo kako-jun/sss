@@ -78,13 +78,17 @@ fn main() {
             commands::system::reset_all_data,
             commands::settings::save_setting,
             commands::settings::get_setting,
-            commands::file_operations::share_image,
+            commands::file_operations::pick_image,
             commands::file_operations::exclude_image,
             commands::stats::get_display_stats,
             commands::file_operations::get_default_share_directory,
             commands::file_operations::get_ignore_patterns,
             commands::file_operations::remove_ignore_pattern,
             commands::file_operations::add_ignore_pattern,
+            commands::file_operations::get_recent_images,
+            commands::file_operations::get_picked_images,
+            commands::file_operations::delete_picked_image,
+            commands::file_operations::reset_all_display_counts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

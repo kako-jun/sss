@@ -125,6 +125,10 @@ pub async fn scan_directory(
     )
     .map_err(|e| format!("Database error: {}", e))?;
 
+    // スキャン履歴の上限管理（100件超を削除）
+    db.trim_scan_history(100)
+        .map_err(|e| format!("Database error: {}", e))?;
+
     drop(db);
 
     // プレイリストを作成または更新
