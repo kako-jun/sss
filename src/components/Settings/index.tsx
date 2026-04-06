@@ -95,8 +95,8 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
           </button>
         </div>
 
-        {/* タブコンテンツ */}
-        <div className="flex-1 overflow-y-auto">
+        {/* タブコンテンツ（高さ固定でタブ切替時のガタつきを防止） */}
+        <div className="flex-1 overflow-y-auto min-h-[50vh]">
           {activeTab === 'scan' && <ScanSection onScanComplete={onScanComplete} />}
           {activeTab === 'options' && (
             <div className="space-y-8">
