@@ -256,11 +256,18 @@ CREATE TABLE scan_history (
   9. `exit_app`: アプリケーション終了
   10. `save_setting`: 設定を保存
   11. `get_setting`: 設定を取得
-  12. `share_image`: 画像をPictures/sssフォルダにコピー
-  13. `exclude_image`: 画像を.sssignoreに追加（日付/ファイル/フォルダ除外）
+  12. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー
+  13. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）
   14. `get_display_stats`: 統計データ取得（グラフ用、全画像の表示回数）
-  15. `get_default_share_directory`: シェア先デフォルトパス取得
+  15. `get_default_share_directory`: ピック先デフォルトパス取得
   16. `reset_all_data`: 全データリセット（DB削除・キャッシュ削除）
+  17. `get_ignore_patterns`: 除外ルール一覧を取得
+  18. `remove_ignore_pattern`: 除外ルールを削除
+  19. `add_ignore_pattern`: 除外ルールを手動追加
+  20. `get_recent_images`: 最近表示した画像一覧（最新100件、除外済み除く）
+  21. `get_picked_images`: ピック済み画像一覧
+  22. `delete_picked_image`: ピック済み画像を削除
+  23. `reset_all_display_counts`: 全画像の表示回数をリセット
 
 ## Reactコンポーネント構成
 
@@ -378,10 +385,10 @@ CREATE TABLE scan_history (
   - GPS情報がある場合のみ表示
   - Google Maps API または Leaflet を使用
 
-### 📤 シェアマーク機能（SNS用候補選別）
+### 📤 ピック機能（SNS用候補選別）
 
-- [x] **ファイルコピー機能**: オーバーレイUIに「シェア」ボタンを追加し、クリックでファイルをコピー
-- [x] **デフォルトコピー先**: `Pictures/sss`フォルダ（Windows: `%USERPROFILE%\Pictures\sss`、Linux/macOS: `~/Pictures/sss`）
+- [x] **ファイルコピー機能**: オーバーレイの…メニューからピック（コピー）
+- [x] **デフォルトコピー先**: `Pictures/sss-picked`フォルダ
 - [x] **フォルダ自動作成**: コピー先フォルダが存在しない場合は自動作成
 - [x] **視覚的フィードバック**: コピー完了時にステータスメッセージを表示
 - [x] **設定画面でカスタマイズ**: コピー先フォルダパスを変更可能
