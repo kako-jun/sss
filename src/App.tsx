@@ -337,7 +337,7 @@ function App() {
               </>
             )}
             <button
-              onClick={() => setIsSettingsOpen(true)}
+              onClick={handleSettings}
               className="px-5 py-2 bg-white/8 hover:bg-white/15 border border-white/10 rounded text-white/60 hover:text-white/80 transition-colors text-sm"
             >
               {error === 'No more images' ? 'フォルダを選択' : '設定を開く'}
