@@ -6,6 +6,8 @@ import { IntervalSection } from './IntervalSection';
 import { SettingsSection } from './SettingsSection';
 import { ShareDirectorySection } from './ShareDirectorySection';
 import { ExcludeRulesSection } from './ExcludeRulesSection';
+import { PickSection } from './PickSection';
+import { HistorySection } from './HistorySection';
 import { GraphSection } from './GraphSection';
 import { InfoSection } from './InfoSection';
 import { MODAL_ANIMATION_DURATION } from '../../constants';
@@ -17,7 +19,7 @@ interface SettingsProps {
   onIntervalChange?: (interval: number) => void;
 }
 
-type TabType = 'scan' | 'options' | 'exclude' | 'stats' | 'info';
+type TabType = 'scan' | 'options' | 'exclude' | 'pick' | 'history' | 'stats' | 'info';
 
 export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>('scan');
@@ -82,6 +84,26 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
             除外ルール
           </button>
           <button
+            onClick={() => setActiveTab('pick')}
+            className={`px-4 py-2 text-sm transition-colors ${
+              activeTab === 'pick'
+                ? 'text-white/80 border-b border-white/50'
+                : 'text-white/30 hover:text-white/50'
+            }`}
+          >
+            ピック
+          </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`px-4 py-2 text-sm transition-colors ${
+              activeTab === 'history'
+                ? 'text-white/80 border-b border-white/50'
+                : 'text-white/30 hover:text-white/50'
+            }`}
+          >
+            履歴
+          </button>
+          <button
             onClick={() => {
               setActiveTab('stats');
               setStatsKey((prev) => prev + 1); // タブを開くたびにkeyを変更して再マウント
@@ -119,6 +141,16 @@ export function Settings({ isOpen, onClose, onScanComplete, onIntervalChange }: 
           {activeTab === 'exclude' && (
             <div className="space-y-8">
               <ExcludeRulesSection />
+            </div>
+          )}
+          {activeTab === 'pick' && (
+            <div className="space-y-8">
+              <PickSection />
+            </div>
+          )}
+          {activeTab === 'history' && (
+            <div className="space-y-8">
+              <HistorySection />
             </div>
           )}
           {activeTab === 'stats' && (

@@ -33,3 +33,10 @@ export interface Stats {
   totalImages: number;
   displayedImages: number;
 }
+
+// 最近表示した画像（Rust側はsnake_case）
+export interface RecentImage {
+  path: string;
+  display_count: number;
+  last_displayed: string;
+}

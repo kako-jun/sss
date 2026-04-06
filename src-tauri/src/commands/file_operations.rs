@@ -173,10 +173,7 @@ pub async fn remove_ignore_pattern(
 
 /// 除外ルールを手動追加
 #[tauri::command]
-pub async fn add_ignore_pattern(
-    pattern: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn add_ignore_pattern(pattern: String, state: State<'_, AppState>) -> Result<(), String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     db.add_ignore_rule(&pattern)
         .map_err(|e| format!("Failed to add ignore rule: {}", e))

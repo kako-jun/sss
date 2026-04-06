@@ -309,10 +309,8 @@ impl Database {
 
     /// 除外ルールを削除
     pub fn remove_ignore_rule(&self, pattern: &str) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM ignore_rules WHERE pattern = ?1",
-            [pattern],
-        )?;
+        self.conn
+            .execute("DELETE FROM ignore_rules WHERE pattern = ?1", [pattern])?;
         Ok(())
     }
 
@@ -324,9 +322,7 @@ impl Database {
              ORDER BY last_displayed DESC
              LIMIT ?1",
         )?;
-        let rows = stmt.query_map([limit], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?;
+        let rows = stmt.query_map([limit], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
 
         let mut result = Vec::new();
         for row in rows {

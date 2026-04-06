@@ -16,7 +16,7 @@ import {
   Settings,
 } from 'lucide-react';
 import type { ImageInfo } from '../types';
-import { openInExplorer, shareImage, excludeImage } from '../lib/tauri';
+import { openInExplorer, pickImage, excludeImage } from '../lib/tauri';
 import { useState, useMemo } from 'react';
 import { open } from '@tauri-apps/plugin-shell';
 
@@ -76,7 +76,7 @@ export function OverlayUI({
     if (!image) return;
 
     try {
-      const destPath = await shareImage(image.path);
+      const destPath = await pickImage(image.path);
       setStatusMessage(`コピー完了: ${destPath}`);
       setTimeout(() => setStatusMessage(''), 3000);
     } catch (err) {
