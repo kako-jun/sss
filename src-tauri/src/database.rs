@@ -309,9 +309,35 @@ impl Database {
 
     /// 除外ルールを削除
     pub fn remove_ignore_rule(&self, pattern: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM ignore_rules WHERE pattern = ?1", [pattern])?;
+        Ok(())
+    }
+
+    /// 最近表示した画像一覧を取得（last_displayed 降順、limit件）
+    pub fn get_recent_images(&self, limit: i32) -> Result<Vec<(String, i32, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, display_count, last_displayed FROM image_stats
+             WHERE last_displayed IS NOT NULL
+             ORDER BY last_displayed DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// スキャン履歴の上限管理（max_entries件を超える古いレコードを削除）
+    pub fn trim_scan_history(&self, max_entries: i32) -> Result<()> {
         self.conn.execute(
-            "DELETE FROM ignore_rules WHERE pattern = ?1",
-            [pattern],
+            "DELETE FROM scan_history WHERE id NOT IN (
+                 SELECT id FROM scan_history ORDER BY scanned_at DESC LIMIT ?1
+             )",
+            [max_entries],
         )?;
         Ok(())
     }

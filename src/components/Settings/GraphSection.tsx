@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { getDisplayStats, getStats } from '../../lib/tauri';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { getDisplayStats, getStats, resetAllDisplayCounts } from '../../lib/tauri';
 import type { Stats } from '../../types';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
@@ -8,26 +8,40 @@ export function GraphSection() {
   const [displayStats, setDisplayStats] = useState<Array<[string, number]>>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isResetting, setIsResetting] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
 
-  useEffect(() => {
-    // タブが表示されるたびにデータを再読み込み（keyによる再マウント）
-    const loadStats = async () => {
-      setIsLoading(true);
-      try {
-        const [graphStats, summaryStats] = await Promise.all([getDisplayStats(), getStats()]);
-        setDisplayStats(graphStats);
-        setStats(summaryStats);
-      } catch (err) {
-        console.error('Failed to load display stats:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadStats();
+  const loadStats = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [graphStats, summaryStats] = await Promise.all([getDisplayStats(), getStats()]);
+      setDisplayStats(graphStats);
+      setStats(summaryStats);
+    } catch (err) {
+      console.error('Failed to load display stats:', err);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
+
+  const handleReset = async () => {
+    if (!window.confirm('すべての画像の表示回数をリセットしますか？')) return;
+
+    setIsResetting(true);
+    try {
+      await resetAllDisplayCounts();
+      await loadStats();
+    } catch (err) {
+      console.error('Failed to reset display counts:', err);
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   useEffect(() => {
     if (!chartRef.current || displayStats.length === 0 || isLoading) {
@@ -168,6 +182,14 @@ export function GraphSection() {
           完全平等ランダムアルゴリズムが正しく動作していれば、全てのファイルが均等に表示されます
         </div>
       </div>
+
+      <button
+        onClick={handleReset}
+        disabled={isResetting}
+        className="text-sm text-red-400/60 hover:text-red-400/80 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        {isResetting ? 'リセット中...' : '表示回数をリセット'}
+      </button>
     </div>
   );
 }

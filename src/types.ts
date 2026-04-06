@@ -33,3 +33,10 @@ export interface Stats {
   totalImages: number;
   displayedImages: number;
 }
+
+// 最近表示した画像
+export interface RecentImage {
+  path: string;
+  displayCount: number;
+  lastDisplayed: string;
+}

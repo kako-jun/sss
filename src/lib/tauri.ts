@@ -1,9 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { ImageInfo, ScanProgress, Stats } from '../types';
+import type { ImageInfo, RecentImage, ScanProgress, Stats } from '../types';
 
 /**
- * デフォルトのシェアディレクトリパスを取得
+ * デフォルトのピック先ディレクトリパスを取得
  */
 export async function getDefaultShareDirectory(): Promise<string> {
   return await invoke<string>('get_default_share_directory');
@@ -90,10 +90,10 @@ export async function getSetting(key: string): Promise<string | null> {
 }
 
 /**
- * ピック：画像をPictures/sssフォルダにコピー
+ * ピック：画像をPictures/sss-pickedフォルダにコピー
  */
-export async function shareImage(imagePath: string): Promise<string> {
-  return await invoke<string>('share_image', { imagePath });
+export async function pickImage(imagePath: string): Promise<string> {
+  return await invoke<string>('pick_image', { imagePath });
 }
 
 /**
@@ -139,4 +139,32 @@ export async function addIgnorePattern(pattern: string): Promise<void> {
  */
 export async function resetAllData(): Promise<void> {
   return await invoke<void>('reset_all_data');
+}
+
+/**
+ * 最近表示した画像一覧を取得（最新100件）
+ */
+export async function getRecentImages(): Promise<RecentImage[]> {
+  return await invoke<RecentImage[]>('get_recent_images');
+}
+
+/**
+ * ピック済み画像一覧を取得
+ */
+export async function getPickedImages(): Promise<string[]> {
+  return await invoke<string[]>('get_picked_images');
+}
+
+/**
+ * ピック済み画像を削除
+ */
+export async function deletePickedImage(imagePath: string): Promise<void> {
+  await invoke('delete_picked_image', { imagePath });
+}
+
+/**
+ * 全画像の表示回数をリセット
+ */
+export async function resetAllDisplayCounts(): Promise<void> {
+  await invoke('reset_all_display_counts');
 }

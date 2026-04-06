@@ -1,11 +1,20 @@
 use crate::commands::types::AppState;
+use crate::ignore::IgnoreFilter;
 use crate::image_processor::get_exif_info;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::State;
 
-/// デフォルトのシェアディレクトリパスを取得
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentImage {
+    pub path: String,
+    pub display_count: i32,
+    pub last_displayed: String,
+}
+
+/// デフォルトのピック先ディレクトリパスを取得
 #[tauri::command]
 pub async fn get_default_share_directory() -> Result<String, String> {
     let pictures_dir = if cfg!(windows) {
@@ -15,7 +24,7 @@ pub async fn get_default_share_directory() -> Result<String, String> {
     }
     .map_err(|_| "Failed to get home directory".to_string())?;
 
-    let share_directory = pictures_dir.join("sss");
+    let share_directory = pictures_dir.join("sss-picked");
     Ok(share_directory.to_str().unwrap_or("").to_string())
 }
 
@@ -84,9 +93,9 @@ pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// シェアマーク機能：画像をPictures/sssフォルダにコピー
+/// ピック機能：画像をPictures/sss-pickedフォルダにコピー
 #[tauri::command]
-pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn pick_image(image_path: String, state: State<'_, AppState>) -> Result<String, String> {
     let source_path = Path::new(&image_path);
 
     if !source_path.exists() {
@@ -101,7 +110,7 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
     {
         Some(path) => PathBuf::from(path),
         None => {
-            // デフォルト: Pictures/sss
+            // デフォルト: Pictures/sss-picked
             let pictures_dir = if cfg!(windows) {
                 std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
             } else {
@@ -109,7 +118,7 @@ pub async fn share_image(image_path: String, state: State<'_, AppState>) -> Resu
             }
             .map_err(|_| "Failed to get home directory".to_string())?;
 
-            pictures_dir.join("sss")
+            pictures_dir.join("sss-picked")
         }
     };
     drop(db);
@@ -165,10 +174,7 @@ pub async fn remove_ignore_pattern(
 
 /// 除外ルールを手動追加
 #[tauri::command]
-pub async fn add_ignore_pattern(
-    pattern: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn add_ignore_pattern(pattern: String, state: State<'_, AppState>) -> Result<(), String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     db.add_ignore_rule(&pattern)
         .map_err(|e| format!("Failed to add ignore rule: {}", e))
@@ -240,4 +246,129 @@ pub async fn exclude_image(
             pattern
         ))
     }
+}
+
+/// 最近表示した画像一覧を取得（最新100件、除外済み除く）
+#[tauri::command]
+pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentImage>, String> {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+
+    // 除外パターンを取得してフィルタを構築
+    let patterns = db
+        .get_ignore_rules()
+        .map_err(|e| format!("Failed to get ignore rules: {}", e))?;
+    let ignore_filter = IgnoreFilter::from_patterns(&patterns);
+
+    // 最近表示した画像を多めに取得（除外フィルタ後に最大100件を返す。
+    // 除外率が高い場合は100件未満になりうる）
+    let all_recent = db
+        .get_recent_images(500)
+        .map_err(|e| format!("Failed to get recent images: {}", e))?;
+    drop(db);
+
+    // 除外パターンにマッチしないものだけ返す（最大100件）
+    let filtered: Vec<RecentImage> = all_recent
+        .into_iter()
+        .filter(|(path, _, _)| !ignore_filter.is_ignored(Path::new(path)))
+        .take(100)
+        .map(|(path, display_count, last_displayed)| RecentImage {
+            path,
+            display_count,
+            last_displayed,
+        })
+        .collect();
+
+    Ok(filtered)
+}
+
+/// ピック済みフォルダのパスを取得するヘルパー
+fn get_picked_directory(db: &crate::database::Database) -> Result<PathBuf, String> {
+    match db
+        .get_setting("share_directory_path")
+        .map_err(|e| e.to_string())?
+    {
+        Some(path) => Ok(PathBuf::from(path)),
+        None => {
+            let pictures_dir = if cfg!(windows) {
+                std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
+            } else {
+                std::env::var("HOME").map(|p| PathBuf::from(p).join("Pictures"))
+            }
+            .map_err(|_| "Failed to get home directory".to_string())?;
+
+            Ok(pictures_dir.join("sss-picked"))
+        }
+    }
+}
+
+/// ピック済み画像一覧を取得（sss-pickedフォルダをスキャン）
+#[tauri::command]
+pub async fn get_picked_images(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    let picked_dir = get_picked_directory(&db)?;
+    drop(db);
+
+    if !picked_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let image_extensions = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif"];
+
+    let mut images: Vec<String> = Vec::new();
+    let entries =
+        fs::read_dir(&picked_dir).map_err(|e| format!("Failed to read directory: {}", e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if image_extensions
+                    .iter()
+                    .any(|e| ext.to_ascii_lowercase() == *e)
+                {
+                    images.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    images.sort();
+    Ok(images)
+}
+
+/// ピック済み画像を削除
+#[tauri::command]
+pub async fn delete_picked_image(
+    image_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    let picked_dir = get_picked_directory(&db)?;
+    drop(db);
+
+    let path = Path::new(&image_path);
+
+    // 安全チェック: sss-picked フォルダ内のファイルのみ削除可能
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve path: {}", e))?;
+    let canonical_dir = picked_dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve picked directory: {}", e))?;
+
+    if !canonical_path.starts_with(&canonical_dir) {
+        return Err("Cannot delete files outside the picked directory".to_string());
+    }
+
+    fs::remove_file(path).map_err(|e| format!("Failed to delete file: {}", e))?;
+    Ok(())
+}
+
+/// 全画像の表示回数をリセット
+#[tauri::command]
+pub async fn reset_all_display_counts(state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    db.reset_all_display_counts()
+        .map_err(|e| format!("Failed to reset display counts: {}", e))
 }

@@ -44,7 +44,7 @@ export function ShareDirectorySection() {
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        シェア先ディレクトリ
+        ピック先ディレクトリ
       </h3>
 
       <div className="flex gap-2">
