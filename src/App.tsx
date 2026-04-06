@@ -14,6 +14,9 @@ import logoBg from './assets/logo-bg.webp';
 
 function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<
+    'scan' | 'options' | 'exclude' | 'pick' | 'history' | 'stats' | 'info'
+  >('scan');
   const [currentPosition, setCurrentPosition] = useState(0);
   const [totalImages, setTotalImages] = useState(0);
   const [canGoBack, setCanGoBack] = useState(false);
@@ -248,6 +251,13 @@ function App() {
 
   const handleSettings = () => {
     pause();
+    setSettingsInitialTab('scan');
+    setIsSettingsOpen(true);
+  };
+
+  const handleOpenPickTab = () => {
+    pause();
+    setSettingsInitialTab('pick');
     setIsSettingsOpen(true);
   };
 
@@ -457,6 +467,7 @@ function App() {
           isPlaying={isPlaying}
           onPrevious={handlePrevious}
           onNext={handleNext}
+          onOpenPickTab={handleOpenPickTab}
           onMouseEnter={handleOverlayMouseEnter}
           onMouseLeave={handleOverlayMouseLeave}
           onTogglePause={handleTogglePause}
@@ -465,10 +476,12 @@ function App() {
 
       {/* 設定画面 */}
       <Settings
+        key={settingsInitialTab}
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onScanComplete={handleScanComplete}
         onIntervalChange={handleIntervalChange}
+        initialTab={settingsInitialTab}
       />
     </div>
   );
