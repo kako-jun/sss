@@ -301,13 +301,24 @@ function App() {
 
         <div className="w-screen h-screen flex items-center justify-center relative z-10">
           <div className="text-white/70 text-lg text-center">
-            <div className="mb-4">エラーが発生しました</div>
-            <div className="text-red-400/80 mb-6 text-sm">{error}</div>
+            {error === 'No more images' ? (
+              <>
+                <div className="text-white/60 text-xl mb-2">ようこそ SSS へ</div>
+                <div className="text-white/30 text-sm mb-6">
+                  写真フォルダを選択してスライドショーを始めましょう
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mb-4">エラーが発生しました</div>
+                <div className="text-red-400/80 mb-6 text-sm">{error}</div>
+              </>
+            )}
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="px-5 py-2 bg-white/8 hover:bg-white/15 border border-white/10 rounded text-white/60 hover:text-white/80 transition-colors text-sm"
             >
-              設定を開く
+              {error === 'No more images' ? 'フォルダを選択' : '設定を開く'}
             </button>
           </div>
         </div>
@@ -372,17 +383,20 @@ function App() {
         </span>
       </button>
 
-      {/* 画像がない場合の案内 */}
+      {/* 画像がない場合のウェルカム画面 */}
       {!currentImage && !isLoading && !isSettingsOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-40">
           <div className="text-center">
-            <div className="text-white/50 text-lg mb-5">画像が読み込まれていません</div>
+            <div className="text-white/60 text-xl mb-2">ようこそ SSS へ</div>
+            <div className="text-white/30 text-sm mb-6">
+              写真フォルダを選択してスライドショーを始めましょう
+            </div>
             <button
               onClick={handleSettings}
               className="flex items-center gap-2 px-5 py-2 bg-white/8 hover:bg-white/15 border border-white/10 text-white/50 hover:text-white/80 rounded transition-colors mx-auto text-sm"
             >
               <SettingsIcon size={16} />
-              設定を開く
+              フォルダを選択
             </button>
           </div>
         </div>
