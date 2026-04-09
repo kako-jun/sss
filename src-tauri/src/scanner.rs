@@ -9,8 +9,9 @@ use walkdir::WalkDir;
 /// 画像ファイルの拡張子
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif"];
 
-/// 動画ファイルの拡張子
-const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "avi", "mkv", "webm", "flv", "wmv", "m4v"];
+/// 動画ファイルの拡張子（HTMLのvideoタグでネイティブ再生可能な形式のみ）
+/// avi/mkv/flv/wmv等の旧フォーマットはffmpeg同梱後に対応予定
+const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "ogg", "ogv", "m4v"];
 
 /// ファイルメタデータ
 #[derive(Debug, Clone)]
@@ -224,9 +225,12 @@ mod tests {
 
         assert!(scanner.is_video_file(Path::new("test.mp4")));
         assert!(scanner.is_video_file(Path::new("test.MP4")));
-        assert!(scanner.is_video_file(Path::new("test.mov")));
-        assert!(scanner.is_video_file(Path::new("test.mkv")));
         assert!(scanner.is_video_file(Path::new("test.webm")));
+        assert!(scanner.is_video_file(Path::new("test.ogg")));
+        assert!(scanner.is_video_file(Path::new("test.ogv")));
+        assert!(scanner.is_video_file(Path::new("test.m4v")));
+        assert!(!scanner.is_video_file(Path::new("test.avi")));
+        assert!(!scanner.is_video_file(Path::new("test.mkv")));
         assert!(!scanner.is_video_file(Path::new("test.jpg")));
         assert!(!scanner.is_video_file(Path::new("test.txt")));
     }
@@ -240,7 +244,7 @@ mod tests {
         assert!(scanner.is_media_file(Path::new("test.png")));
         // 動画もメディア
         assert!(scanner.is_media_file(Path::new("test.mp4")));
-        assert!(scanner.is_media_file(Path::new("test.mov")));
+        assert!(scanner.is_media_file(Path::new("test.webm")));
         // それ以外は非メディア
         assert!(!scanner.is_media_file(Path::new("test.txt")));
     }
