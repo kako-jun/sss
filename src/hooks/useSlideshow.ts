@@ -76,10 +76,25 @@ export function useSlideshow(interval: number = 10000) {
   }, []);
 
   /**
+   * 動画再生終了時に次へ進むコールバック
+   */
+  const handleVideoEnded = useCallback(() => {
+    if (isPlaying) {
+      loadNextImage();
+    }
+  }, [isPlaying, loadNextImage]);
+
+  /**
+   * 現在のメディアが動画かどうか
+   */
+  const isCurrentVideo = currentImage?.isVideo ?? false;
+
+  /**
    * 自動進行のタイマーとプログレスバー
+   * 動画の場合はタイマーを使わず onEnded で次に進む
    */
   useEffect(() => {
-    if (isPlaying && !isLoading) {
+    if (isPlaying && !isLoading && !isCurrentVideo) {
       setProgress(0);
       startTimeRef.current = Date.now();
 
@@ -104,13 +119,13 @@ export function useSlideshow(interval: number = 10000) {
         }
       };
     } else {
-      // 一時停止時はプログレスをリセット
+      // 一時停止時または動画再生中はプログレスをリセット
       setProgress(0);
       if (progressIntervalRef.current !== undefined) {
         window.clearInterval(progressIntervalRef.current);
       }
     }
-  }, [isPlaying, isLoading, interval, loadNextImage]);
+  }, [isPlaying, isLoading, isCurrentVideo, interval, loadNextImage]);
 
   /**
    * 初回画像読み込み
@@ -136,5 +151,6 @@ export function useSlideshow(interval: number = 10000) {
     loadNextImage,
     loadPreviousImage,
     initialize,
+    handleVideoEnded,
   };
 }
