@@ -204,13 +204,11 @@ fn parse_gps_coordinate(value: &exif::Value, reference: &str) -> Option<f64> {
 }
 
 /// 動画ファイルかどうかを判定
+/// 拡張子リストは scanner::VIDEO_EXTENSIONS を正本とする
 pub fn is_video_file(path: &Path) -> bool {
     if let Some(extension) = path.extension() {
         let ext = extension.to_string_lossy().to_lowercase();
-        matches!(
-            ext.as_str(),
-            "mp4" | "mov" | "avi" | "mkv" | "webm" | "flv" | "wmv" | "m4v"
-        )
+        crate::scanner::VIDEO_EXTENSIONS.contains(&ext.as_str())
     } else {
         false
     }

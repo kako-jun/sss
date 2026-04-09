@@ -44,6 +44,7 @@ function App() {
     loadNextImage,
     loadPreviousImage,
     initialize,
+    handleVideoEnded,
   } = useSlideshow(displayInterval); // 設定値を使用
 
   // プレイリスト情報を更新
@@ -391,7 +392,7 @@ function App() {
   return (
     <div className="w-screen h-screen bg-black overflow-hidden">
       {/* スライドショー */}
-      <Slideshow image={currentImage} isLoading={isLoading} />
+      <Slideshow image={currentImage} isLoading={isLoading} onVideoEnded={handleVideoEnded} />
 
       {/* 終了ボタン（右上） */}
       <button

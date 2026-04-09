@@ -9,6 +9,10 @@ use walkdir::WalkDir;
 /// 画像ファイルの拡張子
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif"];
 
+/// 動画ファイルの拡張子（HTMLのvideoタグでネイティブ再生可能な形式のみ）
+/// avi/mkv/flv/wmv等の旧フォーマットはffmpeg同梱後に対応予定
+pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "ogv", "m4v"];
+
 /// ファイルメタデータ
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
@@ -66,7 +70,7 @@ impl ImageScanner {
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
-            .filter(|e| self.is_image_file(e.path()))
+            .filter(|e| self.is_media_file(e.path()))
             .filter(|e| !self.ignore_filter.is_ignored(e.path()))
             .collect();
 
@@ -182,6 +186,21 @@ impl ImageScanner {
         }
         false
     }
+
+    /// 動画ファイルかチェック
+    fn is_video_file(&self, path: &Path) -> bool {
+        if let Some(ext) = path.extension() {
+            if let Some(ext_str) = ext.to_str() {
+                return VIDEO_EXTENSIONS.contains(&ext_str.to_lowercase().as_str());
+            }
+        }
+        false
+    }
+
+    /// メディアファイル（画像または動画）かチェック
+    fn is_media_file(&self, path: &Path) -> bool {
+        self.is_image_file(path) || self.is_video_file(path)
+    }
 }
 
 #[cfg(test)]
@@ -198,5 +217,36 @@ mod tests {
         assert!(scanner.is_image_file(Path::new("test.webp")));
         assert!(!scanner.is_image_file(Path::new("test.txt")));
         assert!(!scanner.is_image_file(Path::new("test")));
+    }
+
+    #[test]
+    fn test_is_video_file() {
+        let scanner = ImageScanner::new(IgnoreFilter::from_patterns(&[]));
+
+        assert!(scanner.is_video_file(Path::new("test.mp4")));
+        assert!(scanner.is_video_file(Path::new("test.MP4")));
+        assert!(scanner.is_video_file(Path::new("test.webm")));
+        assert!(scanner.is_video_file(Path::new("test.ogv")));
+        assert!(scanner.is_video_file(Path::new("test.m4v")));
+        // ogg は音声ファイルと曖昧なため対象外
+        assert!(!scanner.is_video_file(Path::new("test.ogg")));
+        assert!(!scanner.is_video_file(Path::new("test.avi")));
+        assert!(!scanner.is_video_file(Path::new("test.mkv")));
+        assert!(!scanner.is_video_file(Path::new("test.jpg")));
+        assert!(!scanner.is_video_file(Path::new("test.txt")));
+    }
+
+    #[test]
+    fn test_is_media_file() {
+        let scanner = ImageScanner::new(IgnoreFilter::from_patterns(&[]));
+
+        // 画像もメディア
+        assert!(scanner.is_media_file(Path::new("test.jpg")));
+        assert!(scanner.is_media_file(Path::new("test.png")));
+        // 動画もメディア
+        assert!(scanner.is_media_file(Path::new("test.mp4")));
+        assert!(scanner.is_media_file(Path::new("test.webm")));
+        // それ以外は非メディア
+        assert!(!scanner.is_media_file(Path::new("test.txt")));
     }
 }

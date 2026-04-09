@@ -6,9 +6,10 @@ import logoBg from '../assets/logo-bg.webp';
 interface SlideshowProps {
   image: ImageInfo | null;
   isLoading?: boolean;
+  onVideoEnded?: () => void;
 }
 
-export function Slideshow({ image, isLoading }: SlideshowProps) {
+export function Slideshow({ image, isLoading, onVideoEnded }: SlideshowProps) {
   if (!image) {
     return (
       <div className="w-screen h-screen bg-black flex items-center justify-center">
@@ -46,12 +47,13 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
             }}
             autoPlay
             muted
-            loop
+            onEnded={onVideoEnded}
             onError={(e) => {
               console.error('Failed to load video:', image.path);
               console.error('Error event:', e);
+              // 動画の読み込みに失敗した場合も次に進む
+              onVideoEnded?.();
             }}
-            onLoadedData={() => {}}
           />
         ) : (
           // 画像の場合
@@ -72,7 +74,6 @@ export function Slideshow({ image, isLoading }: SlideshowProps) {
               console.error('Failed to load image:', image.path);
               console.error('Error event:', e);
             }}
-            onLoad={() => {}}
           />
         )}
       </AnimatePresence>

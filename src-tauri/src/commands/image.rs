@@ -210,6 +210,11 @@ fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf, app
                 continue;
             }
 
+            // 動画ファイルは画像処理をスキップ
+            if is_video_file(path) {
+                continue;
+            }
+
             // 画像サイズを取得
             let (width, height) = match get_image_dimensions(path) {
                 Ok(dims) => dims,
