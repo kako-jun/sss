@@ -54,7 +54,6 @@ export function Slideshow({ image, isLoading, onVideoEnded }: SlideshowProps) {
               // 動画の読み込みに失敗した場合も次に進む
               onVideoEnded?.();
             }}
-            onLoadedData={() => {}}
           />
         ) : (
           // 画像の場合
@@ -75,7 +74,6 @@ export function Slideshow({ image, isLoading, onVideoEnded }: SlideshowProps) {
               console.error('Failed to load image:', image.path);
               console.error('Error event:', e);
             }}
-            onLoad={() => {}}
           />
         )}
       </AnimatePresence>

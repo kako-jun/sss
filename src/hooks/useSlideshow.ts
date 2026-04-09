@@ -76,6 +76,11 @@ export function useSlideshow(interval: number = 10000) {
   }, []);
 
   /**
+   * 現在のメディアが動画かどうか
+   */
+  const isCurrentVideo = currentImage?.isVideo ?? false;
+
+  /**
    * 動画再生終了時に次へ進むコールバック
    */
   const handleVideoEnded = useCallback(() => {
@@ -83,11 +88,6 @@ export function useSlideshow(interval: number = 10000) {
       loadNextImage();
     }
   }, [isPlaying, loadNextImage]);
-
-  /**
-   * 現在のメディアが動画かどうか
-   */
-  const isCurrentVideo = currentImage?.isVideo ?? false;
 
   /**
    * 自動進行のタイマーとプログレスバー

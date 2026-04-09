@@ -11,7 +11,7 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp", 
 
 /// 動画ファイルの拡張子（HTMLのvideoタグでネイティブ再生可能な形式のみ）
 /// avi/mkv/flv/wmv等の旧フォーマットはffmpeg同梱後に対応予定
-const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "ogg", "ogv", "m4v"];
+pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "ogv", "m4v"];
 
 /// ファイルメタデータ
 #[derive(Debug, Clone)]
@@ -226,9 +226,10 @@ mod tests {
         assert!(scanner.is_video_file(Path::new("test.mp4")));
         assert!(scanner.is_video_file(Path::new("test.MP4")));
         assert!(scanner.is_video_file(Path::new("test.webm")));
-        assert!(scanner.is_video_file(Path::new("test.ogg")));
         assert!(scanner.is_video_file(Path::new("test.ogv")));
         assert!(scanner.is_video_file(Path::new("test.m4v")));
+        // ogg は音声ファイルと曖昧なため対象外
+        assert!(!scanner.is_video_file(Path::new("test.ogg")));
         assert!(!scanner.is_video_file(Path::new("test.avi")));
         assert!(!scanner.is_video_file(Path::new("test.mkv")));
         assert!(!scanner.is_video_file(Path::new("test.jpg")));
