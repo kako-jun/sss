@@ -29,8 +29,7 @@ export function InfoSection() {
 
     try {
       await resetAllData();
-      setResetMessage('初期化が完了しました。ページをリロードしてください。');
-      setIsResetting(false);
+      window.location.reload();
     } catch (err) {
       console.error('Failed to reset settings:', err);
       setResetMessage(`エラー: ${err}`);
