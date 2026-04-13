@@ -559,3 +559,7 @@ MIT License
 - kamadak-exif: https://crates.io/crates/kamadak-exif
 - rayon: https://crates.io/crates/rayon
 - Framer Motion: https://www.framer.com/motion/
+
+## デザインシステム
+
+UIの生成・修正時は `DESIGN.md` に定義されたデザインシステムに従うこと。定義外の色・フォント・スペーシングを勝手に使わない。
