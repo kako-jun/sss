@@ -172,10 +172,7 @@ fn get_image_info_internal(
 
     // EXIF情報（画像のみ）
     let exif = if !is_video {
-        match get_exif_info(path) {
-            Ok(info) => Some(info),
-            Err(_) => None,
-        }
+        get_exif_info(path).ok()
     } else {
         None
     };

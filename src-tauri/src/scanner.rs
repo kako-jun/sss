@@ -53,8 +53,6 @@ impl ImageScanner {
     where
         F: FnMut(usize, usize) + Send + Sync,
     {
-        let start_time = std::time::Instant::now();
-
         // ディレクトリが存在するかチェック
         if !directory.exists() {
             return Err(format!("Directory does not exist: {:?}", directory));
@@ -101,7 +99,7 @@ impl ImageScanner {
 
                 // 100ファイルごとに進捗を報告
                 let count = processed.fetch_add(1, Ordering::Relaxed) + 1;
-                if count % 100 == 0 || count == total {
+                if count.is_multiple_of(100) || count == total {
                     if let Ok(mut cb) = callback.lock() {
                         cb(count, total);
                     }
@@ -140,7 +138,6 @@ impl ImageScanner {
         let current_files = self.scan_directory_with_progress(directory, progress_callback)?;
 
         let mut new_files = Vec::new();
-        let mut unchanged_count = 0;
 
         // 新規ファイルと変更されたファイルを検出
         for file in &current_files {
@@ -155,7 +152,6 @@ impl ImageScanner {
                         new_files.push(file.path.clone());
                     } else {
                         // 変更なし
-                        unchanged_count += 1;
                     }
                 }
             }
