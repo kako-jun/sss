@@ -148,7 +148,7 @@ pub async fn pick_image(image_path: String, state: State<'_, AppState>) -> Resul
     };
 
     // ファイルをコピー
-    fs::copy(&source_path, &final_dest_path).map_err(|e| format!("Failed to copy file: {}", e))?;
+    fs::copy(source_path, &final_dest_path).map_err(|e| format!("Failed to copy file: {}", e))?;
 
     Ok(final_dest_path.to_string_lossy().to_string())
 }
