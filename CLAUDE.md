@@ -207,10 +207,12 @@ CREATE TABLE scan_history (
 
 ### src-tauri/src/main.rs
 
-- アプリケーションエントリーポイント
-- Tauriコマンドの登録
-- スクリーンセーバー抑制の初期化
-- キャッシュディレクトリの管理
+- bin エントリ。`sss_lib::run()` を呼ぶだけの薄い殻（`windows_subsystem` 属性のみ保持）
+
+### src-tauri/src/lib.rs
+
+- ライブラリ本体（`sss_lib`）。`run()` が Tauri アプリを初期化（プラグイン登録・Tauriコマンド登録・スクリーンセーバー抑制・キャッシュ管理・`AppState` 構築）
+- 芯モジュール（scanner/playlist/ignore/image_processor/database/commands）を `pub` 公開し、結合テスト `tests/golden_e2e.rs`（フォルダ→scan→ignore→playlist の golden e2e）から直接叩けるようにする lib+bin 分割
 
 ### src-tauri/src/database.rs
 
