@@ -77,7 +77,7 @@ pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
                 Command::new("xdg-open")
                     .arg(directory)
                     .spawn()
-                    .map_err(|e| format!("Failed to open file manager: {}", e))?;
+                    .map_err(|e| format!("Failed to open file manager: {e}"))?;
             }
         }
     }
@@ -126,7 +126,7 @@ pub async fn pick_image(image_path: String, state: State<'_, AppState>) -> Resul
     // ディレクトリが存在しない場合は作成
     if !share_directory.exists() {
         fs::create_dir_all(&share_directory)
-            .map_err(|e| format!("Failed to create share directory: {}", e))?;
+            .map_err(|e| format!("Failed to create share directory: {e}"))?;
     }
 
     // ファイル名を取得
@@ -142,13 +142,13 @@ pub async fn pick_image(image_path: String, state: State<'_, AppState>) -> Resul
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        share_directory.join(format!("{}_{}.{}", stem, timestamp, ext))
+        share_directory.join(format!("{stem}_{timestamp}.{ext}"))
     } else {
         dest_path
     };
 
     // ファイルをコピー
-    fs::copy(source_path, &final_dest_path).map_err(|e| format!("Failed to copy file: {}", e))?;
+    fs::copy(source_path, &final_dest_path).map_err(|e| format!("Failed to copy file: {e}"))?;
 
     Ok(final_dest_path.to_string_lossy().to_string())
 }
@@ -158,7 +158,7 @@ pub async fn pick_image(image_path: String, state: State<'_, AppState>) -> Resul
 pub async fn get_ignore_patterns(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     db.get_ignore_rules()
-        .map_err(|e| format!("Failed to get ignore rules: {}", e))
+        .map_err(|e| format!("Failed to get ignore rules: {e}"))
 }
 
 /// 除外ルールを削除
@@ -169,7 +169,7 @@ pub async fn remove_ignore_pattern(
 ) -> Result<(), String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     db.remove_ignore_rule(&pattern)
-        .map_err(|e| format!("Failed to remove ignore rule: {}", e))
+        .map_err(|e| format!("Failed to remove ignore rule: {e}"))
 }
 
 /// 除外ルールを手動追加
@@ -177,7 +177,7 @@ pub async fn remove_ignore_pattern(
 pub async fn add_ignore_pattern(pattern: String, state: State<'_, AppState>) -> Result<(), String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     db.add_ignore_rule(&pattern)
-        .map_err(|e| format!("Failed to add ignore rule: {}", e))
+        .map_err(|e| format!("Failed to add ignore rule: {e}"))
 }
 
 /// 除外機能：画像をDBのignore_rulesに追加
@@ -202,7 +202,7 @@ pub async fn exclude_image(
                         // "YYYY:MM:DD HH:MM:SS" から "YYYY-MM-DD" を抽出
                         let date_part = date_time.split(' ').next().unwrap_or("");
                         let date = date_part.replace(':', "-");
-                        format!("*{}*", date)
+                        format!("*{date}*")
                     } else {
                         return Err("No EXIF date found".to_string());
                     }
@@ -228,7 +228,7 @@ pub async fn exclude_image(
     // DB に除外ルールを追加
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     db.add_ignore_rule(&pattern)
-        .map_err(|e| format!("Failed to add ignore rule: {}", e))?;
+        .map_err(|e| format!("Failed to add ignore rule: {e}"))?;
     drop(db);
 
     // プレイリストから該当画像を削除（ファイル除外の場合のみ即座に削除）
@@ -238,12 +238,11 @@ pub async fn exclude_image(
             playlist.update_images(vec![], vec![image_path.clone()]);
         }
         drop(playlist_lock);
-        Ok(format!("除外パターン追加: {}", pattern))
+        Ok(format!("除外パターン追加: {pattern}"))
     } else {
         // 日付・ディレクトリ除外は再スキャンが必要
         Ok(format!(
-            "除外パターン追加: {} (変更を反映するには再スキャンしてください)",
-            pattern
+            "除外パターン追加: {pattern} (変更を反映するには再スキャンしてください)"
         ))
     }
 }
@@ -256,14 +255,14 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
     // 除外パターンを取得してフィルタを構築
     let patterns = db
         .get_ignore_rules()
-        .map_err(|e| format!("Failed to get ignore rules: {}", e))?;
+        .map_err(|e| format!("Failed to get ignore rules: {e}"))?;
     let ignore_filter = IgnoreFilter::from_patterns(&patterns);
 
     // 最近表示した画像を多めに取得（除外フィルタ後に最大100件を返す。
     // 除外率が高い場合は100件未満になりうる）
     let all_recent = db
         .get_recent_images(500)
-        .map_err(|e| format!("Failed to get recent images: {}", e))?;
+        .map_err(|e| format!("Failed to get recent images: {e}"))?;
     drop(db);
 
     // 除外パターンにマッチしないものだけ返す（最大100件）
@@ -316,10 +315,10 @@ pub async fn get_picked_images(state: State<'_, AppState>) -> Result<Vec<String>
 
     let mut images: Vec<String> = Vec::new();
     let entries =
-        fs::read_dir(&picked_dir).map_err(|e| format!("Failed to read directory: {}", e))?;
+        fs::read_dir(&picked_dir).map_err(|e| format!("Failed to read directory: {e}"))?;
 
     for entry in entries {
-        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        let entry = entry.map_err(|e| format!("Failed to read entry: {e}"))?;
         let path = entry.path();
         if path.is_file() {
             if let Some(ext) = path.extension() {
@@ -352,16 +351,16 @@ pub async fn delete_picked_image(
     // 安全チェック: sss-picked フォルダ内のファイルのみ削除可能
     let canonical_path = path
         .canonicalize()
-        .map_err(|e| format!("Failed to resolve path: {}", e))?;
+        .map_err(|e| format!("Failed to resolve path: {e}"))?;
     let canonical_dir = picked_dir
         .canonicalize()
-        .map_err(|e| format!("Failed to resolve picked directory: {}", e))?;
+        .map_err(|e| format!("Failed to resolve picked directory: {e}"))?;
 
     if !canonical_path.starts_with(&canonical_dir) {
         return Err("Cannot delete files outside the picked directory".to_string());
     }
 
-    fs::remove_file(path).map_err(|e| format!("Failed to delete file: {}", e))?;
+    fs::remove_file(path).map_err(|e| format!("Failed to delete file: {e}"))?;
     Ok(())
 }
 
@@ -370,5 +369,5 @@ pub async fn delete_picked_image(
 pub async fn reset_all_display_counts(state: State<'_, AppState>) -> Result<(), String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     db.reset_all_display_counts()
-        .map_err(|e| format!("Failed to reset display counts: {}", e))
+        .map_err(|e| format!("Failed to reset display counts: {e}"))
 }

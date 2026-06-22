@@ -138,9 +138,9 @@ fn get_image_info_internal(
         // キャッシュファイル名を生成（元のファイル名のハッシュを使用）
         let hash = format!(
             "{:x}",
-            md5::compute(format!("{}:{}", image_path, apply_rotation))
+            md5::compute(format!("{image_path}:{apply_rotation}"))
         );
-        let cache_file = state.cache_dir.join(format!("{}.jpg", hash));
+        let cache_file = state.cache_dir.join(format!("{hash}.jpg"));
 
         // キャッシュが存在する場合は使用
         if cache_file.exists() {
@@ -154,11 +154,11 @@ fn get_image_info_internal(
                 move || match optimize_image_for_4k(&path_clone, apply_rotation) {
                     Ok(optimized_data) => {
                         if let Err(e) = fs::write(&cache_file_clone, optimized_data) {
-                            eprintln!("Failed to write optimized image: {}", e);
+                            eprintln!("Failed to write optimized image: {e}");
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to optimize image: {}", e);
+                        eprintln!("Failed to optimize image: {e}");
                     }
                 },
             );
@@ -222,20 +222,20 @@ fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf, app
             if width > MAX_WIDTH_4K || height > MAX_HEIGHT_4K || apply_rotation {
                 let hash = format!(
                     "{:x}",
-                    md5::compute(format!("{}:{}", image_path, apply_rotation))
+                    md5::compute(format!("{image_path}:{apply_rotation}"))
                 );
-                let cache_file = cache_dir.join(format!("{}.jpg", hash));
+                let cache_file = cache_dir.join(format!("{hash}.jpg"));
 
                 // キャッシュが既に存在する場合はスキップ
                 if !cache_file.exists() {
                     match optimize_image_for_4k(path, apply_rotation) {
                         Ok(optimized_data) => {
                             if let Err(e) = fs::write(&cache_file, optimized_data) {
-                                eprintln!("Failed to write prefetched cache: {}", e);
+                                eprintln!("Failed to write prefetched cache: {e}");
                             }
                         }
                         Err(e) => {
-                            eprintln!("Failed to optimize for prefetch: {}", e);
+                            eprintln!("Failed to optimize for prefetch: {e}");
                         }
                     }
                 }

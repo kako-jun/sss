@@ -26,7 +26,7 @@ impl IgnoreFilter {
                     has_patterns = true;
                 }
                 Err(e) => {
-                    eprintln!("Invalid pattern '{}': {}", line, e);
+                    eprintln!("Invalid pattern '{line}': {e}");
                 }
             }
         }
@@ -40,7 +40,7 @@ impl IgnoreFilter {
                 globset: Some(globset),
             },
             Err(e) => {
-                eprintln!("Failed to build globset: {}", e);
+                eprintln!("Failed to build globset: {e}");
                 IgnoreFilter { globset: None }
             }
         }

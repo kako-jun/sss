@@ -55,11 +55,11 @@ impl ImageScanner {
     {
         // ディレクトリが存在するかチェック
         if !directory.exists() {
-            return Err(format!("Directory does not exist: {:?}", directory));
+            return Err(format!("Directory does not exist: {directory:?}"));
         }
 
         if !directory.is_dir() {
-            return Err(format!("Path is not a directory: {:?}", directory));
+            return Err(format!("Path is not a directory: {directory:?}"));
         }
 
         // WalkDirでファイルエントリを収集

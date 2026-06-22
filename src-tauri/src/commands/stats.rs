@@ -8,11 +8,11 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
 
     let total_images = db
         .get_total_image_count()
-        .map_err(|e| format!("Database error: {}", e))?;
+        .map_err(|e| format!("Database error: {e}"))?;
 
     let displayed_images = db
         .get_displayed_image_count()
-        .map_err(|e| format!("Database error: {}", e))?;
+        .map_err(|e| format!("Database error: {e}"))?;
 
     Ok(Stats {
         total_images,
@@ -43,5 +43,5 @@ pub async fn get_playlist_info(
 pub async fn get_display_stats(state: State<'_, AppState>) -> Result<Vec<(String, i32)>, String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     db.get_all_display_counts()
-        .map_err(|e| format!("Failed to get display stats: {}", e))
+        .map_err(|e| format!("Failed to get display stats: {e}"))
 }

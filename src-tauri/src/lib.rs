@@ -52,7 +52,7 @@ pub fn run() {
             let cache_dir = app_data_dir.join("cache");
             if cache_dir.exists() {
                 if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
-                    eprintln!("Failed to remove cache directory: {}", e);
+                    eprintln!("Failed to remove cache directory: {e}");
                 }
             }
             std::fs::create_dir_all(&cache_dir).expect("failed to create cache directory");

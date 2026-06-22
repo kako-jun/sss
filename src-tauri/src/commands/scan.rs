@@ -34,18 +34,18 @@ fn migrate_sssignore_to_db(db: &crate::database::Database) {
                     continue;
                 }
                 if let Err(e) = db.add_ignore_rule(line) {
-                    eprintln!("Failed to import ignore rule '{}': {}", line, e);
+                    eprintln!("Failed to import ignore rule '{line}': {e}");
                 }
             }
 
             // .sssignore を .sssignore.bak にリネーム
             let bak_path = home_dir.join(".sssignore.bak");
             if let Err(e) = std::fs::rename(&sssignore_path, &bak_path) {
-                eprintln!("Failed to rename .sssignore to .sssignore.bak: {}", e);
+                eprintln!("Failed to rename .sssignore to .sssignore.bak: {e}");
             }
         }
         Err(e) => {
-            eprintln!("Failed to read .sssignore for migration: {}", e);
+            eprintln!("Failed to read .sssignore for migration: {e}");
         }
     }
 }
@@ -60,7 +60,7 @@ pub async fn scan_directory(
     let directory = PathBuf::from(&directory_path);
 
     if !directory.exists() {
-        return Err(format!("Directory does not exist: {}", directory_path));
+        return Err(format!("Directory does not exist: {directory_path}"));
     }
 
     // マイグレーション処理：~/.sssignore が存在する場合は DB にインポート
@@ -106,13 +106,13 @@ pub async fn scan_directory(
     // 新規ファイルを追加
     for file in &scan_result.files {
         db.upsert_file_metadata(&file.path, file.modified_time, file.file_size)
-            .map_err(|e| format!("Database error: {}", e))?;
+            .map_err(|e| format!("Database error: {e}"))?;
     }
 
     // 削除されたファイルをマーク
     if !scan_result.deleted_files.is_empty() {
         db.mark_deleted(&scan_result.deleted_files)
-            .map_err(|e| format!("Database error: {}", e))?;
+            .map_err(|e| format!("Database error: {e}"))?;
     }
 
     // スキャン履歴を記録
@@ -123,11 +123,11 @@ pub async fn scan_directory(
         scan_result.deleted_count as i32,
         scan_result.duration_ms as i64,
     )
-    .map_err(|e| format!("Database error: {}", e))?;
+    .map_err(|e| format!("Database error: {e}"))?;
 
     // スキャン履歴の上限管理（100件超を削除）
     db.trim_scan_history(100)
-        .map_err(|e| format!("Database error: {}", e))?;
+        .map_err(|e| format!("Database error: {e}"))?;
 
     drop(db);
 
