@@ -1,0 +1,100 @@
+//! sss バックエンドのライブラリ本体。
+//!
+//! Tauri アプリの起動 (`run`) と、スライドショーの芯となるモジュール群
+//! (scanner / playlist / ignore / image_processor / database / commands) を公開する。
+//! `main.rs` (bin) はこの `run()` を呼ぶだけの薄い殻で、結合テスト
+//! (`tests/golden_e2e.rs`) はここで公開した芯を直接叩いて golden path を機械検証する。
+
+pub mod commands;
+pub mod database;
+pub mod ignore;
+pub mod image_processor;
+pub mod playlist;
+pub mod scanner;
+
+use commands::AppState;
+use database::Database;
+use std::sync::Mutex;
+use tauri::Manager;
+
+/// Tauri アプリを起動する。
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        .setup(|app| {
+            // スクリーンセーバーとディスプレイスリープを抑制（クロスプラットフォーム対応）
+            // sleep(false)によりノートPC蓋閉じ時のシステムスリープは許可
+            let keep_awake = keepawake::Builder::default()
+                .display(true) // ディスプレイをオンに保つ（スライドショー表示のため）
+                .idle(true) // アイドルスリープを防ぐ
+                .sleep(false) // 明示的なスリープは許可（ノートPC蓋閉じ時など）
+                .reason("Slideshow running")
+                .app_name("Smart Slide Show")
+                .create()
+                .expect("Failed to initialize keep awake");
+
+            // データベースパスを取得
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("failed to get app data directory");
+
+            // ディレクトリが存在しない場合は作成
+            std::fs::create_dir_all(&app_data_dir).expect("failed to create app data directory");
+
+            let db_path = app_data_dir.join("sss.db");
+
+            // キャッシュディレクトリを削除して再作成（起動時にクリア）
+            let cache_dir = app_data_dir.join("cache");
+            if cache_dir.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
+                    eprintln!("Failed to remove cache directory: {}", e);
+                }
+            }
+            std::fs::create_dir_all(&cache_dir).expect("failed to create cache directory");
+
+            // データベースを初期化
+            let db = Database::new(db_path).expect("failed to initialize database");
+
+            // アプリケーション状態を設定
+            app.manage(AppState {
+                db: Mutex::new(db),
+                playlist: Mutex::new(None),
+                directory_path: Mutex::new(None),
+                cache_dir,
+                _keep_awake: keep_awake,
+            });
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::scan::scan_directory,
+            commands::image::get_next_image,
+            commands::image::get_previous_image,
+            commands::file_operations::open_in_explorer,
+            commands::stats::get_stats,
+            commands::stats::get_playlist_info,
+            commands::settings::get_last_directory_path,
+            commands::system::exit_app,
+            commands::system::reset_all_data,
+            commands::settings::save_setting,
+            commands::settings::get_setting,
+            commands::file_operations::pick_image,
+            commands::file_operations::exclude_image,
+            commands::stats::get_display_stats,
+            commands::file_operations::get_default_share_directory,
+            commands::file_operations::get_ignore_patterns,
+            commands::file_operations::remove_ignore_pattern,
+            commands::file_operations::add_ignore_pattern,
+            commands::file_operations::get_recent_images,
+            commands::file_operations::get_picked_images,
+            commands::file_operations::delete_picked_image,
+            commands::file_operations::reset_all_display_counts,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

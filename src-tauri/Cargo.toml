@@ -7,6 +7,13 @@ license = "MIT"
 repository = ""
 edition = "2021"
 
+# lib+bin 分割: バックエンドの芯を結合テスト (tests/golden_e2e.rs) から呼べるように
+# ライブラリターゲットを公開する。bin (src/main.rs) は run() を呼ぶだけの薄い殻。
+# `_lib` サフィックスは Windows での lib/bin 名衝突回避のため (cargo#8519)。
+[lib]
+name = "sss_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
