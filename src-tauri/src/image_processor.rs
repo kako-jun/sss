@@ -37,7 +37,7 @@ pub struct ImageInfo {
 /// 画像を最適化（EXIF回転適用 + 4Kリサイズ）
 pub fn optimize_image_for_4k(image_path: &Path, apply_rotation: bool) -> Result<Vec<u8>, String> {
     // 画像を読み込む
-    let img = image::open(image_path).map_err(|e| format!("Failed to open image: {}", e))?;
+    let img = image::open(image_path).map_err(|e| format!("Failed to open image: {e}"))?;
 
     // EXIF Orientationに基づいて回転・反転を適用（リサイズ前）
     let img = if apply_rotation {
@@ -59,7 +59,7 @@ pub fn optimize_image_for_4k(image_path: &Path, apply_rotation: bool) -> Result<
     let mut buffer = Vec::new();
     resized_img
         .write_to(&mut std::io::Cursor::new(&mut buffer), ImageFormat::Jpeg)
-        .map_err(|e| format!("Failed to encode image: {}", e))?;
+        .map_err(|e| format!("Failed to encode image: {e}"))?;
 
     Ok(buffer)
 }
@@ -91,14 +91,14 @@ fn apply_exif_orientation(image_path: &Path, img: image::DynamicImage) -> image:
 
 /// 画像の基本情報を取得
 pub fn get_image_dimensions(image_path: &Path) -> Result<(u32, u32), String> {
-    let img = image::open(image_path).map_err(|e| format!("Failed to open image: {}", e))?;
+    let img = image::open(image_path).map_err(|e| format!("Failed to open image: {e}"))?;
 
     Ok(img.dimensions())
 }
 
 /// EXIF情報を取得
 pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
-    let file = File::open(image_path).map_err(|e| format!("Failed to open file: {}", e))?;
+    let file = File::open(image_path).map_err(|e| format!("Failed to open file: {e}"))?;
 
     let mut buf_reader = BufReader::new(file);
     let exif_reader = exif::Reader::new();
