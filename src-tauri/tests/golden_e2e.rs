@@ -7,12 +7,12 @@
 //! scan は WalkDir+rayon 並列、playlist は乱数シャッフルで**順序は非決定**なので、
 //! 判定の根拠は順序ではなく **集合・件数・差分** に置く（ソートして比較）。
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use sss_lib::ignore::IgnoreFilter;
+use sss_lib::ignore::{IgnoreFilter, IgnoreRule};
 use sss_lib::playlist::Playlist;
 use sss_lib::scanner::ImageScanner;
 
@@ -231,6 +231,134 @@ fn incremental_scan_detects_added_and_deleted() {
         "変更なしファイルまで new に混ざっている"
     );
     assert_eq!(result.deleted_files.len(), 1);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// database.rs の既定除外ルールと同じ文字列（#61で判定ロジックを直した対象そのもの）。
+/// 実際の既定値と乖離しないよう、ここでも同じリテラルを使う。
+fn default_ignore_rules() -> Vec<IgnoreRule> {
+    [
+        "**/.thumbnails/",
+        "**/Thumbs.db",
+        "**/.DS_Store",
+        "**/@eaDir/",
+        "**/desktop.ini",
+        "**/.**/",
+    ]
+    .into_iter()
+    .map(IgnoreRule::glob)
+    .collect()
+}
+
+/// #61 問題1: 既定ルール（末尾 `/` のディレクトリ指定）が、Synologyのサムネ
+/// フォルダ（`@eaDir`）・`.thumbnails`・任意のドットフォルダ配下のファイルを
+/// スキャン結果から実際に除外することを golden e2e レベルで確認する。
+#[test]
+fn scan_excludes_default_dotfolder_and_synology_thumbs_rules() {
+    let root = workspace("default_rules");
+
+    write_file(&root, "keep/normal.jpg", b"normal");
+    write_file(&root, "@eaDir/thumb.jpg", b"synology-thumb");
+    write_file(
+        &root,
+        "sub/@eaDir/nested/thumb.jpg",
+        b"synology-thumb-nested",
+    );
+    write_file(&root, ".thumbnails/x.jpg", b"thumbnail");
+    write_file(&root, ".git/config.jpg", b"dotfolder-catch-all");
+    write_file(&root, "Thumbs.db", b"windows-thumb-cache"); // 拡張子非対応なのでそもそも非メディア
+
+    let scanner = ImageScanner::new(IgnoreFilter::from_rules(&default_ignore_rules()));
+    let files = scanner
+        .scan_directory_with_progress(&root, |_, _| {})
+        .expect("scan");
+    let got = relative_set(
+        &root,
+        &files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+    );
+
+    assert_eq!(
+        got,
+        BTreeSet::from(["keep/normal.jpg".to_string()]),
+        "@eaDir・.thumbnails・ドットフォルダ配下はすべて除外され、通常ファイルだけが残るはず"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// #61 問題4: globのメタ文字（`[`,`]`）を含むファイル名・フォルダ名も、
+/// `globset::escape` した文字列をパターンとして登録すれば自分自身を正しく除外できる
+/// （エスケープ無しでは自己マッチせず、黙って除外できないバグがあった）。
+#[test]
+fn scan_excludes_metachar_named_file_via_escaped_pattern() {
+    let root = workspace("metachar");
+
+    write_file(&root, "dir [2020]/photo[1].jpg", b"metachar-file");
+    write_file(&root, "dir [2020]/other.jpg", b"kept-sibling");
+    write_file(&root, "normal.jpg", b"kept-normal");
+
+    let excluded_path = root.join("dir [2020]/photo[1].jpg");
+    let rule = IgnoreRule::glob(globset::escape(&excluded_path.to_string_lossy()));
+
+    let scanner = ImageScanner::new(IgnoreFilter::from_rules(&[rule]));
+    let files = scanner
+        .scan_directory_with_progress(&root, |_, _| {})
+        .expect("scan");
+    let got = relative_set(
+        &root,
+        &files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+    );
+
+    assert_eq!(
+        got,
+        BTreeSet::from(["dir [2020]/other.jpg".to_string(), "normal.jpg".to_string()]),
+        "メタ文字ファイルだけが除外され、同名メタ文字フォルダの他ファイルは残るはず"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// #61 問題2/3: 撮影日除外は、ファイル名に日付が含まれない画像（例: `IMG_0001.jpg`）でも、
+/// DBに保存済みの撮影日（`file_metadata.captured_date`、表示時にEXIFから取得・保存された
+/// もの）があれば正しく除外できることを golden e2e レベルで確認する。
+#[test]
+fn scan_excludes_by_captured_date_even_without_date_in_filename() {
+    let root = workspace("date_exclude");
+
+    write_file(&root, "IMG_0001.jpg", b"excluded-by-captured-date");
+    write_file(&root, "IMG_0002.jpg", b"kept-different-date");
+    write_file(&root, "IMG_0003.jpg", b"kept-never-viewed-yet");
+
+    // IMG_0001/0002 は過去に一度表示され、EXIF撮影日がDBに保存済みという想定
+    // （get_image_info 経由の遅延取得。IMG_0003 は未表示＝captured_date 未取得のまま）。
+    let mut captured_dates = HashMap::new();
+    captured_dates.insert(
+        root.join("IMG_0001.jpg").to_string_lossy().to_string(),
+        "2023-05-15".to_string(),
+    );
+    captured_dates.insert(
+        root.join("IMG_0002.jpg").to_string_lossy().to_string(),
+        "2023-05-16".to_string(),
+    );
+
+    let rules = vec![IgnoreRule::date("2023-05-15")];
+    let filter = IgnoreFilter::from_rules_with_captured_dates(&rules, captured_dates);
+
+    let scanner = ImageScanner::new(filter);
+    let files = scanner
+        .scan_directory_with_progress(&root, |_, _| {})
+        .expect("scan");
+    let got = relative_set(
+        &root,
+        &files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+    );
+
+    assert_eq!(
+        got,
+        BTreeSet::from(["IMG_0002.jpg".to_string(), "IMG_0003.jpg".to_string()]),
+        "撮影日が一致するIMG_0001だけが除外され、ファイル名に日付が無くても正しく判定できるはず"
+    );
 
     let _ = std::fs::remove_dir_all(&root);
 }

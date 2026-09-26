@@ -40,3 +40,10 @@ export interface RecentImage {
   displayCount: number;
   lastDisplayed: string;
 }
+
+// 除外ルール1件（"glob": 通常のglobパターン・末尾 `/` はディレクトリ名照合。
+// "date": 撮影日（YYYY-MM-DD）による除外）
+export interface IgnoreRule {
+  pattern: string;
+  ruleType: 'glob' | 'date';
+}

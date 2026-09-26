@@ -1,5 +1,26 @@
-use rusqlite::{Connection, Result};
+use crate::ignore::RuleType;
+use rusqlite::{params, Connection, Result};
 use std::path::PathBuf;
+
+/// テーブルに列が無ければ追加する（`PRAGMA user_version` による汎用マイグレーションの
+/// 部品。#61 で導入、#62 以降のスキーマ変更でも再利用する）。
+fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
+    let exists: bool = conn.query_row(
+        &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"),
+        [],
+        |row| row.get::<_, i32>(0),
+    )? > 0;
+    if !exists {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+/// `file_metadata` の1行（path, modified_time, file_size, captured_date）
+type FileMetadataRow = (String, i64, i64, Option<String>);
 
 pub struct Database {
     conn: Connection,
@@ -22,6 +43,7 @@ impl Database {
                 path TEXT PRIMARY KEY,
                 modified_time INTEGER NOT NULL,
                 file_size INTEGER NOT NULL,
+                captured_date TEXT,
                 added_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
@@ -50,10 +72,12 @@ impl Database {
             [],
         )?;
 
-        // 除外ルール
+        // 除外ルール（rule_type: "glob"（末尾 `/` はディレクトリ名照合）| "date"（撮影日）。
+        // #61 以前のDBには列が無いため、既存行は run_migrations で 'glob' 補完する）
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS ignore_rules (
                 pattern TEXT PRIMARY KEY,
+                rule_type TEXT NOT NULL DEFAULT 'glob',
                 added_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
@@ -123,6 +147,8 @@ impl Database {
         }
 
         // ignore_rules が空の場合のみデフォルト除外ルールを挿入
+        // （#61: 文字列自体は変更しない。末尾 `/` パターンの判定ロジック側を直したため
+        // 既存DBに保存済みの同じ文字列でも新しい挙動が効く＝データ移行は不要）
         let rule_count: i32 = self
             .conn
             .query_row("SELECT COUNT(*) FROM ignore_rules", [], |row| row.get(0))
@@ -138,16 +164,54 @@ impl Database {
             ];
             for rule in &default_rules {
                 self.conn.execute(
-                    "INSERT OR IGNORE INTO ignore_rules (pattern) VALUES (?1)",
+                    "INSERT OR IGNORE INTO ignore_rules (pattern, rule_type) VALUES (?1, 'glob')",
                     [rule],
                 )?;
             }
         }
 
+        self.run_migrations()?;
+
+        Ok(())
+    }
+
+    /// `PRAGMA user_version` に基づく汎用スキーママイグレーション。バージョンを
+    /// インクリメントしながら段階的に適用する（#61 の骨組みを #62 以降でも再利用する）。
+    fn run_migrations(&self) -> Result<()> {
+        let mut version: i32 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+        if version < 1 {
+            self.migrate_to_v1()?;
+            version = 1;
+            self.conn
+                .execute(&format!("PRAGMA user_version = {version}"), [])?;
+        }
+
+        Ok(())
+    }
+
+    /// v1: `ignore_rules.rule_type` と `file_metadata.captured_date` を追加する（#61）。
+    /// 新規DBは `CREATE TABLE` で既に列を持つため、両方とも冪等（既存なら何もしない）。
+    fn migrate_to_v1(&self) -> Result<()> {
+        add_column_if_missing(
+            &self.conn,
+            "ignore_rules",
+            "rule_type",
+            "TEXT NOT NULL DEFAULT 'glob'",
+        )?;
+        add_column_if_missing(&self.conn, "file_metadata", "captured_date", "TEXT")?;
         Ok(())
     }
 
     /// ファイルメタデータを挿入または更新
+    ///
+    /// `INSERT OR REPLACE` ではなく `ON CONFLICT DO UPDATE` を使う（#61）。
+    /// `REPLACE` は既存行を一度削除してから再挿入するため、対象外の列
+    /// （`captured_date`・`added_at`）が毎回リセットされてしまう。特に
+    /// `captured_date` は毎回のスキャンで全ファイルに対して呼ばれるため、
+    /// `REPLACE` のままだと表示時に取得済みの撮影日が次のスキャンで消えてしまう。
     pub fn upsert_file_metadata(
         &self,
         path: &str,
@@ -155,25 +219,40 @@ impl Database {
         file_size: i64,
     ) -> Result<()> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO file_metadata (path, modified_time, file_size)
-             VALUES (?1, ?2, ?3)",
-            [path, &modified_time.to_string(), &file_size.to_string()],
+            "INSERT INTO file_metadata (path, modified_time, file_size)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(path) DO UPDATE SET
+                 modified_time = excluded.modified_time,
+                 file_size = excluded.file_size",
+            params![path, modified_time, file_size],
         )?;
         Ok(())
     }
 
-    /// ファイルメタデータを取得
-    pub fn get_all_file_metadata(&self) -> Result<Vec<(String, i64, i64)>> {
+    /// ファイルメタデータを取得（撮影日込み。#61: 日付除外ルールの判定に使う）
+    pub fn get_all_file_metadata(&self) -> Result<Vec<FileMetadataRow>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT path, modified_time, file_size FROM file_metadata")?;
-        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            .prepare("SELECT path, modified_time, file_size, captured_date FROM file_metadata")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
 
         let mut result = Vec::new();
         for row in rows {
             result.push(row?);
         }
         Ok(result)
+    }
+
+    /// 表示時に取得したEXIF撮影日をDBに保存する（#61: 撮影日除外ルールの判定用）。
+    /// `file_metadata` に行が無い（未スキャン等）場合は静かに無視する。
+    pub fn set_captured_date(&self, path: &str, captured_date: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE file_metadata SET captured_date = ?1 WHERE path = ?2",
+            params![captured_date, path],
+        )?;
+        Ok(())
     }
 
     /// 削除されたファイルをDBから物理削除する
@@ -285,24 +364,30 @@ impl Database {
         Ok(())
     }
 
-    /// 除外ルール一覧を取得
-    pub fn get_ignore_rules(&self) -> Result<Vec<String>> {
+    /// 除外ルール一覧を取得（パターン文字列 + 種別）。#61: 撮影日ルールは
+    /// UI・ignoreフィルタ構築の両方で通常globと区別する必要があるため rule_type も返す。
+    pub fn get_ignore_rules(&self) -> Result<Vec<(String, RuleType)>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT pattern FROM ignore_rules ORDER BY added_at ASC")?;
-        let rows = stmt.query_map([], |row| row.get(0))?;
-        let mut patterns = Vec::new();
+            .prepare("SELECT pattern, rule_type FROM ignore_rules ORDER BY added_at ASC")?;
+        let rows = stmt.query_map([], |row| {
+            let pattern: String = row.get(0)?;
+            let rule_type: String = row.get(1)?;
+            Ok((pattern, rule_type))
+        })?;
+        let mut rules = Vec::new();
         for row in rows {
-            patterns.push(row?);
+            let (pattern, rule_type) = row?;
+            rules.push((pattern, RuleType::parse(&rule_type)));
         }
-        Ok(patterns)
+        Ok(rules)
     }
 
-    /// 除外ルールを追加
-    pub fn add_ignore_rule(&self, pattern: &str) -> Result<()> {
+    /// 除外ルールを追加（`rule_type`: "glob" | "date"）
+    pub fn add_ignore_rule(&self, pattern: &str, rule_type: RuleType) -> Result<()> {
         self.conn.execute(
-            "INSERT OR IGNORE INTO ignore_rules (pattern) VALUES (?1)",
-            [pattern],
+            "INSERT OR IGNORE INTO ignore_rules (pattern, rule_type) VALUES (?1, ?2)",
+            params![pattern, rule_type.as_str()],
         )?;
         Ok(())
     }

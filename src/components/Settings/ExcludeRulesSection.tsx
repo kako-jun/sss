@@ -1,16 +1,17 @@
 import { X, Plus } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getIgnorePatterns, removeIgnorePattern, addIgnorePattern } from '../../lib/tauri';
+import type { IgnoreRule } from '../../types';
 
 export function ExcludeRulesSection() {
-  const [patterns, setPatterns] = useState<string[]>([]);
+  const [rules, setRules] = useState<IgnoreRule[]>([]);
   const [newPattern, setNewPattern] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     getIgnorePatterns()
       .then((result) => {
-        setPatterns(result);
+        setRules(result);
         setLoading(false);
       })
       .catch((err) => {
@@ -22,7 +23,7 @@ export function ExcludeRulesSection() {
   const handleRemove = async (pattern: string) => {
     try {
       await removeIgnorePattern(pattern);
-      setPatterns((prev) => prev.filter((p) => p !== pattern));
+      setRules((prev) => prev.filter((r) => r.pattern !== pattern));
     } catch (err) {
       console.error('Failed to remove ignore pattern:', err);
     }
@@ -30,11 +31,13 @@ export function ExcludeRulesSection() {
 
   const handleAdd = async () => {
     const trimmed = newPattern.trim();
-    if (!trimmed || patterns.includes(trimmed)) return;
+    if (!trimmed || rules.some((r) => r.pattern === trimmed)) return;
 
     try {
+      // 手動追加は常に通常globルールとして扱う（撮影日ルールはオーバーレイの
+      // 「撮影日付で除外」からのみ作られる）
       await addIgnorePattern(trimmed);
-      setPatterns((prev) => [...prev, trimmed]);
+      setRules((prev) => [...prev, { pattern: trimmed, ruleType: 'glob' }]);
       setNewPattern('');
     } catch (err) {
       console.error('Failed to add ignore pattern:', err);
@@ -55,16 +58,23 @@ export function ExcludeRulesSection() {
     <div className="space-y-4">
       <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">除外ルール</h3>
 
-      {patterns.length === 0 ? (
+      {rules.length === 0 ? (
         <div className="text-white/30 text-sm">除外ルールはありません</div>
       ) : (
         <div className="space-y-1">
-          {patterns.map((pattern) => (
+          {rules.map(({ pattern, ruleType }) => (
             <div
               key={pattern}
               className="flex items-center justify-between gap-2 px-3 py-1.5 bg-black/40 rounded border border-white/8 group"
             >
-              <span className="text-white/55 text-sm truncate">{pattern}</span>
+              <div className="flex items-center gap-2 min-w-0">
+                {ruleType === 'date' && (
+                  <span className="shrink-0 px-1.5 py-0.5 text-[10px] leading-none rounded bg-white/10 text-white/50">
+                    撮影日
+                  </span>
+                )}
+                <span className="text-white/55 text-sm truncate">{pattern}</span>
+              </div>
               <button
                 onClick={() => handleRemove(pattern)}
                 className="p-1 hover:bg-white/8 rounded transition-colors shrink-0 opacity-0 group-hover:opacity-100"

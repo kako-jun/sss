@@ -1,7 +1,8 @@
 use crate::asset_scope::{resolve_and_sanitize_share_directory, resolve_share_directory};
 use crate::commands::types::AppState;
-use crate::ignore::IgnoreFilter;
-use crate::image_processor::get_exif_info;
+use crate::ignore::{glob_check_pattern, IgnoreFilter, IgnoreRule, RuleType};
+use crate::image_processor::{extract_date_only, get_exif_info};
+use globset::Glob;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -13,6 +14,15 @@ pub struct RecentImage {
     pub path: String,
     pub display_count: i32,
     pub last_displayed: String,
+}
+
+/// 除外ルール1件（フロントエンド向けDTO）。#61: 撮影日ルールと通常globを
+/// UI側で区別・表示できるよう `rule_type` を含める。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IgnoreRuleDto {
+    pub pattern: String,
+    pub rule_type: String,
 }
 
 /// ホームディレクトリ配下の Pictures フォルダを取得する（OS別に環境変数を切り替え）。
@@ -172,10 +182,18 @@ pub async fn pick_image(
 
 /// 除外ルール一覧を取得
 #[tauri::command]
-pub async fn get_ignore_patterns(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+pub async fn get_ignore_patterns(state: State<'_, AppState>) -> Result<Vec<IgnoreRuleDto>, String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.get_ignore_rules()
-        .map_err(|e| format!("Failed to get ignore rules: {e}"))
+    let rules = db
+        .get_ignore_rules()
+        .map_err(|e| format!("Failed to get ignore rules: {e}"))?;
+    Ok(rules
+        .into_iter()
+        .map(|(pattern, rule_type)| IgnoreRuleDto {
+            pattern,
+            rule_type: rule_type.as_str().to_string(),
+        })
+        .collect())
 }
 
 /// 除外ルールを削除
@@ -189,11 +207,22 @@ pub async fn remove_ignore_pattern(
         .map_err(|e| format!("Failed to remove ignore rule: {e}"))
 }
 
-/// 除外ルールを手動追加
+/// 除外ルールを手動追加（常に glob ルールとして追加する。撮影日ルールは `exclude_image`
+/// の "date" 経由でのみ作られる）。
+///
+/// #61 問題4: 不正なglob（例: `a{b.jpg` のような閉じていない `{`）は `eprintln!` で
+/// 握りつぶさず `Err` を返し、UI にも失敗を伝える。末尾 `/` のディレクトリ指定
+/// パターンは、実際に使う正規化後の形（`glob_check_pattern`）で検証する。
 #[tauri::command]
 pub async fn add_ignore_pattern(pattern: String, state: State<'_, AppState>) -> Result<(), String> {
+    let trimmed = pattern.trim();
+    if trimmed.is_empty() {
+        return Err("Pattern must not be empty".to_string());
+    }
+    Glob::new(&glob_check_pattern(trimmed)).map_err(|e| format!("Invalid pattern: {e}"))?;
+
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.add_ignore_rule(&pattern)
+    db.add_ignore_rule(trimmed, RuleType::Glob)
         .map_err(|e| format!("Failed to add ignore rule: {e}"))
 }
 
@@ -210,31 +239,30 @@ pub async fn exclude_image(
         return Err("Image file does not exist".to_string());
     }
 
-    let pattern = match exclude_type.as_str() {
+    let (pattern, rule_type) = match exclude_type.as_str() {
         "date" => {
-            // EXIFから日付を取得
+            // EXIFから日付を取得（DateTimeOriginal優先。#61問題3）
             match get_exif_info(path) {
-                Ok(exif) => {
-                    if let Some(date_time) = exif.date_time {
-                        // "YYYY:MM:DD HH:MM:SS" から "YYYY-MM-DD" を抽出
-                        let date_part = date_time.split(' ').next().unwrap_or("");
-                        let date = date_part.replace(':', "-");
-                        format!("*{date}*")
-                    } else {
-                        return Err("No EXIF date found".to_string());
-                    }
-                }
+                Ok(exif) => match exif.date_time.as_deref().and_then(extract_date_only) {
+                    Some(date) => (date, RuleType::Date),
+                    None => return Err("No EXIF date found".to_string()),
+                },
                 Err(_) => return Err("Failed to read EXIF data".to_string()),
             }
         }
         "file" => {
-            // ファイル名パターン
-            path.to_string_lossy().to_string()
+            // ファイル名パターン。globのメタ文字（`[`,`]`,`{`,`}`,`*`,`?`）を含むファイル名でも
+            // 自分自身にマッチするよう escape する（#61問題4: `photo[1].jpg` 等）
+            (globset::escape(&path.to_string_lossy()), RuleType::Glob)
         }
         "directory" => {
-            // ディレクトリパターン
+            // ディレクトリパターン。`/**` でサブフォルダも含めて再帰的に除外する
+            // （#61問題5: 従来の `/*` は直下のファイルしかマッチしていなかった）
             if let Some(parent) = path.parent() {
-                format!("{}/*", parent.to_string_lossy())
+                (
+                    format!("{}/**", globset::escape(&parent.to_string_lossy())),
+                    RuleType::Glob,
+                )
             } else {
                 return Err("Failed to get parent directory".to_string());
             }
@@ -244,7 +272,7 @@ pub async fn exclude_image(
 
     // DB に除外ルールを追加
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.add_ignore_rule(&pattern)
+    db.add_ignore_rule(&pattern, rule_type)
         .map_err(|e| format!("Failed to add ignore rule: {e}"))?;
     drop(db);
 
@@ -270,10 +298,13 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // 除外パターンを取得してフィルタを構築
-    let patterns = db
+    let rules: Vec<IgnoreRule> = db
         .get_ignore_rules()
-        .map_err(|e| format!("Failed to get ignore rules: {e}"))?;
-    let ignore_filter = IgnoreFilter::from_patterns(&patterns);
+        .map_err(|e| format!("Failed to get ignore rules: {e}"))?
+        .into_iter()
+        .map(|(pattern, rule_type)| IgnoreRule { pattern, rule_type })
+        .collect();
+    let ignore_filter = IgnoreFilter::from_rules(&rules);
 
     // 最近表示した画像を多めに取得（除外フィルタ後に最大100件を返す。
     // 除外率が高い場合は100件未満になりうる）
@@ -285,7 +316,7 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
     // 除外パターンにマッチしないものだけ返す（最大100件）
     let filtered: Vec<RecentImage> = all_recent
         .into_iter()
-        .filter(|(path, _, _)| !ignore_filter.is_ignored(Path::new(path)))
+        .filter(|(path, _, _)| !ignore_filter.is_ignored_anywhere(Path::new(path)))
         .take(100)
         .map(|(path, display_count, last_displayed)| RecentImage {
             path,

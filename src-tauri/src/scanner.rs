@@ -69,7 +69,7 @@ impl ImageScanner {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
             .filter(|e| self.is_media_file(e.path()))
-            .filter(|e| !self.ignore_filter.is_ignored(e.path()))
+            .filter(|e| !self.ignore_filter.is_ignored(e.path(), directory))
             .collect();
 
         let total = entries.len();

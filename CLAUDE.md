@@ -57,12 +57,12 @@
 - **先読みキャッシュ**: 5枚先まで先読み。生成は単一ワーカースレッド+キューで直列処理（弱いCPU対応、連打してもスレッド数・メモリが有界）。原本を返すと表示が誤る画像（TIFF等/`apply_exif_rotation=false`時の回転要求）は変換完了を待ってからパスを返す（`tauri::async_runtime::spawn_blocking`で実行スレッドは塞がない）。キャッシュは合計サイズ上限(既定2GB)超で古いものから自動削除（直近提供分は除外）、書込は一時ファイル→renameでアトミック、失敗した画像は再要求を抑止。起動時/全データ初期化時はcache_dirを退避ディレクトリへrename→再作成してクリア（ワーカーの新規書込との競合を回避）
 - **動画処理**: ウィンドウにフィット表示（object-fit: contain）、再生終了で自動次送り
 
-### 3. .sssignoreフィルタリング
+### 3. 除外ルール（ignore）フィルタリング
 
-- gitignoreスタイルのパターンマッチング
-- globsetライブラリによる高速フィルタリング
-- 対象ファイル: `.sssignore`
-- 配置場所: ユーザーホームディレクトリ (Windows: %USERPROFILE%、Unix: $HOME)
+- 除外ルールはDBの `ignore_rules` テーブル（`pattern` + `rule_type`）に保存する（旧 `.sssignore` ファイルは初回起動時にDBへ**1回限り**移行し、`app_settings` にフラグを立てる。移行後は `.sssignore.bak` にリネームされ二度と読まれない）
+- `rule_type = "glob"`: gitignoreスタイルのglobパターン（globsetライブラリ）。**末尾 `/` のパターンはディレクトリ名照合として扱う**（「スキャンルートからの相対パス上で、いずれかの祖先ディレクトリ名が一致」。`**/.thumbnails/`・`**/@eaDir/`・任意のドットフォルダを表す `**/.**/` など）。スキャンルート自体がドットディレクトリ配下でも、相対パスで判定するため誤って全除外にはならない
+- `rule_type = "date"`: 撮影日（`YYYY-MM-DD`）による除外。判定はDBに保存済みの撮影日（`file_metadata.captured_date`。表示時にEXIFから取得・保存する遅延方式、詳細は `docs/architecture.md`）を最優先に使い、未取得の画像はパス文字列中の日付表記（`YYYY-MM-DD`/`YYYYMMDD`）でフォールバック判定する
+- ファイル/ディレクトリ単位の除外（オーバーレイの除外メニュー）は `globset::escape` でメタ文字（`[`,`]`,`{`,`}`,`*`,`?`）をエスケープしてから登録するため、`photo[1].jpg` のような名前でも自己マッチする。手動追加（設定画面）は `Glob::new` で検証し、不正なパターンはエラーを返す
 
 ### 4. 表示履歴管理
 
@@ -181,11 +181,13 @@ CREATE TABLE playlist_state (
 ```sql
 CREATE TABLE ignore_rules (
     pattern TEXT PRIMARY KEY,
+    rule_type TEXT NOT NULL DEFAULT 'glob',  -- "glob" | "date"（#61で追加）
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-- **用途**: .sssignoreルールのキャッシュ
+- **用途**: 除外ルール（旧 `.sssignore` の移行先）。`rule_type` で通常globと撮影日ルールを区別する
+- **マイグレーション**: `PRAGMA user_version` を使った汎用マイグレーション機構（`database.rs::run_migrations`）で列を追加する。既存の `pattern` 文字列自体は変更不要（判定ロジック側の修正のみで新しい挙動が効くため）
 
 ### scan_history テーブル
 
@@ -229,8 +231,9 @@ CREATE TABLE scan_history (
 
 ### src-tauri/src/ignore.rs
 
-- .sssignoreファイルの読み込み
-- globsetによるパターンマッチング
+- DBの `(pattern, rule_type)` から `IgnoreFilter` を構築（globset）
+- 末尾 `/` パターンをディレクトリ名照合用globに正規化（`normalize_dir_pattern`）し、スキャンルートからの相対パスで判定
+- 撮影日ルールの判定（DB保存済み撮影日 優先 / パス文字列中の日付 `extract_date_from_path` でフォールバック）
 
 ### src-tauri/src/playlist.rs
 

@@ -1,53 +1,64 @@
 use crate::asset_scope::sanitize_allow_dir;
 use crate::commands::types::{AppState, ScanProgress};
-use crate::ignore::IgnoreFilter;
+use crate::ignore::{IgnoreFilter, IgnoreRule, RuleType};
 use crate::playlist::Playlist;
 use crate::scanner::ImageScanner;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::{Emitter, Manager, State};
 
-/// ~/.sssignore が存在する場合、内容を DB にインポートして .sssignore.bak にリネーム
+/// `.sssignore` 移行が完了済みかどうかを記録する `app_settings` のキー。
+/// 一度でも移行処理を試みた（ファイルの有無に関わらず）後は二度と実行しない
+/// （#61: 毎スキャン走ってしまい `.sssignore.bak` を上書きし続けるバグの修正）。
+const SSSIGNORE_MIGRATED_KEY: &str = "sssignore_migrated";
+
+/// ~/.sssignore が存在する場合、内容を DB にインポートして .sssignore.bak にリネームする。
+/// **1回限り**: `app_settings.sssignore_migrated` が立っていれば即座に何もしない。
+/// ファイルが存在しなかった場合も含め、実行後は必ずフラグを立てる（再訪しない）。
 fn migrate_sssignore_to_db(db: &crate::database::Database) {
+    if matches!(db.get_setting(SSSIGNORE_MIGRATED_KEY), Ok(Some(_))) {
+        return;
+    }
+
     let home_dir = if cfg!(windows) {
         std::env::var("USERPROFILE").ok().map(PathBuf::from)
     } else {
         std::env::var("HOME").ok().map(PathBuf::from)
     };
 
-    let home_dir = match home_dir {
-        Some(p) => p,
-        None => return,
-    };
+    if let Some(home_dir) = home_dir {
+        let sssignore_path = home_dir.join(".sssignore");
 
-    let sssignore_path = home_dir.join(".sssignore");
+        if sssignore_path.exists() {
+            match std::fs::read_to_string(&sssignore_path) {
+                Ok(content) => {
+                    for line in content.lines() {
+                        let line = line.trim();
+                        // コメントと空行をスキップ
+                        if line.is_empty() || line.starts_with('#') {
+                            continue;
+                        }
+                        if let Err(e) = db.add_ignore_rule(line, RuleType::Glob) {
+                            eprintln!("Failed to import ignore rule '{line}': {e}");
+                        }
+                    }
 
-    if !sssignore_path.exists() {
-        return;
+                    // .sssignore を .sssignore.bak にリネーム
+                    let bak_path = home_dir.join(".sssignore.bak");
+                    if let Err(e) = std::fs::rename(&sssignore_path, &bak_path) {
+                        eprintln!("Failed to rename .sssignore to .sssignore.bak: {e}");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to read .sssignore for migration: {e}");
+                }
+            }
+        }
     }
 
-    // ファイルを読み込んでパターンをDBにインポート
-    match std::fs::read_to_string(&sssignore_path) {
-        Ok(content) => {
-            for line in content.lines() {
-                let line = line.trim();
-                // コメントと空行をスキップ
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
-                }
-                if let Err(e) = db.add_ignore_rule(line) {
-                    eprintln!("Failed to import ignore rule '{line}': {e}");
-                }
-            }
-
-            // .sssignore を .sssignore.bak にリネーム
-            let bak_path = home_dir.join(".sssignore.bak");
-            if let Err(e) = std::fs::rename(&sssignore_path, &bak_path) {
-                eprintln!("Failed to rename .sssignore to .sssignore.bak: {e}");
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to read .sssignore for migration: {e}");
-        }
+    // ファイルが無かった場合も含め、二度と実行しないようフラグを立てる
+    if let Err(e) = db.save_setting(SSSIGNORE_MIGRATED_KEY, "1") {
+        eprintln!("Failed to persist sssignore migration flag: {e}");
     }
 }
 
@@ -90,20 +101,35 @@ pub async fn scan_directory(
         migrate_sssignore_to_db(&db);
     }
 
-    // DB から除外ルールを取得して IgnoreFilter を作成
-    let patterns = {
-        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        db.get_ignore_rules().unwrap_or_default()
-    };
-    let ignore_filter = IgnoreFilter::from_patterns(&patterns);
+    // データベースから前回のファイルメタデータ（撮影日込み）を取得
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    let previous_files_with_dates = db.get_all_file_metadata().unwrap_or_default();
+
+    // DB から除外ルールを取得して IgnoreFilter を作成。撮影日除外ルールは、表示時に
+    // EXIFから取得しDBに保存済みの撮影日（上で取得した previous_files_with_dates 由来）を
+    // 最優先に使う。未取得の画像はパス文字列中の日付でフォールバック判定する（ignore.rs）。
+    let rules: Vec<IgnoreRule> = db
+        .get_ignore_rules()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(pattern, rule_type)| IgnoreRule { pattern, rule_type })
+        .collect();
+    drop(db);
+
+    let captured_dates: HashMap<String, String> = previous_files_with_dates
+        .iter()
+        .filter_map(|(path, _, _, captured_date)| captured_date.clone().map(|d| (path.clone(), d)))
+        .collect();
+    let ignore_filter = IgnoreFilter::from_rules_with_captured_dates(&rules, captured_dates);
 
     // スキャナーを作成
     let scanner = ImageScanner::new(ignore_filter);
 
-    // データベースから前回のファイルメタデータを取得
-    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    let previous_files = db.get_all_file_metadata().unwrap_or_default();
-    drop(db);
+    // scanner が使う差分検出用の前回スナップショット（撮影日は上で別途使用済みのため落とす）
+    let previous_files: Vec<(String, i64, i64)> = previous_files_with_dates
+        .into_iter()
+        .map(|(path, mtime, size, _)| (path, mtime, size))
+        .collect();
 
     // 差分スキャンを実行（進捗イベント付き）
     let scan_result = scanner.scan_directory_incremental_with_progress(

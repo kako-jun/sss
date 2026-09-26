@@ -15,7 +15,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 }));
 
 import * as tauri from './tauri';
-import type { ImageInfo, ScanProgress, Stats, RecentImage } from '../types';
+import type { ImageInfo, ScanProgress, Stats, RecentImage, IgnoreRule } from '../types';
 
 beforeEach(() => {
   invoke.mockReset();
@@ -130,6 +130,16 @@ describe('tauri command wrappers', () => {
       ['2024-01', 5],
       ['2024-02', 8],
     ]);
+  });
+
+  it('getIgnorePatterns returns rules with pattern + ruleType (glob/date)', async () => {
+    const rules: IgnoreRule[] = [
+      { pattern: '**/.thumbnails/', ruleType: 'glob' },
+      { pattern: '2023-05-15', ruleType: 'date' },
+    ];
+    invoke.mockResolvedValue(rules);
+    expect(await tauri.getIgnorePatterns()).toEqual(rules);
+    expect(invoke).toHaveBeenCalledWith('get_ignore_patterns');
   });
 
   it('removeIgnorePattern invokes remove_ignore_pattern with pattern', async () => {

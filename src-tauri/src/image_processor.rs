@@ -284,6 +284,36 @@ pub fn requires_synchronous_cache(image_path: &Path, apply_rotation: bool) -> bo
         || (!apply_rotation && orientation_requires_rotation(image_path))
 }
 
+/// 撮影日時を優先順位付きで取得する（#61問題3）。
+///
+/// `DateTime`（ファイル更新日時相当。カメラが最後に書き換えた日時で、実際の撮影日と
+/// ずれることがある）よりも `DateTimeOriginal`（シャッターを切った日時）を優先し、
+/// それも無ければ `DateTimeDigitized`（デジタル化日時）、最後に `DateTime` の順で
+/// フォールバックする。
+fn read_preferred_date_time(exif: &exif::Exif) -> Option<String> {
+    for tag in [
+        exif::Tag::DateTimeOriginal,
+        exif::Tag::DateTimeDigitized,
+        exif::Tag::DateTime,
+    ] {
+        if let Some(field) = exif.get_field(tag, exif::In::PRIMARY) {
+            return Some(field.display_value().to_string());
+        }
+    }
+    None
+}
+
+/// EXIFの `"YYYY:MM:DD HH:MM:SS"` 形式（`display_value()` の出力）から
+/// 日付部分だけを `"YYYY-MM-DD"` に変換する。撮影日除外ルール（#61）で使う。
+pub fn extract_date_only(date_time: &str) -> Option<String> {
+    let trimmed = date_time.trim().trim_matches('"');
+    let date_part = trimmed.split(' ').next()?;
+    if date_part.len() != 10 {
+        return None;
+    }
+    Some(date_part.replace(':', "-"))
+}
+
 /// EXIF情報を取得
 pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
     let file = File::open(image_path).map_err(|e| format!("Failed to open file: {e}"))?;
@@ -301,10 +331,8 @@ pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
                 height: None,
             };
 
-            // 撮影日時
-            if let Some(field) = exif.get_field(exif::Tag::DateTime, exif::In::PRIMARY) {
-                info.date_time = Some(field.display_value().to_string());
-            }
+            // 撮影日時（DateTimeOriginal → DateTimeDigitized → DateTime の優先順）
+            info.date_time = read_preferred_date_time(&exif);
 
             // GPS座標の取得
             // 緯度
