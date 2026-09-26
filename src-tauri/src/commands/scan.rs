@@ -3,7 +3,7 @@ use crate::ignore::IgnoreFilter;
 use crate::playlist::Playlist;
 use crate::scanner::ImageScanner;
 use std::path::PathBuf;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 /// ~/.sssignore が存在する場合、内容を DB にインポートして .sssignore.bak にリネーム
 fn migrate_sssignore_to_db(db: &crate::database::Database) {
@@ -61,6 +61,15 @@ pub async fn scan_directory(
 
     if !directory.exists() {
         return Err(format!("Directory does not exist: {directory_path}"));
+    }
+
+    // asset scope（convertFileSrc が読み込めるディレクトリ）にスキャン対象を動的に許可する。
+    // 手動スキャン・起動時自動スキャンはどちらもこのコマンドを通るため、ここ1箇所で両方をカバーする。
+    if let Err(e) = app.asset_protocol_scope().allow_directory(&directory, true) {
+        eprintln!(
+            "Failed to allow asset scope for {}: {e}",
+            directory.display()
+        );
     }
 
     // マイグレーション処理：~/.sssignore が存在する場合は DB にインポート

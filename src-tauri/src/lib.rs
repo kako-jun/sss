@@ -5,6 +5,7 @@
 //! `main.rs` (bin) はこの `run()` を呼ぶだけの薄い殻で、結合テスト
 //! (`tests/golden_e2e.rs`) はここで公開した芯を直接叩いて golden path を機械検証する。
 
+pub mod asset_scope;
 pub mod commands;
 pub mod database;
 pub mod ignore;
@@ -12,22 +13,32 @@ pub mod image_processor;
 pub mod playlist;
 pub mod scanner;
 
+use asset_scope::startup_allow_dirs;
+use commands::file_operations::get_picked_directory;
 use commands::AppState;
 use database::Database;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
 
 /// Tauri アプリを起動する。
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // 2つ目のインスタンス起動時は、新規ウィンドウを作らず既存ウィンドウへフォーカスする
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .setup(|app| {
             // スクリーンセーバーとディスプレイスリープを抑制（クロスプラットフォーム対応）
-            // sleep(false)によりノートPC蓋閉じ時のシステムスリープは許可
+            // sleep(false)によりノートPC蓋閉じ時のシステムスリープは許可。
+            // D-Bus が無い環境（一部のLinux等）では初期化に失敗しうるが、
+            // スクリーンセーバー抑制が使えないだけでアプリ自体は起動を続ける。
             let keep_awake = keepawake::Builder::default()
                 .display(true) // ディスプレイをオンに保つ（スライドショー表示のため）
                 .idle(true) // アイドルスリープを防ぐ
@@ -35,7 +46,10 @@ pub fn run() {
                 .reason("Slideshow running")
                 .app_name("Smart Slide Show")
                 .create()
-                .expect("Failed to initialize keep awake");
+                .map_err(|e| {
+                    eprintln!("Failed to initialize keep awake, continuing without it: {e}");
+                })
+                .ok();
 
             // データベースパスを取得
             let app_data_dir = app
@@ -59,6 +73,30 @@ pub fn run() {
 
             // データベースを初期化
             let db = Database::new(db_path).expect("failed to initialize database");
+
+            // asset scope（convertFileSrc が読み込めるディレクトリ）を動的に許可する。
+            // tauri.conf.json の静的 scope は空にしてあるため、表示に必要な全ディレクトリを
+            // ここと scan_directory コマンドの両方で明示的に許可する（起動直後の3経路: 手動スキャン・
+            // 起動時自動スキャンは scan_directory 側、DB保存済みディレクトリの即時許可はここ）。
+            let last_directory = db
+                .get_setting("last_directory_path")
+                .ok()
+                .flatten()
+                .map(PathBuf::from);
+            // ホームディレクトリが解決できない環境ではピック先は諦め、キャッシュ・前回
+            // ディレクトリだけでも許可を続ける
+            let share_directory = get_picked_directory(&db).ok();
+
+            let scope = app.asset_protocol_scope();
+            for dir in startup_allow_dirs(
+                &cache_dir,
+                share_directory.as_deref(),
+                last_directory.as_deref(),
+            ) {
+                if let Err(e) = scope.allow_directory(&dir, true) {
+                    eprintln!("Failed to allow asset scope for {}: {e}", dir.display());
+                }
+            }
 
             // アプリケーション状態を設定
             app.manage(AppState {

@@ -1,3 +1,4 @@
+use crate::asset_scope::resolve_share_directory;
 use crate::commands::types::AppState;
 use crate::ignore::IgnoreFilter;
 use crate::image_processor::get_exif_info;
@@ -14,17 +15,20 @@ pub struct RecentImage {
     pub last_displayed: String,
 }
 
-/// デフォルトのピック先ディレクトリパスを取得
-#[tauri::command]
-pub async fn get_default_share_directory() -> Result<String, String> {
-    let pictures_dir = if cfg!(windows) {
+/// ホームディレクトリ配下の Pictures フォルダを取得する（OS別に環境変数を切り替え）。
+pub(crate) fn home_pictures_dir() -> Result<PathBuf, String> {
+    if cfg!(windows) {
         std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
     } else {
         std::env::var("HOME").map(|p| PathBuf::from(p).join("Pictures"))
     }
-    .map_err(|_| "Failed to get home directory".to_string())?;
+    .map_err(|_| "Failed to get home directory".to_string())
+}
 
-    let share_directory = pictures_dir.join("sss-picked");
+/// デフォルトのピック先ディレクトリパスを取得
+#[tauri::command]
+pub async fn get_default_share_directory() -> Result<String, String> {
+    let share_directory = home_pictures_dir()?.join("sss-picked");
     Ok(share_directory.to_str().unwrap_or("").to_string())
 }
 
@@ -104,24 +108,11 @@ pub async fn pick_image(image_path: String, state: State<'_, AppState>) -> Resul
 
     // コピー先ディレクトリを取得（設定から、なければデフォルト）
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    let share_directory = match db
+    let share_setting = db
         .get_setting("share_directory_path")
-        .map_err(|e| e.to_string())?
-    {
-        Some(path) => PathBuf::from(path),
-        None => {
-            // デフォルト: Pictures/sss-picked
-            let pictures_dir = if cfg!(windows) {
-                std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
-            } else {
-                std::env::var("HOME").map(|p| PathBuf::from(p).join("Pictures"))
-            }
-            .map_err(|_| "Failed to get home directory".to_string())?;
-
-            pictures_dir.join("sss-picked")
-        }
-    };
+        .map_err(|e| e.to_string())?;
     drop(db);
+    let share_directory = resolve_share_directory(&home_pictures_dir()?, share_setting.as_deref());
 
     // ディレクトリが存在しない場合は作成
     if !share_directory.exists() {
@@ -281,23 +272,14 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
 }
 
 /// ピック済みフォルダのパスを取得するヘルパー
-fn get_picked_directory(db: &crate::database::Database) -> Result<PathBuf, String> {
-    match db
+pub(crate) fn get_picked_directory(db: &crate::database::Database) -> Result<PathBuf, String> {
+    let share_setting = db
         .get_setting("share_directory_path")
-        .map_err(|e| e.to_string())?
-    {
-        Some(path) => Ok(PathBuf::from(path)),
-        None => {
-            let pictures_dir = if cfg!(windows) {
-                std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
-            } else {
-                std::env::var("HOME").map(|p| PathBuf::from(p).join("Pictures"))
-            }
-            .map_err(|_| "Failed to get home directory".to_string())?;
-
-            Ok(pictures_dir.join("sss-picked"))
-        }
-    }
+        .map_err(|e| e.to_string())?;
+    Ok(resolve_share_directory(
+        &home_pictures_dir()?,
+        share_setting.as_deref(),
+    ))
 }
 
 /// ピック済み画像一覧を取得（sss-pickedフォルダをスキャン）

@@ -1,0 +1,7 @@
+{
+  "identifier": "main",
+  "description": "sss メインウィンドウの権限。ファイル読み書きは Tauri コマンド経由で行うため plugin-fs は不要。asset scope は起動時・スキャン時に動的許可する（tauri.conf.json の静的 scope は空）",
+  "local": true,
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-open", "opener:default", "process:allow-exit"]
+}
