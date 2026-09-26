@@ -22,13 +22,24 @@ fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &st
     Ok(())
 }
 
-/// SQLite の `LIKE` パターン中のワイルドカード文字（`%`/`_`）と、エスケープ文字自体
-/// （`\`）をエスケープする（#63、`get_file_metadata_under` のディレクトリ前方一致用）。
-/// `ESCAPE '\'` と対で使うこと。
-fn like_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
+/// `get_file_metadata_under` のディレクトリ境界を範囲クエリの下限/上限文字列として
+/// 計算する（#63 PR#77レビューM1(must)）。`sep` を引数に取る純粋関数にすることで、
+/// コンパイル時のOS（`std::path::MAIN_SEPARATOR`）に関わらず、Windows形式の区切り文字
+/// （`\`）を明示的に渡してユニットテストできる。
+///
+/// - `lower = dir_trimmed + sep`（`directory` 自身の子孫の最小値。`directory` 自身は
+///   このAPIの呼び出し元が別途 `path = dir_trimmed` の等価一致で拾う）
+/// - `upper = dir_trimmed + (sepの次のバイト)`（`sep` はASCII、`/`=0x2F・`\`=0x5C なので
+///   +1 も必ずASCII範囲に収まり安全。BINARY照合＝バイト単位比較のTEXT主キーに対する
+///   `path >= lower AND path < upper` が、区切り文字境界での前方一致（`/p/foo` は
+///   `/p/foo/bar.jpg` にマッチし `/p/foobar/x.jpg` にはマッチしない）になる。大文字小文字も
+///   区別される（BINARY照合はバイト値そのものを比較するため）
+fn directory_scope_bounds(dir_trimmed: &str, sep: char) -> (String, String) {
+    let lower = format!("{dir_trimmed}{sep}");
+    let sep_next =
+        char::from_u32(sep as u32 + 1).expect("MAIN_SEPARATORはASCIIなので+1もASCII範囲に収まる");
+    let upper = format!("{dir_trimmed}{sep_next}");
+    (lower, upper)
 }
 
 /// `file_metadata` へのupsertを1件以上、指定の `conn`（`Connection`/`Transaction` の
@@ -609,20 +620,24 @@ impl Database {
     /// 確定削除されてしまう事故があった（`ignore::IgnoreFilter::has_pruned_ancestor_dir`
     /// も対象外のディレクトリに対しては`starts_with`が偽になり救えない）。
     ///
-    /// 前方一致の境界は区切り文字で取る（`/p/foo` を境界指定に `/p/foo/bar.jpg` はマッチ
-    /// させるが `/p/foobar/x.jpg` はマッチさせない）。`LIKE ... ESCAPE` でSQL側の
-    /// ワイルドカード文字（`%`/`_`）をエスケープしてから前方一致させ、`directory`
-    /// 自身のパス（通常ファイルは無いが念のため）も等価一致で拾う。
+    /// **PR#77レビューM1(must)**: 当初は `LIKE ... ESCAPE '\'` で前方一致させていたが、
+    /// エスケープ文字に `\` を使っているため、区切り文字がバックスラッシュのWindows
+    /// （`sep == '\\'`）では `format!("{dir}{sep}%")` が生成するパターンの `\%` が
+    /// 「エスケープされたリテラル`%`」と解釈されてしまい、ワイルドカードとして機能せず
+    /// 常に0件しかマッチしなかった（Windowsで差分スキャンの範囲限定が事実上死んでいた）。
+    /// `path` は主キー（`TEXT PRIMARY KEY`、既定のBINARY照合＝バイト単位比較・大文字小文字
+    /// 区別）なので、`LIKE` ではなく **範囲クエリ** `path >= lower AND path < upper`
+    /// （`lower = dir + sep`、`upper = dir + (sepの次のバイト)`）に置き換える。エスケープが
+    /// 一切不要になるうえ、主キーのインデックスがそのまま効く。
     pub fn get_file_metadata_under(&self, directory: &str) -> Result<Vec<FileMetadataRow>> {
         let dir_trimmed = directory.trim_end_matches(['/', '\\']);
-        let sep = std::path::MAIN_SEPARATOR;
-        let prefix_pattern = format!("{}{sep}%", like_escape(dir_trimmed));
+        let (lower, upper) = directory_scope_bounds(dir_trimmed, std::path::MAIN_SEPARATOR);
 
         let mut stmt = self.conn.prepare(
             "SELECT path, modified_time, file_size FROM file_metadata
-             WHERE path = ?1 OR path LIKE ?2 ESCAPE '\\'",
+             WHERE path = ?1 OR (path >= ?2 AND path < ?3)",
         )?;
-        let rows = stmt.query_map(params![dir_trimmed, prefix_pattern], |row| {
+        let rows = stmt.query_map(params![dir_trimmed, lower, upper], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?;
 
@@ -1502,16 +1517,18 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// #63: `LIKE` のワイルドカード文字（`%`/`_`）を含むディレクトリパスでも、
-    /// リテラルとして扱われエスケープが効くこと（ワイルドカードとして誤爆しない）。
+    /// #63 PR#77レビューM1: `LIKE`のワイルドカード文字と紛らわしい `%`/`_` を含む
+    /// ディレクトリパスでも、範囲クエリ（バイト単位比較）は常にリテラルとして扱うため
+    /// 誤爆しないこと（LIKEを使っていた頃のエスケープ回帰テストを、実装変更後も
+    /// 同じ入力で引き続き通ることを確認する形で残す）。
     #[test]
-    fn get_file_metadata_under_escapes_like_wildcard_characters_in_directory() {
+    fn get_file_metadata_under_treats_percent_and_underscore_as_literal_bytes() {
         let path = temp_db_path("file_metadata_under_escape");
         let db = Database::new(path.clone()).unwrap();
 
         db.upsert_file_metadata("/p/100%_done/a.jpg", 100, 10)
             .unwrap();
-        // "%" が本物のワイルドカードとして働くと、無関係な "/p/100X_done" もヒットしてしまう。
+        // "%"/"_" が本物のワイルドカードとして働くと、無関係な "/p/100X_done" もヒットする。
         db.upsert_file_metadata("/p/100X_done/a.jpg", 200, 20)
             .unwrap();
 
@@ -1519,6 +1536,81 @@ mod tests {
         let paths: Vec<&str> = under.iter().map(|(p, ..)| p.as_str()).collect();
 
         assert_eq!(paths, vec!["/p/100%_done/a.jpg"]);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63 PR#77レビューM1(must) 直接の回帰テスト: `directory_scope_bounds`を
+    /// `sep = '\\'`（Windows形式）で明示的に呼び、コンパイル時のホストOSに関わらず
+    /// Windowsの区切り文字での境界計算を検証する。修正前は`LIKE ... ESCAPE '\'`の
+    /// パターンが`format!("{dir}{sep}%")`＝`"C:\Photos\%"`となり、エスケープ文字と
+    /// 区切り文字が一致するWindows環境では`\%`がリテラル`%`と解釈され常に0件だった。
+    #[test]
+    fn directory_scope_bounds_computes_correct_range_for_windows_backslash_separator() {
+        let (lower, upper) = directory_scope_bounds(r"C:\Photos", '\\');
+        assert_eq!(lower, "C:\\Photos\\", "下限はディレクトリ+区切り文字のはず");
+        assert_eq!(
+            upper, "C:\\Photos]",
+            "上限は区切り文字(0x5C)の次のバイト(0x5D=']')のはず"
+        );
+
+        // 実際にWindows形式のパスをこの境界で絞り込めることも確認する（DBの照合は
+        // BINARY＝バイト単位比較なので、区切り文字がバックスラッシュでも問題なく動く）。
+        let path = temp_db_path("windows_style_bounds");
+        let db = Database::new(path.clone()).unwrap();
+        db.upsert_file_metadata(r"C:\Photos\a.jpg", 100, 10)
+            .unwrap();
+        db.upsert_file_metadata(r"C:\Photos\sub\b.jpg", 200, 20)
+            .unwrap();
+        // "C:\Photos" に前方一致するだけの別ディレクトリ（境界外）を巻き込まない。
+        db.upsert_file_metadata(r"C:\PhotosArchive\c.jpg", 300, 30)
+            .unwrap();
+
+        let under: Vec<String> = db
+            .conn
+            .prepare("SELECT path FROM file_metadata WHERE path = ?1 OR (path >= ?2 AND path < ?3)")
+            .unwrap()
+            .query_map(params![r"C:\Photos", lower, upper], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert_eq!(
+            under.len(),
+            2,
+            "C:\\Photos配下(サブフォルダ含む)の2件だけがヒットするはず: {under:?}"
+        );
+        assert!(under.iter().any(|p| p == r"C:\Photos\a.jpg"));
+        assert!(under.iter().any(|p| p == r"C:\Photos\sub\b.jpg"));
+        assert!(
+            !under.iter().any(|p| p.starts_with(r"C:\PhotosArchive")),
+            "前方一致するだけの別ディレクトリを巻き込んではいけない"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63 PR#77レビューS1: 範囲クエリはBINARY照合（バイト単位比較）なので、
+    /// `/p/foo` を指定したとき大文字違いの `/p/Foo` を巻き込まない
+    /// （LIKE除去に伴う範囲クエリ化で、大文字小文字の区別が壊れていないことの確認）。
+    #[test]
+    fn get_file_metadata_under_does_not_conflate_different_case_directories() {
+        let path = temp_db_path("case_sensitive_scope");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/foo/a.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/Foo/b.jpg", 200, 20).unwrap();
+
+        let under_foo = db.get_file_metadata_under("/p/foo").unwrap();
+        let paths: Vec<&str> = under_foo.iter().map(|(p, ..)| p.as_str()).collect();
+
+        assert_eq!(paths, vec!["/p/foo/a.jpg"]);
+        assert!(
+            !paths.contains(&"/p/Foo/b.jpg"),
+            "/p/foo と /p/Foo は大文字小文字が違う別ディレクトリとして区別されるはず"
+        );
 
         let _ = std::fs::remove_file(&path);
     }
