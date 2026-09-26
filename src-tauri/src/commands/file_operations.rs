@@ -1,11 +1,11 @@
-use crate::asset_scope::resolve_share_directory;
+use crate::asset_scope::{resolve_and_sanitize_share_directory, resolve_share_directory};
 use crate::commands::types::AppState;
 use crate::ignore::IgnoreFilter;
 use crate::image_processor::get_exif_info;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::State;
+use tauri::{Manager, State};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,7 +99,11 @@ pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
 
 /// ピック機能：画像をPictures/sss-pickedフォルダにコピー
 #[tauri::command]
-pub async fn pick_image(image_path: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn pick_image(
+    image_path: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
     let source_path = Path::new(&image_path);
 
     if !source_path.exists() {
@@ -112,12 +116,34 @@ pub async fn pick_image(image_path: String, state: State<'_, AppState>) -> Resul
         .get_setting("share_directory_path")
         .map_err(|e| e.to_string())?;
     drop(db);
-    let share_directory = resolve_share_directory(&home_pictures_dir()?, share_setting.as_deref());
+    let pictures_dir = home_pictures_dir()?;
+    let share_directory = resolve_share_directory(&pictures_dir, share_setting.as_deref());
 
     // ディレクトリが存在しない場合は作成
     if !share_directory.exists() {
         fs::create_dir_all(&share_directory)
             .map_err(|e| format!("Failed to create share directory: {e}"))?;
+    }
+
+    // 起動時・設定変更時点ではディレクトリが未作成で asset scope 許可に失敗していることが
+    // ある（新規環境の既定ピック先など）。実在が保証された今このタイミングで改めて許可し、
+    // 「ピック済み」タブのサムネイル/動画表示が次回起動を待たずに動くようにする
+    // （レビュー #73 must）。
+    match resolve_and_sanitize_share_directory(&pictures_dir, share_setting.as_deref()) {
+        Some(safe_dir) => {
+            if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
+                eprintln!(
+                    "Failed to allow asset scope for {}: {e}",
+                    safe_dir.display()
+                );
+            }
+        }
+        None => {
+            eprintln!(
+                "Refusing to allow unsafe asset scope directory: {}",
+                share_directory.display()
+            );
+        }
     }
 
     // ファイル名を取得

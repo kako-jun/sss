@@ -81,24 +81,33 @@ pub fn run() {
             // ここと scan_directory コマンドの両方で明示的に許可する（起動直後の3経路: 手動スキャン・
             // 起動時自動スキャンは scan_directory 側、DB保存済みディレクトリの即時許可はここ）。
             //
-            // sanitize_allow_dir() を必ず通す: 空文字列や相対パス・ファイルシステムルートを
+            // sanitize_allow_dir() を必ず通す: 空文字列や相対パス・ホームドライブのルートを
             // そのまま allow_directory に渡すと、tauri の scope 実装が意図せず広いパターン
             // （最悪 "/**" 相当）を生成しうるため（レビュー #73 M1）。
-            let last_directory = db
-                .get_setting("last_directory_path")
-                .ok()
-                .flatten()
-                .map(PathBuf::from);
-            // ホームディレクトリが解決できない環境ではピック先は諦め、キャッシュ・前回
-            // ディレクトリだけでも許可を続ける
+            //
+            // last_directory_path だけでなく scan_history の distinct directory_path も
+            // まとめて候補にする（履歴タブに残る他ディレクトリの画像も表示できるように。
+            // レビュー #73 should2）。
+            let mut scanned_directories: Vec<PathBuf> = db
+                .get_distinct_scan_directories()
+                .unwrap_or_default()
+                .into_iter()
+                .map(PathBuf::from)
+                .collect();
+            if let Some(last) = db.get_setting("last_directory_path").ok().flatten() {
+                let last = PathBuf::from(last);
+                if !scanned_directories.contains(&last) {
+                    scanned_directories.push(last);
+                }
+            }
+            // ホームディレクトリが解決できない環境ではピック先は諦め、キャッシュ・スキャン履歴
+            // だけでも許可を続ける
             let share_directory = get_picked_directory(&db).ok();
 
             let scope = app.asset_protocol_scope();
-            for dir in startup_allow_dirs(
-                &cache_dir,
-                share_directory.as_deref(),
-                last_directory.as_deref(),
-            ) {
+            for dir in
+                startup_allow_dirs(&cache_dir, share_directory.as_deref(), &scanned_directories)
+            {
                 match sanitize_allow_dir(&dir) {
                     Some(safe_dir) => {
                         if let Err(e) = scope.allow_directory(&safe_dir, true) {

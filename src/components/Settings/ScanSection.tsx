@@ -71,7 +71,15 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
       onScanComplete();
     } catch (err) {
       console.error('Failed to scan directory:', err);
-      setError(err instanceof Error ? err.message : 'Failed to scan directory');
+      // Tauri コマンドの Err(String) はそのまま文字列としてrejectされる（Errorインスタンスではない）。
+      // asset scope の安全性チェックで拒否された場合など、理由をそのままユーザーに見せる。
+      if (err instanceof Error) {
+        setError(err.message);
+      } else if (typeof err === 'string') {
+        setError(err);
+      } else {
+        setError('Failed to scan directory');
+      }
     } finally {
       setIsScanning(false);
       if (unlisten) {
