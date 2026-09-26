@@ -35,7 +35,10 @@ const SSSIGNORE_MIGRATED_KEY: &str = "sssignore_migrated";
 ///   ここで改めて除く）。
 /// - 上記候補のうち未取得、またはファイルが変更されて古くなったものだけ、rayon で
 ///   並列にEXIFを読み直す。
-fn resolve_captured_dates(
+///
+/// `pub`: `tests/exif_resolve_throughput.rs`（S-b計測。`#[ignore]`付き）が
+/// DB/Tauri抜きでこの処理単体の所要時間を直接測るために公開する。
+pub fn resolve_captured_dates(
     exif_cache_entries: Vec<ExifCacheRow>,
     current_files: &[FileMetadata],
     walk_filter: &IgnoreFilter,

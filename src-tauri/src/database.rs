@@ -34,7 +34,9 @@ fn ignore_rules_has_composite_pk(conn: &Connection) -> Result<bool> {
 type FileMetadataRow = (String, i64, i64);
 
 /// `exif_cache` の1行（path, captured_date, file_mtime）
-pub(crate) type ExifCacheRow = (String, Option<String>, i64);
+/// `pub`: `commands::scan::resolve_captured_dates`（pub、tests/exif_resolve_throughput.rs から
+/// 直接呼ぶ計測用ベンチ）の公開シグネチャに現れるため、private_interfaces lint を避ける必要がある。
+pub type ExifCacheRow = (String, Option<String>, i64);
 
 pub struct Database {
     conn: Connection,
