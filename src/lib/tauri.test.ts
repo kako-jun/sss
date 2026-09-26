@@ -54,7 +54,6 @@ describe('tauri command wrappers', () => {
       exif: null,
       displayCount: 0,
       lastDisplayed: null,
-      applyRotation: true,
     };
     invoke.mockResolvedValue(image);
     const result = await tauri.getNextImage();

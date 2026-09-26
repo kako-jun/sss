@@ -30,7 +30,6 @@ function makeImage(path: string, isVideo = false): ImageInfo {
     exif: null,
     displayCount: 0,
     lastDisplayed: null,
-    applyRotation: true,
   };
 }
 

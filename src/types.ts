@@ -9,9 +9,6 @@ export interface ImageInfo {
   exif: ExifInfo | null;
   displayCount: number;
   lastDisplayed: string | null;
-  // apply_exif_rotation設定のスナップショット。回転はフロントのimage-orientation CSSで
-  // 行うため、img要素はこれに応じてfrom-image/noneを切り替える必要がある（#60）。
-  applyRotation: boolean;
 }
 
 // EXIF情報

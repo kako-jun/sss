@@ -57,20 +57,18 @@ export function Slideshow({ image, isLoading, onVideoEnded }: SlideshowProps) {
           />
         ) : (
           // 画像の場合
+          // #60 レビュー2巡目 must B: crossOrigin/image-orientationの明示切替は撤去した。
+          // wry の WebKitGTK 実装が asset スキームを CORS 有効登録しておらず、
+          // crossOrigin="anonymous"を付けるとLinux本番で画像が一切表示されなくなる
+          // リスクがあるため。回転はWebView既定の動作（image-orientation: from-image、
+          // EXIF Orientationに従って自動回転）に任せる。apply_exif_rotation=falseで
+          // EXIFが回転を要求している画像は、バックエンドが「格納画素のまま・EXIF無し」の
+          // キャッシュを返す（image_processor::plan_cache_file/requires_synchronous_cache）
+          // ため、原本を返さない限りfrom-imageが誤って回転させることはない。
           <motion.img
             key={image.path}
             src={srcUrl}
             alt={image.path}
-            // #60 レビュー方針転換: 回転はバックエンドで焼き込まず、フロントの
-            // image-orientation CSS で行う（apply_exif_rotation設定に連動して
-            // from-image/noneを切替）。ただし asset プロトコルはWebViewから見て
-            // 別オリジンであり、crossOrigin無しのクロスオリジン画像は
-            // image-orientation自体が無視される（Edgeで実測確認済み）。
-            // tauri 2.10.3 の asset protocol ハンドラ（src/protocol/asset.rs）は
-            // Access-Control-Allow-Origin にwindow_originをそのまま返す
-            // （ワイルドカードではなく実オリジンを反映）ため、crossOrigin="anonymous"
-            // （認証情報なしのCORSリクエスト）でCORSチェックを通過できる。
-            crossOrigin="anonymous"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -78,13 +76,6 @@ export function Slideshow({ image, isLoading, onVideoEnded }: SlideshowProps) {
             className="w-full h-full object-contain"
             style={{
               willChange: 'opacity',
-              // apply_exif_rotation設定に連動: ONならWebView既定の
-              // from-image（EXIF Orientationに従って自動回転）に任せ、
-              // OFFならnoneで原本の生ピクセルのまま表示する。
-              // なお4K超/TIFF等で結局バックエンドがキャッシュを焼く場合は
-              // そのキャッシュがapply_rotationに従って既に回転済み・EXIF無しで
-              // 書き出されるため、from-imageを当てても二重回転はしない。
-              imageOrientation: image.applyRotation ? 'from-image' : 'none',
             }}
             draggable={false}
             onError={(e) => {

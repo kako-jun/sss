@@ -14,13 +14,31 @@
 //! - 累積サイズが上限を超えたら mtime の古いものから削除する。ただし直近に実際へ
 //!   返した（表示に使われた）パスは削除対象から除外し、mtime も参照時に更新する
 //!   （レビュー must4: 生成順=FIFOの巻き添え削除を防ぎ、真の LRU に近づける）
-//! - WebView が直接表示できない形式（TIFF等）は、原本を返せないため
-//!   `request_current_and_wait` で変換完了を待ってからキャッシュパスを返す
-//!   （レビュー must2）
+//! - WebView が直接表示できない形式（TIFF等）、および apply_rotation=false なのに
+//!   EXIF Orientation が回転を要求している画像は、原本をそのまま返すと表示が誤る
+//!   （前者はそもそも表示できず、後者はWebView既定のfrom-imageが勝手に回転してしまう）
+//!   ため、`request_current_and_wait` で変換完了を待ってからキャッシュパスを返す
+//!   （レビュー1巡目 must2、2巡目 must B）
 //! - 変換に失敗した画像は失敗セットに記録し、同じキャッシュキーの再要求を抑止する
 //!   （レビュー must7）
 //! - ジョブ処理は `catch_unwind` で囲み、image crate 内の panic でワーカースレッド
 //!   自体が死なないようにする（レビュー must6）
+//!
+//! 実装上の注意（レビュー2巡目 must A / should(1)）:
+//! - `mark_served` のmtime更新は `OpenOptions::new().append(true)` で書込アクセスを
+//!   要求してから `set_modified` を呼ぶ（Windows では `set_modified` に
+//!   `FILE_WRITE_ATTRIBUTES` 相当の書込アクセス権が必要で、読み取り専用オープンでは
+//!   失敗しうるため）。
+//! - `request_current_and_wait` の待ち手は `queue` ロックを保持したまま
+//!   `exists()`/失敗セットを確認してから `wait_timeout` を呼ぶ。ワーカー側も
+//!   `completed.notify_all()` を呼ぶ前に同じ `queue` ロックを取得する。これにより
+//!   「確認とwait開始の間に通知が来て待ちそびれる」古典的な lost wakeup を避ける。
+//!
+//! 既知の制約（レビュー2巡目 should(3)）: ワーカーは単一スレッドで非プリエンプティブ
+//! なため、`request_current_and_wait` 呼び出し時にワーカーが既に別の重い先読みジョブを
+//! 処理中だと、その先読みが終わるまで新しい current 要求（TIFF等）は着手されない。
+//! 巨大な先読み画像の処理中に呼ばれた場合、`CACHE_WAIT_TIMEOUT`（既定5秒）を
+//! 使い切ってタイムアウトする可能性がある。
 
 use std::collections::{HashSet, VecDeque};
 use std::panic::{self, AssertUnwindSafe};
@@ -69,6 +87,10 @@ struct Shared {
 }
 
 /// 画像最適化キャッシュを直列に作る常駐ワーカー。
+/// `Clone` は内部の `Arc<Shared>` の複製のみで、同じワーカー/キューを指し続ける
+/// （軽量。`tauri::async_runtime::spawn_blocking` へ渡す `'static` クロージャへ
+/// 持ち込むために使う。レビュー2巡目 should(2)）。
+#[derive(Clone)]
 pub struct CacheWorker {
     shared: Arc<Shared>,
 }
@@ -114,7 +136,7 @@ impl CacheWorker {
             };
 
             if job.cache_file.exists() {
-                shared.completed.notify_all();
+                notify_completed(&shared);
                 continue;
             }
 
@@ -168,7 +190,7 @@ impl CacheWorker {
                 }
             }
 
-            shared.completed.notify_all();
+            notify_completed(&shared);
         }
     }
 
@@ -229,6 +251,11 @@ impl CacheWorker {
         self.request_current(source_path, cache_file.clone(), apply_rotation);
 
         let deadline = Instant::now() + timeout;
+        // must A/should(1): 「確認」から「wait開始」までロックを保持し続けることで、
+        // その間にワーカーが完了・notify_all してしまい待ちそびれる（lost wakeup）
+        // 事故を防ぐ。ワーカー側（notify_completed）も同じ queue ロックを取ってから
+        // 通知するため、ここでロックを取れた時点で「直前の完了」は必ず反映されている。
+        let mut queue = self.shared.queue.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             if cache_file.exists() {
                 return true;
@@ -242,13 +269,12 @@ impl CacheWorker {
                 return cache_file.exists();
             }
 
-            let queue = self.shared.queue.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = self
+            let (guard, _timeout_result) = self
                 .shared
                 .completed
                 .wait_timeout(queue, deadline - now)
                 .unwrap_or_else(|e| e.into_inner());
-            // ロックはここでドロップされ、ループ先頭で exists()/failed を再確認する。
+            queue = guard;
         }
     }
 
@@ -299,7 +325,10 @@ impl CacheWorker {
     /// - 直近 `RECENTLY_SERVED_CAPACITY` 件は enforce_cache_limit の削除対象から除外する
     ///   （表示中/直近表示分がバックグラウンドの削除と競合して消えるのを防ぐ）
     pub fn mark_served(&self, cache_file: PathBuf) {
-        if let Ok(file) = std::fs::File::open(&cache_file) {
+        // must A: 読み取り専用オープンだと Windows で set_modified に必要な
+        // FILE_WRITE_ATTRIBUTES 相当の権限が無く失敗しうる。append(true) は
+        // ファイルを truncate/作成せずに書込アクセスだけ要求できる。
+        if let Ok(file) = std::fs::OpenOptions::new().append(true).open(&cache_file) {
             let _ = file.set_modified(SystemTime::now());
         }
 
@@ -322,6 +351,16 @@ impl CacheWorker {
             .unwrap_or_else(|e| e.into_inner())
             .contains(cache_file)
     }
+
+    /// 失敗セットを空にする（nit: `reset_all_data` でキャッシュを丸ごと作り直す際に、
+    /// 過去の失敗記録が居座って以後ずっと再試行されなくなるのを防ぐ）。
+    pub fn clear_failed(&self) {
+        self.shared
+            .failed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
 }
 
 fn mark_failed(shared: &Shared, cache_file: &Path) {
@@ -330,6 +369,106 @@ fn mark_failed(shared: &Shared, cache_file: &Path) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(cache_file.to_path_buf());
+}
+
+/// `completed` を通知する前に `queue` ロックを取得する（must A/should(1)）。
+/// `request_current_and_wait` の待ち手も同じロックを保持したまま
+/// 確認→wait を行うため、これで lost wakeup を防げる。
+fn notify_completed(shared: &Shared) {
+    let _queue = shared.queue.lock().unwrap_or_else(|e| e.into_inner());
+    shared.completed.notify_all();
+}
+
+/// キャッシュディレクトリをクリアする（起動時・`reset_all_data` 共通の手順）。
+///
+/// `cache_dir` を退避ディレクトリ（`app_data_dir` 直下の `cache-trash-<timestamp>`）へ
+/// rename してから空の `cache_dir` を再作成し、退避先の削除はバックグラウンドスレッドに
+/// 任せる（レビュー must5）。rename はディレクトリエントリの付け替えのみで中身のコピーを
+/// 伴わないため、キャッシュが巨大でも一瞬で終わり、この直後に動く `CacheWorker` の新規
+/// 書込と競合しない。
+///
+/// rename が失敗した場合（例: cache_dir が別ファイルシステム上にある等）は、中身を
+/// 1件ずつ同期的に削除するフォールバックを行う（失敗した項目は無視して続行。
+/// レビュー2巡目 should(5)）。このフォールバックは rename が使えたときの高速性・
+/// 無競合性を再現できない既知の劣化経路であり、rename が失敗するような通常想定外の
+/// 環境でのみ発生する。
+///
+/// 加えて、`app_data_dir` 直下に前回以前の実行で消しきれなかった古い `cache-trash-*`
+/// が残っていれば、まとめてバックグラウンドで削除する（アプリがクラッシュする等で
+/// 削除スレッドが完走できなかった場合の掃除。レビュー2巡目 should(4)）。
+pub fn clear_cache_dir(app_data_dir: &Path, cache_dir: &Path) {
+    sweep_stale_trash_dirs(app_data_dir);
+
+    if cache_dir.exists() {
+        let trash_dir = app_data_dir.join(format!(
+            "cache-trash-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        ));
+        match std::fs::rename(cache_dir, &trash_dir) {
+            Ok(()) => {
+                std::thread::spawn(move || {
+                    if let Err(e) = std::fs::remove_dir_all(&trash_dir) {
+                        eprintln!("Failed to remove cache trash {}: {e}", trash_dir.display());
+                    }
+                });
+            }
+            Err(e) => {
+                eprintln!(
+                    "Failed to move cache directory to trash ({e}); falling back to per-entry delete"
+                );
+                clear_directory_contents(cache_dir);
+            }
+        }
+    }
+
+    if let Err(e) = std::fs::create_dir_all(cache_dir) {
+        eprintln!("Failed to recreate cache directory: {e}");
+    }
+}
+
+/// `app_data_dir` 直下に残っている `cache-trash-*` ディレクトリをすべて
+/// バックグラウンドで削除する（should(4): クラッシュ等で前回消しきれなかった分の掃除）。
+fn sweep_stale_trash_dirs(app_data_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(app_data_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_trash_dir = path.is_dir()
+            && path
+                .file_name()
+                .map(|n| n.to_string_lossy().starts_with("cache-trash-"))
+                .unwrap_or(false);
+        if is_trash_dir {
+            std::thread::spawn(move || {
+                if let Err(e) = std::fs::remove_dir_all(&path) {
+                    eprintln!("Failed to remove stale cache trash {}: {e}", path.display());
+                }
+            });
+        }
+    }
+}
+
+/// ディレクトリの中身（ファイル/サブディレクトリ）を1件ずつ削除する。
+/// 個々の削除失敗は無視して続行する（`clear_cache_dir` の rename 失敗時フォールバック）。
+fn clear_directory_contents(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let result = if path.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if let Err(e) = result {
+            eprintln!("Failed to remove cache entry {}: {e}", path.display());
+        }
+    }
 }
 
 /// 一時ファイルに書いてから rename する（同一ディレクトリ内なのでアトミック）。
@@ -429,6 +568,79 @@ mod tests {
                 failed: Mutex::new(HashSet::new()),
             }),
         }
+    }
+
+    /// must5: cache_dir を退避→再作成する。呼び出し直後には新しい cache_dir が
+    /// 空であること（中身のコピーが起きていないこと）を確認する。
+    #[test]
+    fn clear_cache_dir_recreates_empty_cache_dir() {
+        let app_data_dir = workspace("clear_app_data");
+        let cache_dir = app_data_dir.join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::write(cache_dir.join("old.jpg"), b"stale").unwrap();
+
+        clear_cache_dir(&app_data_dir, &cache_dir);
+
+        assert!(cache_dir.exists(), "cache_dir というパス自体は残るはず");
+        let remaining: Vec<_> = std::fs::read_dir(&cache_dir).unwrap().flatten().collect();
+        assert!(
+            remaining.is_empty(),
+            "呼び出し直後の cache_dir は空のはず: {remaining:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&app_data_dir);
+    }
+
+    /// should(4): app_data_dir 直下に残っている古い cache-trash-* も
+    /// バックグラウンドで削除される。
+    #[test]
+    fn clear_cache_dir_sweeps_stale_trash_dirs_from_previous_runs() {
+        let app_data_dir = workspace("clear_sweep");
+        let cache_dir = app_data_dir.join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        let stale_trash = app_data_dir.join("cache-trash-stale-from-previous-run");
+        std::fs::create_dir_all(&stale_trash).unwrap();
+        std::fs::write(stale_trash.join("leftover.jpg"), b"leftover").unwrap();
+
+        clear_cache_dir(&app_data_dir, &cache_dir);
+
+        // バックグラウンド削除の完了を短時間ポーリングで待つ（フレーキー回避のため
+        // 長時間スリープではなく、完了したら即抜けるポーリングにする）。
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while stale_trash.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(
+            !stale_trash.exists(),
+            "古い cache-trash-* はバックグラウンドで削除されるはず"
+        );
+
+        let _ = std::fs::remove_dir_all(&app_data_dir);
+    }
+
+    /// should(5): rename が使えない状況のフォールバック（中身を1件ずつ削除）。
+    /// 個々の削除対象を消せること、存在しないディレクトリでもパニックしないことを確認する。
+    #[test]
+    fn clear_directory_contents_removes_files_and_ignores_missing_dir() {
+        let dir = workspace("fallback_clear");
+        std::fs::write(dir.join("a.jpg"), b"a").unwrap();
+        std::fs::create_dir_all(dir.join("subdir")).unwrap();
+        std::fs::write(dir.join("subdir/b.jpg"), b"b").unwrap();
+
+        clear_directory_contents(&dir);
+
+        let remaining: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
+        assert!(
+            remaining.is_empty(),
+            "中身は全て削除されるはず: {remaining:?}"
+        );
+
+        // 存在しないディレクトリを渡してもパニックしない。
+        clear_directory_contents(&dir.join("does-not-exist"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -716,12 +928,13 @@ mod tests {
         let cache_file = cache_dir.join("done.jpg");
 
         // 実ワーカーは動かさず、完了を模擬するスレッドだけ起動する。
+        // notify_completed と同じ手順（queueロックを取ってから notify）で模擬する。
         let sim_shared = Arc::clone(&worker.shared);
         let sim_cache_file = cache_file.clone();
         let simulator = thread::spawn(move || {
             thread::sleep(Duration::from_millis(50));
             std::fs::write(&sim_cache_file, b"done").unwrap();
-            sim_shared.completed.notify_all();
+            notify_completed(&sim_shared);
         });
 
         let ok = worker.request_current_and_wait(

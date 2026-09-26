@@ -1,4 +1,4 @@
-use image::{imageops::FilterType, GenericImageView, ImageFormat};
+use image::{imageops::FilterType, GenericImageView, ImageDecoder, ImageFormat};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
@@ -32,10 +32,6 @@ pub struct ImageInfo {
     pub exif: Option<ExifInfo>,
     pub display_count: i32,
     pub last_displayed: Option<String>,
-    /// apply_exif_rotation 設定のスナップショット。回転はフロントの `image-orientation`
-    /// CSS で行うため（#60 レビュー方針転換）、フロントがこの値を見て
-    /// `from-image`（true）/`none`（false）を切り替える必要がある。
-    pub apply_rotation: bool,
 }
 
 /// 画像を読み込み、apply_rotation=true かつ EXIF Orientation が存在する場合は回転・反転を適用する。
@@ -65,10 +61,19 @@ fn needs_4k_resize(width: u32, height: u32) -> bool {
     width > MAX_WIDTH_4K || height > MAX_HEIGHT_4K
 }
 
-/// 画像を最適化（EXIF回転適用 + 4Kリサイズ）
+/// 画像を最適化する。
 ///
-/// 出力フォーマットは元画像の拡張子から決める（`cache_extension_for` と対で使うこと）。
-/// PNG 原本は透過を保持するため PNG のまま、それ以外は JPEG (品質90%明示) で書き出す。
+/// - `apply_rotation=true`: EXIF Orientation を画素へ焼き込んでから書き出す
+///   （4K超・TIFF等でキャッシュが必要になった画像向け）。
+/// - `apply_rotation=false`: 回転を一切適用せず、格納されている画素のまま書き出す
+///   （4K超・TIFF等に加え、apply_rotation=false なのに EXIF Orientation が
+///   回転を要求している画像も対象。原本のEXIFに従ってWebViewが勝手に回転するのを
+///   防ぐため、格納画素のまま・EXIF無しでキャッシュを作る。#60 レビュー2巡目 must B）。
+///
+/// 4K超なら Lanczos3 でリサイズする。出力フォーマットはデコード後の実データの
+/// アルファ有無で決める（`resized_img.color().has_alpha()`）。透過があれば PNG の
+/// まま、無ければ JPEG（品質90%明示）にする。EXIFは再エンコードにより失われるため、
+/// キャッシュ済みファイルに `image-orientation: from-image` を当てても二重回転しない。
 pub fn optimize_image_for_4k(image_path: &Path, apply_rotation: bool) -> Result<Vec<u8>, String> {
     let img = load_and_orient(image_path, apply_rotation)?;
     let (width, height) = img.dimensions();
@@ -80,7 +85,7 @@ pub fn optimize_image_for_4k(image_path: &Path, apply_rotation: bool) -> Result<
     };
 
     let mut buffer = Vec::new();
-    if is_png_source(image_path) {
+    if resized_img.color().has_alpha() {
         resized_img
             .write_to(&mut std::io::Cursor::new(&mut buffer), ImageFormat::Png)
             .map_err(|e| format!("Failed to encode image: {e}"))?;
@@ -117,9 +122,23 @@ fn orientation_swaps_dimensions(orientation: image::metadata::Orientation) -> bo
     )
 }
 
-/// 拡張子が png かどうか（透過保持のため PNG のまま書き出す判定に使う）
-fn is_png_source(path: &Path) -> bool {
-    ext_lower(path).as_deref() == Some("png")
+/// 原本のヘッダから色種別だけを読み、アルファチャンネルを持つかを判定する
+/// （フルデコードしない。`ImageDecoder::color_type` はヘッダ相当の情報のみで
+/// 判定できるため、`get_image_dimensions` 同様に軽量）。
+///
+/// `plan_cache_file` のキャッシュ拡張子決定と `optimize_image_for_4k` の実際の
+/// エンコード判定（`resized_img.color().has_alpha()`）を一致させるために使う
+/// （#60 レビュー2巡目 nit: 旧実装は拡張子が png かどうかだけで判定しており、
+/// アルファ付き TIFF/BMP の透過が JPEG 化で失われ、逆に非透過 PNG も律儀に
+/// 大きい PNG のまま保存していた）。読み取り失敗時はアルファ無し扱いにする
+/// （実際のエンコードは `optimize_image_for_4k` がデコード後の実データで
+/// 再判定するため、ここでの誤判定はキャッシュ拡張子のわずかな非効率に留まる）。
+fn source_has_alpha(path: &Path) -> bool {
+    image::ImageReader::open(path)
+        .ok()
+        .and_then(|r| r.into_decoder().ok())
+        .map(|d| d.color_type().has_alpha())
+        .unwrap_or(false)
 }
 
 /// アニメーションしうる形式（GIF/WebP）かどうか。
@@ -165,20 +184,33 @@ pub fn get_display_dimensions(
     }
 }
 
+/// 回転が必要か（EXIF Orientation が NoTransforms 以外）を返す。
+fn orientation_requires_rotation(image_path: &Path) -> bool {
+    read_exif_orientation(image_path)
+        .map(|o| o != image::metadata::Orientation::NoTransforms)
+        .unwrap_or(false)
+}
+
 /// このパスがキャッシュ（最適化済みファイル）を必要とするか判定し、必要なら
 /// 保存先のキャッシュファイルパス（拡張子込み）を返す。不要なら None（原本をそのまま表示）。
 ///
 /// キャッシュが必要になる条件（いずれか）:
 /// - WebView が直接表示できない形式（TIFF等）
 /// - 表示サイズが 4K を超える
+/// - `apply_rotation=false` なのに EXIF Orientation が回転/反転を要求している
 ///
-/// EXIF回転**だけ**が理由でキャッシュを作ることはしない（#60 レビュー方針転換）。
-/// 回転はフロントの `image-orientation` CSS（apply_rotation設定に連動して
-/// `from-image`/`none` を切替）で行い、原本をそのまま asset プロトコル経由で表示する。
-/// ただし上記の理由で結局キャッシュが必要になった画像（4K超・TIFF等）は、
-/// キャッシュ生成時に apply_rotation の値に従って画素を回転しEXIFなしで書き出す
-/// （`optimize_image_for_4k` 参照。生成物にはEXIFが残らないため `from-image` を
-/// 当てても二重回転しない）。
+/// 回転は原則 WebView 既定の動作（`image-orientation: from-image`）に任せる
+/// （#60 レビュー2巡目 must B: `crossOrigin`/`image-orientation` の明示切替は
+/// wry の WebKitGTK 実装が asset スキームを CORS 有効登録しておらず Linux 本番で
+/// 画像が一切出ないリスクがあるため撤去した）。したがって `apply_rotation=true`
+/// の場合、回転が必要というだけでは原本をそのまま返してよい（WebView が EXIF に
+/// 従って正しく回転表示する）。
+///
+/// 一方 `apply_rotation=false` なのに EXIF が回転を要求している画像は、原本を
+/// そのまま返すと WebView 既定の `from-image` が EXIF に従って勝手に回転してしまい
+/// 設定（OFF=回転しない）と食い違う。この場合だけは「格納画素のまま・EXIF無し」で
+/// 書き出したキャッシュを使う（`optimize_image_for_4k(path, false)` は回転を適用
+/// せず、かつ再エンコードでEXIFが失われるため、結果的に「回転なし」を保証できる）。
 ///
 /// 4K超の判定はヘッダ上の生の幅高さ（回転前）で行う。WebView は原本をそのまま
 /// デコードしてから CSS で回転を表示上適用するだけで、デコード時のメモリコストは
@@ -196,15 +228,17 @@ pub fn plan_cache_file(
     }
 
     let unsupported_by_webview = is_webview_unsupported_format(image_path);
-
     let (width, height) = get_image_dimensions(image_path).unwrap_or((0, 0));
     let oversized = needs_4k_resize(width, height);
+    let needs_derotated_cache = !apply_rotation && orientation_requires_rotation(image_path);
 
-    if !(unsupported_by_webview || oversized) {
+    if !(unsupported_by_webview || oversized || needs_derotated_cache) {
         return None;
     }
 
-    let ext = if is_png_source(image_path) {
+    // 拡張子はデコード前のヘッダ情報から推定したアルファ有無で決める
+    // （実際のエンコード判定 optimize_image_for_4k::color().has_alpha() と一致させる）。
+    let ext = if source_has_alpha(image_path) {
         "png"
     } else {
         "jpg"
@@ -231,6 +265,23 @@ pub fn plan_cache_file(
         ))
     );
     Some(cache_dir.join(format!("{hash}.{ext}")))
+}
+
+/// このパスのキャッシュ生成を（原本を先に返さず）同期的に待つ必要があるか判定する
+/// （#60 レビュー2巡目 must B）。
+///
+/// 原本をそのまま一時的に返してしまうと見た目が誤る2ケース:
+/// - WebView が直接デコードできない形式（TIFF等）→ そもそも表示できない
+/// - `apply_rotation=false` なのに EXIF Orientation が回転を要求している場合。
+///   原本をそのまま返すと WebView 既定の `from-image` が回転してしまい、
+///   設定（OFF）と一時的にでも食い違って見える
+///
+/// 4K超のみが理由でキャッシュが必要な画像はここには含まない。原本も WebView で
+/// 正しく表示できるため、キャッシュ完成まで原本を表示しておいて問題ない
+/// （非同期でよい）。
+pub fn requires_synchronous_cache(image_path: &Path, apply_rotation: bool) -> bool {
+    is_webview_unsupported_format(image_path)
+        || (!apply_rotation && orientation_requires_rotation(image_path))
 }
 
 /// EXIF情報を取得
@@ -394,10 +445,6 @@ mod tests {
 
     #[test]
     fn format_classification() {
-        assert!(is_png_source(Path::new("a.png")));
-        assert!(is_png_source(Path::new("a.PNG")));
-        assert!(!is_png_source(Path::new("a.jpg")));
-
         assert!(is_animation_capable_format(Path::new("a.gif")));
         assert!(is_animation_capable_format(Path::new("a.webp")));
         assert!(!is_animation_capable_format(Path::new("a.png")));
@@ -405,6 +452,44 @@ mod tests {
         assert!(is_webview_unsupported_format(Path::new("a.tiff")));
         assert!(is_webview_unsupported_format(Path::new("a.tif")));
         assert!(!is_webview_unsupported_format(Path::new("a.jpg")));
+    }
+
+    /// source_has_alpha はヘッダ情報（デコード後の色種別相当）を見て判定する。
+    /// 拡張子だけでなく実データのアルファ有無を反映すること、存在しないパスは
+    /// false 扱いになることを検証する。
+    #[test]
+    fn source_has_alpha_reflects_actual_color_type_not_just_extension() {
+        let dir = std::env::temp_dir().join(format!("sss_source_alpha_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let rgba = image::DynamicImage::ImageRgba8(image::RgbaImage::new(4, 4));
+        let rgb = image::DynamicImage::ImageRgb8(image::RgbImage::new(4, 4));
+
+        let png_with_alpha = dir.join("alpha.png");
+        std::fs::write(&png_with_alpha, encode(&rgba, ImageFormat::Png)).unwrap();
+        assert!(
+            source_has_alpha(&png_with_alpha),
+            "アルファ付きPNGはtrueのはず"
+        );
+
+        let png_without_alpha = dir.join("opaque.png");
+        std::fs::write(&png_without_alpha, encode(&rgb, ImageFormat::Png)).unwrap();
+        assert!(
+            !source_has_alpha(&png_without_alpha),
+            "拡張子がpngでもアルファが無ければfalseのはず"
+        );
+
+        let jpg = dir.join("photo.jpg");
+        std::fs::write(&jpg, encode(&rgb, ImageFormat::Jpeg)).unwrap();
+        assert!(!source_has_alpha(&jpg), "JPEGは常にアルファ無しのはず");
+
+        assert!(
+            !source_has_alpha(Path::new("/tmp/does-not-exist.png")),
+            "存在しないパスはfalse扱いのはず"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// EXIF Orientation を埋め込んだ最小 TIFF ブロックを組み立てる（テスト専用）。
@@ -675,11 +760,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// #60 レビュー方針転換: 回転は常にフロントの CSS（`image-orientation`）で行うため、
-    /// EXIF回転が必要というだけではキャッシュを作らない（4K超でも TIFF等でもない限り）。
-    /// apply_rotation の true/false どちらでも結果は変わらない。
+    /// #60 レビュー2巡目 must B: apply_rotation=true のときは回転が必要というだけでは
+    /// キャッシュを作らない（WebView既定の from-image に任せる）。
     #[test]
-    fn plan_cache_file_ignores_rotation_need_regardless_of_apply_rotation_setting() {
+    fn plan_cache_file_none_for_rotation_only_when_apply_rotation_true() {
         let dir = std::env::temp_dir().join(format!(
             "sss_plan_cache_rotation_only_{}",
             std::process::id()
@@ -692,15 +776,78 @@ mod tests {
         assert_eq!(
             plan_cache_file(&path, true, &dir.join("cache")),
             None,
-            "回転のみが理由ではキャッシュ対象にならないはず（apply_rotation=true）"
-        );
-        assert_eq!(
-            plan_cache_file(&path, false, &dir.join("cache")),
-            None,
-            "回転のみが理由ではキャッシュ対象にならないはず（apply_rotation=false）"
+            "apply_rotation=trueなら回転のみが理由ではキャッシュ対象にならないはず"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #60 レビュー2巡目 must B: apply_rotation=false なのに EXIF が回転を要求している
+    /// 画像は、原本をそのまま返すとWebView既定のfrom-imageが勝手に回転してしまうため、
+    /// 「格納画素のまま・EXIF無し」のキャッシュを作る対象になる。
+    /// また `requires_synchronous_cache` もこのケースを true とすることを確認する。
+    #[test]
+    fn plan_cache_file_some_for_rotation_only_when_apply_rotation_false() {
+        let dir =
+            std::env::temp_dir().join(format!("sss_plan_cache_derotate_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Orientation 6 は90度回転が必要（4K未満・JPEG形式・非透過）
+        let (path, _) = write_test_jpeg(&dir, "o6.jpg", 6);
+        let plan = plan_cache_file(&path, false, &dir.join("cache"));
+        assert!(
+            plan.is_some(),
+            "apply_rotation=falseで回転が必要なEXIFを持つ画像はキャッシュ対象になるはず"
+        );
+        assert_eq!(
+            plan.unwrap().extension().and_then(|e| e.to_str()),
+            Some("jpg")
+        );
+
+        assert!(
+            requires_synchronous_cache(&path, false),
+            "原本をそのまま返すと誤って回転して見えるため同期待ちが必要なはず"
+        );
+        assert!(
+            !requires_synchronous_cache(&path, true),
+            "apply_rotation=trueなら原本をそのまま返してもWebViewが正しく回転するので非同期でよい"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Orientation 1（無回転）なら apply_rotation=false でもキャッシュ不要
+    /// （そもそも回転させる必要が無いため、原本をそのまま返してよい）。
+    #[test]
+    fn plan_cache_file_none_when_orientation_is_1_even_with_apply_rotation_false() {
+        let dir = std::env::temp_dir().join(format!(
+            "sss_plan_cache_no_derotate_needed_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let (path, _) = write_test_jpeg(&dir, "o1.jpg", 1);
+        assert_eq!(plan_cache_file(&path, false, &dir.join("cache")), None);
+        assert!(!requires_synchronous_cache(&path, false));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// TIFF等 WebView 非対応形式は apply_rotation の値に関わらず同期待ちが必要
+    /// （そもそも原本を表示できないため）。
+    #[test]
+    fn requires_synchronous_cache_true_for_webview_unsupported_format_regardless_of_apply_rotation()
+    {
+        assert!(requires_synchronous_cache(
+            Path::new("/tmp/does-not-matter.tiff"),
+            true
+        ));
+        assert!(requires_synchronous_cache(
+            Path::new("/tmp/does-not-matter.tiff"),
+            false
+        ));
     }
 
     /// キャッシュキーには apply_rotation・mtime・サイズを含める（nit: 原本が
@@ -729,36 +876,59 @@ mod tests {
     }
 
     /// 4K超のみが理由でキャッシュ対象になるケース（回転不要・WebView対応形式）。
-    /// 拡張子ごとに出力フォーマットが分かれる（JPEGソース→jpg、PNGソース→png＝透過保持）
+    /// 出力フォーマットは拡張子ではなく実データのアルファ有無で分かれる
+    /// （#60 レビュー2巡目 nit: PNG拡張子でも非透過ならjpg、逆にアルファがあればpng）
     /// ことも同時に検証する。
     #[test]
-    fn plan_cache_file_some_when_oversized_only_and_extension_follows_source_format() {
+    fn plan_cache_file_some_when_oversized_only_extension_follows_alpha_presence() {
         let dir =
             std::env::temp_dir().join(format!("sss_plan_cache_oversized_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
         // 幅のみが4K超（3840を上回る）。高さは小さくして画素数を抑える。
-        let oversized = image::DynamicImage::ImageRgb8(image::RgbImage::new(MAX_WIDTH_4K + 1, 4));
+        let oversized_rgb =
+            image::DynamicImage::ImageRgb8(image::RgbImage::new(MAX_WIDTH_4K + 1, 4));
+        let oversized_rgba =
+            image::DynamicImage::ImageRgba8(image::RgbaImage::new(MAX_WIDTH_4K + 1, 4));
 
         let jpg_path = dir.join("big.jpg");
-        std::fs::write(&jpg_path, encode(&oversized, ImageFormat::Jpeg)).unwrap();
+        std::fs::write(&jpg_path, encode(&oversized_rgb, ImageFormat::Jpeg)).unwrap();
         let jpg_plan = plan_cache_file(&jpg_path, true, &dir.join("cache"));
         assert!(jpg_plan.is_some(), "4K超のみでもキャッシュ対象になるはず");
         assert_eq!(
             jpg_plan.unwrap().extension().and_then(|e| e.to_str()),
             Some("jpg"),
-            "JPEGソースはjpgでキャッシュされるはず"
+            "非透過JPEGソースはjpgでキャッシュされるはず"
         );
 
-        let png_path = dir.join("big.png");
-        std::fs::write(&png_path, encode(&oversized, ImageFormat::Png)).unwrap();
-        let png_plan = plan_cache_file(&png_path, true, &dir.join("cache"));
-        assert!(png_plan.is_some(), "4K超のみでもキャッシュ対象になるはず");
+        let opaque_png_path = dir.join("big_opaque.png");
+        std::fs::write(&opaque_png_path, encode(&oversized_rgb, ImageFormat::Png)).unwrap();
+        let opaque_png_plan = plan_cache_file(&opaque_png_path, true, &dir.join("cache"));
+        assert!(
+            opaque_png_plan.is_some(),
+            "4K超のみでもキャッシュ対象になるはず"
+        );
         assert_eq!(
-            png_plan.unwrap().extension().and_then(|e| e.to_str()),
+            opaque_png_plan
+                .unwrap()
+                .extension()
+                .and_then(|e| e.to_str()),
+            Some("jpg"),
+            "拡張子がpngでもアルファが無ければjpgでキャッシュされるはず（圧縮率優先）"
+        );
+
+        let alpha_png_path = dir.join("big_alpha.png");
+        std::fs::write(&alpha_png_path, encode(&oversized_rgba, ImageFormat::Png)).unwrap();
+        let alpha_png_plan = plan_cache_file(&alpha_png_path, true, &dir.join("cache"));
+        assert!(
+            alpha_png_plan.is_some(),
+            "4K超のみでもキャッシュ対象になるはず"
+        );
+        assert_eq!(
+            alpha_png_plan.unwrap().extension().and_then(|e| e.to_str()),
             Some("png"),
-            "PNGソースは透過保持のためpngでキャッシュされるはず"
+            "アルファ付きソースは透過保持のためpngでキャッシュされるはず"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
