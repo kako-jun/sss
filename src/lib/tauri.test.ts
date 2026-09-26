@@ -43,6 +43,13 @@ describe('tauri command wrappers', () => {
     expect(result).toEqual(progress);
   });
 
+  it('restorePlaylist passes directoryPath (camelCase) and returns the boolean as-is', async () => {
+    invoke.mockResolvedValue(true);
+    const result = await tauri.restorePlaylist('/photos');
+    expect(invoke).toHaveBeenCalledWith('restore_playlist', { directoryPath: '/photos' });
+    expect(result).toBe(true);
+  });
+
   it('getNextImage invokes get_next_image and returns ImageInfo', async () => {
     const image: ImageInfo = {
       path: '/a.jpg',

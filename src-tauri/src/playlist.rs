@@ -15,23 +15,27 @@ pub const HISTORY_LIMIT: usize = 100;
 /// 別の画像を指してしまう（#62 の元バグ）。パス保持ならシャッフル後も
 /// 常に「実際に表示した画像」を指し続ける。
 ///
-/// `current_index` は「`shuffled_list` を順番に消費していく進行カーソル」であり、
-/// 履歴を戻って（`go_back`）から再度進める（`advance`）だけの間は変化しない。
-/// 新しい画像へ進むとき（履歴の先頭に追いついた状態からの前進）だけ更新される。
+/// #62レビュー M1(must): 進行カーソルは「消費済み件数」を表す `next_index`
+/// （範囲 `0..=shuffled_list.len()`）で持つ。旧設計は「最後に表示した位置」を
+/// 表す `current_index` と、開始前を表す `before_start: bool` の2つの状態を
+/// 同期させる必要があり、`update_images` の削除処理で「表示中の画像自身が
+/// 削除された」場合の扱いを誤ると、削除前に本来表示されるはずだった未表示画像を
+/// 1枚飛ばすバグがあった。`next_index` なら「`shuffled_list[0..next_index)` が
+/// 今の巡で表示済みの区間」という単一の不変条件だけで済み、削除件数も
+/// `[..next_index]`（表示中の画像自身を含む）を数えれば過不足なく補正できる。
+/// `next_index == 0` は「まだ何も表示していない」、`next_index == len` は
+/// 「今の巡を全部消費した（次の advance で再シャッフル）」を意味する。
 #[derive(Debug, Clone)]
 pub struct Playlist {
     /// シャッフルされた画像リスト
     shuffled_list: Vec<String>,
-    /// 進行カーソル（新規に進んだ最後の shuffled_list 上の位置）
-    current_index: usize,
+    /// 消費済み件数（`0..=shuffled_list.len()`）。`shuffled_list[0..next_index)` が
+    /// 今の巡で表示済みの区間、`[next_index..)` が未表示の区間。
+    next_index: usize,
     /// 閲覧履歴（パスで保持、最大 `HISTORY_LIMIT` 件）
     history: Vec<String>,
     /// 履歴内の現在の表示位置
     history_position: usize,
-    /// 番兵: true の間はまだ一度も `advance` していない（#62: 最初の `advance` が
-    /// index 0 を飛ばして index 1 を返してしまうバグの修正。`current_index` を
-    /// 「開始位置の一つ手前」として扱う代わりに、この明示フラグで判定する）。
-    before_start: bool,
 }
 
 impl Playlist {
@@ -42,52 +46,54 @@ impl Playlist {
 
         Playlist {
             shuffled_list: images,
-            current_index: 0,
+            next_index: 0,
             history: Vec::new(),
             history_position: 0,
-            before_start: true,
         }
     }
 
     /// 永続化された状態から復元する（#62）。呼び出し元（DB）が返す値をそのまま渡してよい。
-    /// 範囲外の `current_index`/`history_position` は安全な値へクランプする。
+    /// 範囲外の `next_index`/`history_position` は安全な値へクランプする
+    /// （`next_index` の有効範囲は `0..=len`、`len` 自身も含む点に注意）。
+    ///
+    /// #62レビュー S3: `history` が壊れている（空/パース失敗でデフォルト化）場合でも、
+    /// `shuffled_list`/`next_index` が健全であればそのまま使う（`advance` は履歴が
+    /// 空なら常に「新規」扱いになるため、`next_index` が指す続きから正しく再開できる）。
     pub fn from_persisted(
         shuffled_list: Vec<String>,
-        current_index: usize,
+        next_index: usize,
         history: Vec<String>,
         history_position: usize,
     ) -> Self {
         let len = shuffled_list.len();
-        let current_index = if len == 0 {
-            0
-        } else {
-            current_index.min(len - 1)
-        };
+        let next_index = next_index.min(len);
         let history_position = if history.is_empty() {
             0
         } else {
             history_position.min(history.len() - 1)
         };
-        let before_start = len == 0 || history.is_empty();
 
         Playlist {
             shuffled_list,
-            current_index,
+            next_index,
             history,
             history_position,
-            before_start,
         }
     }
 
-    /// 現在の画像を取得（履歴の現在位置から。まだ何も表示していなければ `None`）
+    /// 現在の画像を取得（履歴の現在位置から）。
+    ///
+    /// `shuffled_list` が空、または履歴が空（まだ何も表示していない/復元データが
+    /// 壊れている等）なら `None`。`shuffled_list` が空なのに履歴だけ残っている
+    /// （復元データの不整合）ケースも安全側に倒して `None` を返す。
     pub fn current(&self) -> Option<&String> {
-        if self.before_start {
+        if self.shuffled_list.is_empty() || self.history.is_empty() {
             return None;
         }
         self.history.get(self.history_position)
     }
 
-    /// N個先の画像のパスを覗く（インデックスは変更しない）。
+    /// N個先の画像のパスを覗く（`n=0` が次に表示される画像、状態は変更しない）。
     ///
     /// #62: 巡の末尾を越える覗き見は行わない（打ち切り）。次の巡の並びは
     /// 実際に `advance` が末尾へ到達するまで確定しないため、ここで先読みすると
@@ -98,7 +104,7 @@ impl Playlist {
         if self.shuffled_list.is_empty() {
             return None;
         }
-        let idx = self.current_index + n;
+        let idx = self.next_index + n;
         if idx >= self.shuffled_list.len() {
             return None;
         }
@@ -110,58 +116,53 @@ impl Playlist {
     ///
     /// 3つ目の戻り値は永続化のため（#62）: 再シャッフルが起きた場合は
     /// `shuffled_list` 自体が変わるためフル保存が必要、それ以外は
-    /// `current_index`/履歴だけの軽量保存で足りる。
+    /// `next_index`/履歴だけの軽量保存で足りる。
     pub fn advance(&mut self) -> (Option<&String>, bool, bool) {
         if self.shuffled_list.is_empty() {
             return (None, false, false);
         }
 
-        if self.before_start {
-            // 番兵: 最初の advance で index 0 を返す（#62）。
-            self.before_start = false;
-            self.current_index = 0;
-            self.history = vec![self.shuffled_list[0].clone()];
-            self.history_position = 0;
-            return (self.current(), true, false);
-        }
-
-        // 履歴の途中にいるかチェック（前へで戻った後か？）
-        let is_in_history = self.history_position < self.history.len() - 1;
-
-        if is_in_history {
-            // 履歴内を進む（既に見た画像なのでカウントしない）
+        // 履歴の途中にいるかチェック（前へで戻った後、まだ最新に追いついていないか）。
+        // 履歴が空（まだ何も表示していない、または復元データの破損で失われた）なら
+        // 常に「新規」扱いにする（#62レビューS3: history だけ壊れていても next_index を
+        // 信じて続きから再開できる）。
+        if !self.history.is_empty() && self.history_position < self.history.len() - 1 {
             self.history_position += 1;
             return (self.current(), false, false);
         }
 
-        // 新しい画像に進む（カウントする）
-        self.current_index = (self.current_index + 1) % self.shuffled_list.len();
-
         let mut reshuffled = false;
 
-        // リストの最後まで到達したら再シャッフル（先頭が直前の表示画像と同じにならないよう保証）
-        if self.current_index == 0 && self.shuffled_list.len() > 1 {
-            // シャッフル前に「実際に最後に表示した画像」を記録する。
-            // #62: history はパスで保持しているので、直前の shuffled_list の並びに
-            // 依存せず正しい「直前の画像」を取れる。
-            let last_shown = self.history.last().cloned();
-            let mut rng = thread_rng();
-            self.shuffled_list.shuffle(&mut rng);
-            reshuffled = true;
-            // 先頭が直前の画像と同じなら2番目と入れ替えて連続表示を防ぐ
-            if let Some(ref last) = last_shown {
-                if self.shuffled_list.first() == Some(last) {
-                    self.shuffled_list.swap(0, 1);
+        // 巡の末尾に到達済み（今の巡を全部消費した）なら、再シャッフルしてから
+        // 先頭（next_index=0）から再開する。1件以下のリストは並びを変えても
+        // 意味が無いため再シャッフル扱いにしない（#62レビュー前の挙動を維持）。
+        if self.next_index >= self.shuffled_list.len() {
+            self.next_index = 0;
+            if self.shuffled_list.len() > 1 {
+                // シャッフル前に「実際に最後に表示した画像」を記録する。
+                // #62: history はパスで保持しているので、直前の shuffled_list の並びに
+                // 依存せず正しい「直前の画像」を取れる。
+                let last_shown = self.history.last().cloned();
+                let mut rng = thread_rng();
+                self.shuffled_list.shuffle(&mut rng);
+                reshuffled = true;
+                // 先頭が直前の画像と同じなら2番目と入れ替えて連続表示を防ぐ
+                if let Some(ref last) = last_shown {
+                    if self.shuffled_list.first() == Some(last) {
+                        self.shuffled_list.swap(0, 1);
+                    }
                 }
             }
         }
+
+        let shown_path = self.shuffled_list[self.next_index].clone();
+        self.next_index += 1;
 
         // 履歴に追加（最大 HISTORY_LIMIT 件）
         if self.history.len() >= HISTORY_LIMIT {
             self.history.remove(0);
         }
-        self.history
-            .push(self.shuffled_list[self.current_index].clone());
+        self.history.push(shown_path);
         self.history_position = self.history.len() - 1;
 
         (self.current(), true, reshuffled)
@@ -169,11 +170,11 @@ impl Playlist {
 
     /// 前の画像に戻る（履歴から、カウント増やさない）。
     ///
-    /// #62: `current_index`（進行カーソル）は変更しない。戻った先から再度
+    /// #62: `next_index`（進行カーソル）は変更しない。戻った先から再度
     /// 前進する場合に、正しい続きの位置から再開できるようにするため。
     pub fn go_back(&mut self) -> Option<&String> {
-        if self.before_start || self.history_position == 0 {
-            // 履歴の最初なので戻れない
+        if self.history.is_empty() || self.history_position == 0 {
+            // 履歴が無い/最初なので戻れない
             return self.current();
         }
 
@@ -183,7 +184,7 @@ impl Playlist {
 
     /// 履歴で前に戻れるかチェック
     pub fn can_go_back(&self) -> bool {
-        !self.before_start && self.history_position > 0
+        !self.shuffled_list.is_empty() && !self.history.is_empty() && self.history_position > 0
     }
 
     /// プレイリストの総数を取得
@@ -195,9 +196,15 @@ impl Playlist {
     ///
     /// 履歴を戻って閲覧中の画像が現在の `shuffled_list` の並びの中にまだ
     /// 存在すれば、その実際の位置を返す（同一巡内での「前へ」なら常に見つかる）。
-    /// 再シャッフル後で見つからない場合は進行カーソルの位置にフォールバックする。
+    ///
+    /// この `O(N)` の探索は、`go_back` が `next_index` を変更しない設計（履歴を
+    /// 戻って見ている画像の位置は `next_index` から機械的に導けない）である限り、
+    /// 表示中の位置番号を正しく出すために必要（#62レビュー nit: `next_index` 化後も
+    /// 「戻って見ている画像の実際の位置」という要件自体は変わらないため不要にはならない）。
+    /// 再シャッフル後で見つからない場合は進行カーソル（`next_index`。ちょうど
+    /// 「最後に新規表示した画像の1-indexed位置」と一致する）にフォールバックする。
     pub fn current_position(&self) -> usize {
-        if self.shuffled_list.is_empty() || self.before_start {
+        if self.shuffled_list.is_empty() || self.history.is_empty() {
             return 0;
         }
         if let Some(path) = self.history.get(self.history_position) {
@@ -205,7 +212,7 @@ impl Playlist {
                 return idx + 1;
             }
         }
-        self.current_index + 1
+        self.next_index
     }
 
     /// 画像リストを更新（新規画像追加、削除画像除外）
@@ -215,13 +222,14 @@ impl Playlist {
     /// 10万件規模・削除5万件で数秒かかる退行があった。`HashSet` に変換してから判定する
     /// ことで `retain` 全体を O(N) に落とす。
     ///
-    /// #62:
-    /// - 削除は `current_index` より前（=既に表示済みの区間）にあった件数だけ
-    ///   `current_index` を減算する。そうしないと、削除された分だけ未表示の画像を
-    ///   飛ばしてしまう。
+    /// #62レビュー M1(must): 削除は `[0, next_index)`（=今の巡で表示済みの区間。
+    /// 表示中の画像自身を含む）にあった件数だけ `next_index` を減算する。旧実装は
+    /// `[0, current_index)`（表示中の画像自身を含まない）でしか数えていなかったため、
+    /// 表示中の画像自身が削除された場合に補正が1件不足し、削除後にその位置へ
+    /// スライドしてきた未表示画像を「表示済み」扱いにして1枚飛ばしていた。
     /// - 削除された画像は履歴からも取り除く（表示中の画像が生き残っていれば
     ///   その新しい位置へ `history_position` を再計算する）。
-    /// - 新規画像は「未再生区間」（`current_index` より後ろ。何も表示していなければ
+    /// - 新規画像は「未再生区間」（`next_index` 以降。何も表示していなければ
     ///   全体）にランダムに散らして挿入する。末尾へ塊で追加すると、その巡の終盤に
     ///   新規画像が連続して固まって出てしまうため。挿入は既存の未再生区間の順序を
     ///   保ったまま新規画像をランダムな位置へ差し込む1パスのマージ（O(N+K)）で行う
@@ -230,15 +238,15 @@ impl Playlist {
         if !deleted_images.is_empty() {
             let deleted_set: HashSet<&str> = deleted_images.iter().map(String::as_str).collect();
 
-            let boundary = self.current_index.min(self.shuffled_list.len());
-            let removed_before_current = self.shuffled_list[..boundary]
+            let boundary = self.next_index.min(self.shuffled_list.len());
+            let removed_before_next = self.shuffled_list[..boundary]
                 .iter()
                 .filter(|p| deleted_set.contains(p.as_str()))
                 .count();
 
             self.shuffled_list
                 .retain(|path| !deleted_set.contains(path.as_str()));
-            self.current_index = self.current_index.saturating_sub(removed_before_current);
+            self.next_index = self.next_index.saturating_sub(removed_before_next);
 
             // 履歴からも削除された画像を除去し、表示中位置を再計算する。
             let current_path = self.history.get(self.history_position).cloned();
@@ -254,12 +262,8 @@ impl Playlist {
             let mut new_shuffled = new_images;
             new_shuffled.shuffle(&mut rng);
 
-            // 未再生区間の開始位置。まだ一度も表示していなければ全体が未再生区間。
-            let split_at = if self.before_start {
-                0
-            } else {
-                (self.current_index + 1).min(self.shuffled_list.len())
-            };
+            // 未再生区間の開始位置は next_index そのもの（まだ何も表示していなければ0）。
+            let split_at = self.next_index.min(self.shuffled_list.len());
             let suffix = self.shuffled_list.split_off(split_at);
 
             // 既存の未再生区間（suffix、既にランダム順）と新規画像（new_shuffled、
@@ -283,24 +287,24 @@ impl Playlist {
             self.shuffled_list.extend(merged);
         }
 
-        // 現在のインデックスが範囲外になった場合は調整
-        if self.current_index >= self.shuffled_list.len() && !self.shuffled_list.is_empty() {
-            self.current_index = self.shuffled_list.len() - 1;
+        // next_index が範囲外になった場合はクランプする（有効範囲は 0..=len）。
+        if self.next_index > self.shuffled_list.len() {
+            self.next_index = self.shuffled_list.len();
         }
 
-        // 削除により履歴が空になってしまった場合の安全策（まだ開始前なら空のままでよい）
-        if !self.before_start && self.history.is_empty() {
-            if let Some(path) = self.shuffled_list.get(self.current_index) {
+        // 削除により履歴が空になってしまった場合の安全策
+        // （まだ何も表示していない=next_index==0なら空のままでよい）。
+        if self.next_index > 0 && self.history.is_empty() {
+            if let Some(path) = self.shuffled_list.get(self.next_index - 1) {
                 self.history = vec![path.clone()];
             }
             self.history_position = 0;
         }
 
         if self.shuffled_list.is_empty() {
-            self.current_index = 0;
+            self.next_index = 0;
             self.history.clear();
             self.history_position = 0;
-            self.before_start = true;
         }
     }
 
@@ -321,9 +325,9 @@ impl Playlist {
         &self.shuffled_list
     }
 
-    /// 永続化用: 進行カーソル（#62）。
-    pub fn current_index(&self) -> usize {
-        self.current_index
+    /// 永続化用: 進行カーソル（消費済み件数、`0..=len`。#62レビューM1）。
+    pub fn next_index(&self) -> usize {
+        self.next_index
     }
 
     /// 永続化用: 履歴（パス列、#62）。
@@ -439,7 +443,7 @@ mod tests {
         }
     }
 
-    /// #62 復元: 保存(shuffled_list/current_index/history/history_position)→
+    /// #62 復元: 保存(shuffled_list/next_index/history/history_position)→
     /// `from_persisted` で新しい `Playlist` を作っても、続きから再開して
     /// 1巡ぶん全件がちょうど1回ずつ表示される（再起動を跨いだのと同等の状況）。
     #[test]
@@ -457,7 +461,7 @@ mod tests {
         // 保存された状態を模して新しい Playlist インスタンスを作る（再起動相当）。
         let restored = Playlist::from_persisted(
             playlist.shuffled_list().to_vec(),
-            playlist.current_index(),
+            playlist.next_index(),
             playlist.history().to_vec(),
             playlist.history_position(),
         );
@@ -481,14 +485,14 @@ mod tests {
         );
     }
 
-    /// #62: 復元直後でも `advance()` の番兵は正しく機能する（0件進めた状態からの
-    /// 復元、つまり `before_start` のまま保存されたケース）。
+    /// #62: 復元直後でも `advance()` の番兵は正しく機能する（0件進めた状態＝
+    /// `next_index == 0` かつ履歴も空のまま保存されたケース）。
     #[test]
     fn restart_before_any_advance_still_returns_index_zero_first() {
         let playlist = Playlist::new(vec!["a.jpg".to_string(), "b.jpg".to_string()]);
         let restored = Playlist::from_persisted(
             playlist.shuffled_list().to_vec(),
-            playlist.current_index(),
+            playlist.next_index(),
             playlist.history().to_vec(),
             playlist.history_position(),
         );
@@ -590,19 +594,19 @@ mod tests {
         assert_eq!(playlist.total_count(), 2);
     }
 
-    /// #62: 新規画像は「未再生区間」（current_index より後ろ）にのみ挿入される。
-    /// 既に表示済みの区間（0..=current_index）に紛れ込んで、今回の巡で
+    /// #62: 新規画像は「未再生区間」（next_index より後ろ）にのみ挿入される。
+    /// 既に表示済みの区間（0..next_index）に紛れ込んで、今回の巡で
     /// 二度と表示されなくなる/表示済み扱いのまま出てこない、ということがない。
     #[test]
     fn update_images_inserts_new_images_only_into_unplayed_segment() {
         let images: Vec<String> = (0..20).map(|i| format!("img{i}.jpg")).collect();
         let mut playlist = Playlist::new(images);
 
-        // 10件進めておく（current_index = 9 相当のところまで）
+        // 10件進めておく（next_index = 10）
         for _ in 0..10 {
             playlist.advance();
         }
-        let current_index = playlist.current_index();
+        let next_index = playlist.next_index();
 
         let new_images: Vec<String> = (0..5).map(|i| format!("new{i}.jpg")).collect();
         playlist.update_images(new_images.clone(), vec![]);
@@ -614,39 +618,106 @@ mod tests {
                 .position(|p| p == path)
                 .expect("挿入されているはず");
             assert!(
-                pos > current_index,
-                "新規画像({path})は未再生区間(current_index={current_index}より後ろ)に入るはず、実際は{pos}"
+                pos >= next_index,
+                "新規画像({path})は未再生区間(next_index={next_index}以降)に入るはず、実際は{pos}"
             );
         }
     }
 
-    /// #62: `update_images` は `current_index` より前で削除された件数だけ
-    /// `current_index` を減算し、未再生の画像を飛ばさない。
+    /// #62レビュー M1(must) 回帰: 表示中の画像そのものが削除されても、削除前に
+    /// 本来表示されるはずだった「未表示」画像を1枚も飛ばさない。先頭
+    /// （1件目を表示中に削除）・中間・末尾（今の巡の最後の画像を表示中に削除）の
+    /// いずれの位置でも成り立つことを確認する。
+    ///
+    /// 旧実装は `removed_before_current` を `[..current_index]`（表示中の画像自身を
+    /// 含まない）でしか数えていなかったため、表示中の画像自身が削除された場合に
+    /// カーソルの補正が1件不足し、削除後にその位置へスライドしてきた本来まだ
+    /// 表示していない画像を「表示済み」扱いにして飛ばしてしまっていた。
     #[test]
-    fn update_images_shifts_current_index_by_deletions_before_it() {
+    fn update_images_deleting_the_currently_shown_image_does_not_skip_unplayed_images() {
+        for shown_count in [1usize, 5, 10] {
+            let images: Vec<String> = (0..10).map(|i| format!("img{i}.jpg")).collect();
+            let mut playlist = Playlist::new(images.clone());
+
+            let mut shown_before = Vec::new();
+            for _ in 0..shown_count {
+                let (img, _, _) = playlist.advance();
+                shown_before.push(img.unwrap().clone());
+            }
+
+            let currently_shown = playlist
+                .current()
+                .expect("shown_count>=1なので表示中の画像があるはず")
+                .clone();
+
+            // 表示中の画像そのものを削除する
+            playlist.update_images(vec![], vec![currently_shown.clone()]);
+
+            // 残りを（今の巡の末尾まで）進めて、削除した1件を除く全件が
+            // 過不足なく出てくるか確認する。
+            let mut rest_shown = Vec::new();
+            while playlist.next_index() < playlist.total_count() {
+                let (img, should_count, reshuffled) = playlist.advance();
+                assert!(
+                    should_count,
+                    "shown_count={shown_count}: 巡の途中はすべて新規表示のはず"
+                );
+                assert!(
+                    !reshuffled,
+                    "shown_count={shown_count}: 今の巡の残りを消費しきるまでは再シャッフルしないはず"
+                );
+                rest_shown.push(img.unwrap().clone());
+            }
+
+            let mut all_shown: Vec<String> = shown_before
+                .into_iter()
+                .filter(|p| p != &currently_shown)
+                .chain(rest_shown)
+                .collect();
+            all_shown.sort();
+
+            let mut expected: Vec<String> = images
+                .into_iter()
+                .filter(|p| p != &currently_shown)
+                .collect();
+            expected.sort();
+
+            assert_eq!(
+                all_shown, expected,
+                "shown_count={shown_count}: 表示中画像を削除しても、残り全件が過不足なく\
+                 ちょうど1回ずつ出るはず（削除した画像以外は1枚も飛ばさない）"
+            );
+        }
+    }
+
+    /// #62: `update_images` は `next_index` より前（表示済み区間）で削除された
+    /// 件数だけ `next_index` を減算し、未再生の画像を飛ばさない
+    /// （表示中の画像自身は削除されないケース）。
+    #[test]
+    fn update_images_shifts_next_index_by_deletions_before_it() {
         let images: Vec<String> = (0..10).map(|i| format!("img{i}.jpg")).collect();
         let mut playlist = Playlist::new(images.clone());
 
-        // 5件進める（current_index = 4）
+        // 5件進める（next_index = 5、表示中は shuffled_list[4]）
         for _ in 0..5 {
             playlist.advance();
         }
-        assert_eq!(playlist.current_index(), 4);
+        assert_eq!(playlist.next_index(), 5);
         let current_path = playlist.shuffled_list()[4].clone();
 
-        // current_index より前(0..=3)にある画像のうち2件を削除する
+        // 表示済み区間(0..=3、表示中の[4]自身は含めない)にある画像のうち2件を削除する
         let before_current: Vec<String> = playlist.shuffled_list()[0..4].to_vec();
         let deleted: Vec<String> = before_current.into_iter().take(2).collect();
         playlist.update_images(vec![], deleted);
 
         assert_eq!(
-            playlist.current_index(),
-            2,
-            "current_indexより前の削除2件ぶんだけ減算されるはず"
+            playlist.next_index(),
+            3,
+            "next_indexより前の削除2件ぶんだけ減算されるはず"
         );
-        // current_index が指す画像自体は変わらない(削除されていないため)
+        // 表示中だった画像自体は変わらない(削除されていないため)
         assert_eq!(
-            playlist.shuffled_list()[playlist.current_index()],
+            playlist.shuffled_list()[playlist.next_index() - 1],
             current_path
         );
     }
@@ -677,13 +748,13 @@ mod tests {
         let images: Vec<String> = (0..5).map(|i| format!("img{i}.jpg")).collect();
         let mut playlist = Playlist::new(images);
 
-        // 4件目まで進める(current_index=3、残り1件)
+        // 4件進める(next_index=4、残り1件)
         for _ in 0..4 {
             playlist.advance();
         }
-        assert!(playlist.peek_next_n(1).is_some(), "残り1件は覗けるはず");
+        assert!(playlist.peek_next_n(0).is_some(), "残り1件は覗けるはず");
         assert!(
-            playlist.peek_next_n(2).is_none(),
+            playlist.peek_next_n(1).is_none(),
             "巡の末尾を越える覗き見は打ち切られるはず(次巡の並びは未確定)"
         );
     }
@@ -806,7 +877,7 @@ mod tests {
     /// 超過分はFIFOで最古のエントリから追い出される。
     #[test]
     fn history_length_caps_at_history_limit_boundary() {
-        // 再シャッフル(current_index==0への巻き戻り)を挟まないよう、
+        // 再シャッフル(next_index==lenへの到達)を挟まないよう、
         // HISTORY_LIMIT+1より十分大きい件数のリストを使う。
         let images: Vec<String> = (0..500).map(|i| format!("img{i}.jpg")).collect();
         let mut playlist = Playlist::new(images);
@@ -842,8 +913,8 @@ mod tests {
     }
 
     /// #62 事故パターン: `update_images` で残り全件が削除されると、プレイリストは
-    /// 空になり `before_start` 相当にリセットされる。その後に新規画像が追加されれば
-    /// 「番兵」が再び効き、最初の `advance` がindex 0を飛ばさず返す。
+    /// 空になり「開始前」相当（`next_index==0`・履歴空）にリセットされる。その後に
+    /// 新規画像が追加されれば、最初の `advance` がindex 0を飛ばさず返す。
     #[test]
     fn update_images_deleting_all_images_resets_to_before_start_and_recovers_on_new_images() {
         let images: Vec<String> = (0..5).map(|i| format!("img{i}.jpg")).collect();
@@ -861,10 +932,11 @@ mod tests {
         assert_eq!(playlist.total_count(), 0);
         assert!(
             playlist.current().is_none(),
-            "全件削除後はbefore_startにリセットされcurrentはNoneのはず"
+            "全件削除後は開始前相当にリセットされcurrentはNoneのはず"
         );
         assert!(!playlist.can_go_back());
         assert_eq!(playlist.current_position(), 0);
+        assert_eq!(playlist.next_index(), 0);
 
         // 空の状態から新規画像が追加されても正しく最初から始まる(番兵が効く)
         let new_images: Vec<String> = vec!["new1.jpg".to_string(), "new2.jpg".to_string()];
@@ -911,7 +983,7 @@ mod tests {
         // この「戻った直後」の状態をそのまま保存→復元する(再起動相当)。
         let mut restored = Playlist::from_persisted(
             playlist.shuffled_list().to_vec(),
-            playlist.current_index(),
+            playlist.next_index(),
             playlist.history().to_vec(),
             playlist.history_position(),
         );
@@ -936,7 +1008,7 @@ mod tests {
         );
     }
 
-    /// #62 異常/境界: `from_persisted` に範囲外の `current_index`/`history_position`
+    /// #62 異常/境界: `from_persisted` に範囲外の `next_index`/`history_position`
     /// （保存データの破損・不整合を模す）を渡してもパニックせず安全な値へクランプする。
     #[test]
     fn from_persisted_clamps_out_of_range_indices_instead_of_panicking() {
@@ -952,9 +1024,9 @@ mod tests {
         let restored = Playlist::from_persisted(shuffled_list.clone(), 100, history.clone(), 100);
         assert_eq!(restored.total_count(), 3);
         assert_eq!(
-            restored.current_index(),
-            2,
-            "current_indexはlen-1にクランプされるはず"
+            restored.next_index(),
+            3,
+            "next_indexはlen(=3、末尾に到達済みを表す)にクランプされるはず"
         );
         assert_eq!(
             restored.history_position(),

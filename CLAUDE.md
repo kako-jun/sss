@@ -164,31 +164,52 @@ CREATE TABLE image_stats (
 
 - **用途**: 表示履歴管理
 
-### playlist_state テーブル
+### playlist_list / playlist_position テーブル
+
+プレイリスト状態の永続化（#62で実使用開始）。当初は `playlist_state` 1テーブルに
+まとめていたが、**#62レビューM3(must)** で書込頻度の異なる2テーブルへ分割した:
+`shuffled_list`（10万件規模でJSONが数MBになりうる）を含む1行を、`advance` のたびの
+軽量更新（`next_index`/`history` だけ変える）でも毎回書き直すことになり、SQLiteは
+行全体をコピーして書くため実測で1回あたり数十ms・1日あたり数十GB相当の無駄な
+I/Oになっていたため。旧 `playlist_state`（#61以前からある未使用テーブル。実使用
+されたことは一度も無い）はv2マイグレーションでドロップ済み。
 
 ```sql
-CREATE TABLE playlist_state (
+CREATE TABLE playlist_list (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    directory_path TEXT,          -- どのスキャン対象ディレクトリの状態か（#62）
-    current_index INTEGER DEFAULT 0,
-    shuffled_list TEXT,           -- JSON array（パス）
-    history TEXT,                 -- JSON array（パス。インデックスではない、#62）
-    history_position INTEGER DEFAULT 0,
-    last_shuffled DATETIME,       -- 未使用（旧カラム、実害なく残置）
-    is_paused BOOLEAN DEFAULT 0   -- 未使用（旧カラム、実害なく残置）
+    directory_path TEXT,  -- どのスキャン対象ディレクトリの状態か
+    shuffled_list TEXT    -- JSON array（パス）
+);
+
+CREATE TABLE playlist_position (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    next_index INTEGER DEFAULT 0,  -- 消費済み件数(0..=len)。#62レビューM1
+    history TEXT,                  -- JSON array（パス。インデックスではない、#62）
+    history_position INTEGER DEFAULT 0
 );
 ```
 
-- **用途**: プレイリスト状態の永続化（#62で実使用開始）。常に1行（`id=1`）だけを持つ。
-  - `directory_path`/`shuffled_list`/`current_index`/`history`/`history_position` は
-    シャッフル確定時（新規作成・巡の再シャッフル・`update_images`）に1トランザクションで
-    フル保存する（`Database::save_playlist_full`）。
-  - `advance`/`go_back` のたびは `current_index`/`history`/`history_position` だけを
-    軽量更新する（`Database::save_playlist_position`。`shuffled_list` は書かない。
-    10万件規模で毎回全件書くと重いため）。
-  - 起動時は `Database::load_playlist_state` で読み、`directory_path` が今回のスキャン
-    対象と一致すれば `Playlist::from_persisted` で復元し、現在のスキャン結果との差分を
-    `update_images` 相当で適用して再開する（一致しなければ新規シャッフル）。
+- **用途**: 常にそれぞれ1行（`id=1`）だけを持つ。
+  - `playlist_list`（directory_path/shuffled_list）は、シャッフル確定時
+    （新規作成・巡の再シャッフル・`update_images`）に `playlist_position` と
+    同じトランザクションでフル保存する（`Database::save_playlist_full`）。
+  - `advance`/`go_back` のたびは `playlist_position`（next_index/history/
+    history_position）だけを軽量更新する（`Database::save_playlist_position`。
+    `playlist_list` には一切触れない）。
+  - 起動時は `Database::load_playlist_state` で両テーブルを読み、`directory_path`
+    が一致すれば `Playlist::from_persisted` で復元する。JSON列が壊れていても
+    エラーにはせず空リストへフォールバックする（#62レビューS3）。特に `history`
+    だけが壊れていても `shuffled_list`/`next_index` は健全なまま読め、続きから
+    再開できる。
+  - **#62レビューS1**: `scan_directory` のスキャン完了を待たずに表示を始められる
+    よう、独立した `restore_playlist` コマンドが起動直後にまずこの読み出しを行う
+    （詳細は §3 コマンド一覧、`docs/architecture.md` §5③）。
+  - **#62レビューS2**: ディレクトリの一致判定は生の文字列比較ではなく
+    `commands::playlist_persistence::normalize_directory_key`（`canonicalize`
+    優先、失敗時は末尾区切り除去）で行う。
+  - 1行しか持たないため、フォルダA→B→Aと切り替えるとAの巡の途中経過は失われ、
+    Bに切り替えた時点で上書きされる（複数フォルダの状態を同時に保持しない設計。
+    #62レビューS2、詳細は `docs/features.md`）。
 
 ### ignore_rules テーブル
 
@@ -266,11 +287,16 @@ CREATE TABLE scan_history (
 
 - シャッフルアルゴリズム実装（末尾到達時の再シャッフル、境界での連続表示防止）
 - 履歴管理（#62: パスで保持。インデックス保持だと再シャッフルで別画像を指してしまうため）
-- 開始前の番兵（`before_start`。最初の `advance` が index 0 を飛ばさないようにする、#62）
-- 永続化用アクセサ（`shuffled_list`/`current_index`/`history`/`history_position` の
+- 進行カーソルは `next_index`（消費済み件数、範囲 `0..=len`。#62レビューM1(must)）で
+  持つ。`next_index==0`が「開始前」、`next_index==len`が「巡の末尾」を意味し、
+  専用の番兵フラグは持たない（旧 `current_index`+`before_start` の2状態管理は、
+  `update_images` の削除処理で表示中の画像自身が削除されるケースの補正を誤ると
+  未表示画像を1枚飛ばすバグがあった）
+- 永続化用アクセサ（`shuffled_list`/`next_index`/`history`/`history_position` の
   getterと `from_persisted` コンストラクタ）を提供するのみで、DB自体には触らない
   （実際の読み書きは `database.rs`（`save_playlist_full`/`save_playlist_position`/
-  `load_playlist_state`）と `commands/scan.rs`/`commands/image.rs` が行う。Tauri/DB非依存を保つ設計）
+  `load_playlist_state`）と `commands/playlist_persistence.rs`/`commands/scan.rs`/
+  `commands/image.rs`/`commands/file_operations.rs` が行う。Tauri/DB非依存を保つ設計）
 
 ### src-tauri/src/image_processor.rs
 
@@ -286,32 +312,38 @@ CREATE TABLE scan_history (
 
 ### src-tauri/src/commands/
 
-- Tauriコマンドハンドラ（22個）
+- Tauriコマンドハンドラ（23個）
   1. `scan_directory`: フォルダスキャン（リアルタイム進捗イベント付き）。プレイリストの
-     新規作成/差分更新に加え、起動直後（メモリ上にプレイリストが無い）はDB保存済みの
-     プレイリスト状態を読み、対象ディレクトリが一致すれば復元して差分適用する
-     （#62: 独立した `init_playlist` コマンドは無く、この中で行う）
-  2. `get_next_image`: 次の画像/動画取得（5枚先読みキャッシュ、advance後の永続化込み）
-  3. `get_previous_image`: 前の画像/動画取得（表示回数を増やさない、go_back後の永続化込み）
-  4. `open_in_explorer`: ファイルマネージャーで開く（OS別対応）
-  5. `get_stats`: 統計情報取得
-  6. `get_playlist_info`: プレイリスト情報取得（位置、総数、戻れるか）
-  7. `get_last_directory_path`: 最後にスキャンしたフォルダパス取得
-  8. `exit_app`: アプリケーション終了
-  9. `save_setting`: 設定を保存
-  10. `get_setting`: 設定を取得
-  11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー
-  12. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）
-  13. `get_display_stats`: 統計データ取得（グラフ用、全画像の表示回数）
-  14. `get_default_share_directory`: ピック先デフォルトパス取得
-  15. `reset_all_data`: 全データリセット（DB削除・キャッシュ削除）
-  16. `get_ignore_patterns`: 除外ルール一覧を取得
-  17. `remove_ignore_pattern`: 除外ルールを削除
-  18. `add_ignore_pattern`: 除外ルールを手動追加
-  19. `get_recent_images`: 最近表示した画像一覧（最新100件、除外済み除く）
-  20. `get_picked_images`: ピック済み画像一覧
-  21. `delete_picked_image`: ピック済み画像を削除
-  22. `reset_all_display_counts`: 全画像の表示回数をリセット
+     新規作成/差分更新に加え、メモリ上にプレイリストが無い場合（`restore_playlist` が
+     復元できなかった、またはまだ呼ばれていない）はDB保存済みのプレイリスト状態を
+     読み、対象ディレクトリが一致すれば復元して差分適用する
+  2. `restore_playlist`: 起動直後、DB保存済みのプレイリスト状態を**スキャン完了を
+     待たずに**復元する（#62レビューS1）。フロントはまずこれを呼び、`true`（復元
+     成功）ならスキャンをバックグラウンドへ回して即座に表示を始め、`false`（保存
+     なし/ディレクトリ不一致）ならスキャン完了を待つ従来のフローにフォールバックする
+  3. `get_next_image`: 次の画像/動画取得（5枚先読みキャッシュ、advance後の永続化込み）
+  4. `get_previous_image`: 前の画像/動画取得（表示回数を増やさない、go_back後の永続化込み）
+  5. `open_in_explorer`: ファイルマネージャーで開く（OS別対応）
+  6. `get_stats`: 統計情報取得
+  7. `get_playlist_info`: プレイリスト情報取得（位置、総数、戻れるか）
+  8. `get_last_directory_path`: 最後にスキャンしたフォルダパス取得
+  9. `exit_app`: アプリケーション終了
+  10. `save_setting`: 設定を保存
+  11. `get_setting`: 設定を取得
+  12. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー
+  13. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。
+      即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
+      （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
+  14. `get_display_stats`: 統計データ取得（グラフ用、全画像の表示回数）
+  15. `get_default_share_directory`: ピック先デフォルトパス取得
+  16. `reset_all_data`: 全データリセット（DB削除・キャッシュ削除）
+  17. `get_ignore_patterns`: 除外ルール一覧を取得
+  18. `remove_ignore_pattern`: 除外ルールを削除
+  19. `add_ignore_pattern`: 除外ルールを手動追加
+  20. `get_recent_images`: 最近表示した画像一覧（最新100件、除外済み除く）
+  21. `get_picked_images`: ピック済み画像一覧
+  22. `delete_picked_image`: ピック済み画像を削除
+  23. `reset_all_display_counts`: 全画像の表示回数をリセット
 
 ## Reactコンポーネント構成
 

@@ -1,4 +1,5 @@
 use crate::asset_scope::sanitize_allow_dir;
+use crate::commands::playlist_persistence::{self, normalize_directory_key};
 use crate::commands::types::{AppState, ScanProgress};
 use crate::database::{Database, ExifCacheRow};
 use crate::ignore::{IgnoreFilter, IgnoreRule, RuleType};
@@ -408,7 +409,13 @@ where
     // --- Stage 5: 短時間のplaylistロック（差分適用・復元・確定保存） ---
     {
         let mut playlist_lock = playlist_mutex.lock().unwrap_or_else(|e| e.into_inner());
-        let is_same_directory = current_directory.map(|p| p == directory).unwrap_or(false);
+        // #62レビューS2: ディレクトリ比較は正規化キーで行う（canonicalize前後・末尾区切り
+        // の有無で文字列表現が食い違っても同じディレクトリと判定できるように）。
+        let directory_key = normalize_directory_key(directory);
+        let is_same_directory = current_directory
+            .map(|p| normalize_directory_key(p) == directory_key)
+            .unwrap_or(false);
+        let directory_str = directory.to_string_lossy().to_string();
 
         if is_same_directory && playlist_lock.is_some() {
             // 同じディレクトリの場合のみ既存のプレイリストを更新。
@@ -422,7 +429,15 @@ where
                 let included_set: HashSet<String> = included.iter().cloned().collect();
                 let added: Vec<String> = included_set.difference(&current_set).cloned().collect();
                 let removed: Vec<String> = current_set.difference(&included_set).cloned().collect();
-                playlist.update_images(added, removed);
+                if !added.is_empty() || !removed.is_empty() {
+                    playlist.update_images(added, removed);
+                    // #62レビューM2(must): メンバーシップを変える操作(update_images)は
+                    // 必ず保存とセットで行う。保存し忘れると、再起動を跨いだときに
+                    // 除外したはずの画像が復活したり(exif_cacheと違いDBには残っている)、
+                    // 二重表示になったりする。
+                    let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+                    playlist_persistence::save_full(&db, &directory_str, playlist);
+                }
             }
         } else {
             // メモリ上に無い（起動直後の初回スキャン、または別ディレクトリへの切替）。
@@ -432,19 +447,24 @@ where
             // 毎回捨ててしまい「完全平等」が達成できない（元issueの問題1）。
             // 保存済み状態のディレクトリが今回のスキャン対象と一致する場合だけ復元し、
             // 現在の「含めるべき集合」との差分を `update_images` 相当で適用する。
-            let directory_str = directory.to_string_lossy().to_string();
+            //
+            // #62レビューS1: この復元自体は `restore_playlist` コマンドが起動直後に
+            // 先に行うため、実際にはここに来る前に `playlist_lock` が既に復元済みの
+            // ことが多い（その場合は上の `is_same_directory` 分岐に入る）。ここに来るのは
+            // `restore_playlist` が復元できなかった場合（保存が無い/ディレクトリ不一致）や、
+            // ディレクトリを選び直した場合。
             let restored = {
                 let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
                 db.load_playlist_state().unwrap_or(None)
             };
 
-            *playlist_lock = match restored {
-                Some((saved_dir, shuffled_list, current_index, history, history_position))
-                    if saved_dir == directory_str =>
+            let playlist = match restored {
+                Some((saved_dir, shuffled_list, next_index, history, history_position))
+                    if normalize_directory_key(Path::new(&saved_dir)) == directory_key =>
                 {
                     let mut playlist = Playlist::from_persisted(
                         shuffled_list,
-                        current_index,
+                        next_index,
                         history,
                         history_position,
                     );
@@ -457,25 +477,21 @@ where
                     if !added.is_empty() || !removed.is_empty() {
                         playlist.update_images(added, removed);
                     }
-                    Some(playlist)
+                    playlist
                 }
                 // 保存済み状態が無い、または別ディレクトリのものなら新規シャッフル
-                _ => Some(Playlist::new(included.clone())),
+                _ => Playlist::new(included.clone()),
             };
-        }
 
-        // #62: シャッフルが確定した（新規作成・復元後の差分適用・同一ディレクトリの
-        // 差分更新のいずれも shuffled_list が変わりうる）ので、ここで必ずフル保存する。
-        // advance 単位の軽量保存（`save_playlist_position`）とは別経路。
-        if let Some(ref playlist) = *playlist_lock {
-            let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = db.save_playlist_full(
-                &directory.to_string_lossy(),
-                playlist.shuffled_list(),
-                playlist.current_index(),
-                playlist.history(),
-                playlist.history_position(),
-            );
+            // #62: シャッフルが確定した（新規作成・復元後の差分適用のいずれも
+            // shuffled_list が変わりうる）ので、ここで必ずフル保存する
+            // （上の差分が空でも、directory_path をこのディレクトリへ更新するため）。
+            {
+                let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+                playlist_persistence::save_full(&db, &directory_str, &playlist);
+            }
+
+            *playlist_lock = Some(playlist);
         }
     } // ロック解放
 
@@ -571,4 +587,57 @@ pub async fn scan_directory(
     drop(db);
 
     Ok(progress)
+}
+
+/// 起動時、DBに保存済みのプレイリスト状態を復元する（#62レビューS1）。
+///
+/// スキャン完了を待たずに最初の画像を表示できるようにするため、`scan_directory`
+/// とは独立したコマンドとして提供する。フロントは起動直後にまずこれを呼び、
+/// `true`（復元できた）ならスキャン完了を待たずに即座に `get_next_image` を呼んで
+/// 表示を始め、スキャンはバックグラウンドで実行して差分だけ反映する。`false`
+/// （保存が無い/ディレクトリが一致しない）ならスキャン完了を待つ従来のフローに
+/// フォールバックする。
+///
+/// 復元に成功した場合、`AppState.directory_path` もここで設定する。直後に
+/// バックグラウンドで呼ばれる `scan_directory` の `current_directory` がこの値と
+/// 一致し、新規シャッフルではなく「差分更新」経路を通るようにするため。
+///
+/// asset scope の許可はTauri起動時（`lib.rs` の `setup`、#59）に
+/// `last_directory_path`/`scan_history` の全ディレクトリへ既に行われているため、
+/// ここでは行わない（`scan_directory` は手動選択したばかりの未許可ディレクトリも
+/// 扱うため許可が要るが、`restore_playlist` は起動時に許可済みのディレクトリしか
+/// 対象にしない）。
+#[tauri::command]
+pub async fn restore_playlist(
+    directory_path: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let directory = PathBuf::from(&directory_path);
+    let directory_key = normalize_directory_key(&directory);
+
+    let restored = {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.load_playlist_state().unwrap_or(None)
+    };
+
+    let (saved_dir, shuffled_list, next_index, history, history_position) = match restored {
+        Some(row) if normalize_directory_key(Path::new(&row.0)) == directory_key => row,
+        _ => return Ok(false),
+    };
+    let _ = saved_dir;
+
+    let playlist = Playlist::from_persisted(shuffled_list, next_index, history, history_position);
+    if playlist.is_empty() {
+        // 保存されていた画像が復元時点で1件も無い(空のディレクトリ等)。
+        // 従来どおりスキャンに任せる。
+        return Ok(false);
+    }
+
+    *state.playlist.lock().unwrap_or_else(|e| e.into_inner()) = Some(playlist);
+    *state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(directory);
+
+    Ok(true)
 }

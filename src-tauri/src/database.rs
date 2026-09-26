@@ -1,9 +1,9 @@
 use crate::ignore::RuleType;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 use std::path::PathBuf;
 
-/// `playlist_state` の固定行ID（常に1行だけを更新する）。
-const PLAYLIST_STATE_ID: i64 = 1;
+/// `playlist_list`/`playlist_position` の固定行ID（常に1行だけを更新する）。
+const PLAYLIST_ROW_ID: i64 = 1;
 
 /// テーブルに列が無ければ追加する（`PRAGMA user_version` による汎用マイグレーションの
 /// 部品。#61 で導入、#62 以降のスキーマ変更でも再利用する）。
@@ -41,8 +41,9 @@ type FileMetadataRow = (String, i64, i64);
 /// 直接呼ぶ計測用ベンチ）の公開シグネチャに現れるため、private_interfaces lint を避ける必要がある。
 pub type ExifCacheRow = (String, Option<String>, i64);
 
-/// `playlist_state` の保存済み状態（#62）:
-/// (directory_path, shuffled_list, current_index, history, history_position)
+/// 保存済みプレイリスト状態（#62、#62レビューM3で `playlist_list`/`playlist_position`
+/// の2テーブルに分割）:
+/// (directory_path, shuffled_list, next_index, history, history_position)
 type PlaylistStateRow = (String, Vec<String>, usize, Vec<String>, usize);
 
 pub struct Database {
@@ -84,18 +85,28 @@ impl Database {
             [],
         )?;
 
-        // プレイリスト状態（#62で directory_path/history/history_position を追加し実使用開始。
-        // shuffled_list/history は JSON 配列文字列で保存する。詳細は docs/architecture.md 参照）
+        // プレイリスト状態（#62で実使用開始。#62レビューM3で2テーブルに分割した:
+        // - playlist_list: シャッフル確定時（新規作成・巡の再シャッフル・update_images）
+        //   にしか書かない大きい方（shuffled_list、10万件規模でJSONが数MBになりうる）。
+        // - playlist_position: advance/go_backのたびに書く小さい方（next_index/history/
+        //   history_position）。1テーブルのままだと軽量保存のはずのUPDATEでも
+        //   shuffled_list列を含む行を書き直すことになり、SQLiteは行全体を作り直すため
+        //   実測で1回あたり数十msかかっていた（レビュー実測）。
+        // shuffled_list/history は JSON 配列文字列で保存する。詳細は docs/architecture.md 参照
         self.conn.execute(
-            "CREATE TABLE IF NOT EXISTS playlist_state (
+            "CREATE TABLE IF NOT EXISTS playlist_list (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 directory_path TEXT,
-                current_index INTEGER DEFAULT 0,
-                shuffled_list TEXT,
+                shuffled_list TEXT
+            )",
+            [],
+        )?;
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS playlist_position (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                next_index INTEGER DEFAULT 0,
                 history TEXT,
-                history_position INTEGER DEFAULT 0,
-                last_shuffled DATETIME,
-                is_paused BOOLEAN DEFAULT 0
+                history_position INTEGER DEFAULT 0
             )",
             [],
         )?;
@@ -290,20 +301,43 @@ impl Database {
         Ok(())
     }
 
-    /// v2: `playlist_state` にプレイリスト永続化用の列を追加する（#62）。
-    /// 旧スキーマ（`current_index`/`shuffled_list`/`last_shuffled`/`is_paused` のみ）
-    /// は #61 まで一度も実使用されていなかったため、既存データの移行は考えず
-    /// 列追加のみでよい。新規DBは `CREATE TABLE` で既に最終形を持つため冪等。
+    /// v2: プレイリスト永続化用のテーブルを新設する（#62）。
+    ///
+    /// #62レビューM3(must): 当初案は `playlist_state` 1テーブルに列を追加するだけ
+    /// だったが、v2はこのPR内でしか存在しない未リリースの中身のため、リリース後の
+    /// 互換性を気にせず設計を作り直した。`shuffled_list`（10万件規模でJSONが
+    /// 数MBになりうる）を含む1行を、advanceのたびの軽量更新（`next_index`/`history`だけ
+    /// 変える）でも毎回書き直すことになり、SQLiteは行全体をコピーして書くため
+    /// 実測で1回あたり数十ms・1日あたり数十GB相当の無駄なI/Oになっていた。
+    /// 書込頻度が全く異なる2テーブルに分割する:
+    /// - `playlist_list`（directory_path/shuffled_list、シャッフル確定時にしか書かない）
+    /// - `playlist_position`（next_index/history/history_position、advance毎に書く）
+    ///
+    /// 旧 `playlist_state`（#61以前からある未使用テーブル。`current_index`/
+    /// `shuffled_list`/`last_shuffled`/`is_paused`。実使用されたことは一度も無い）は
+    /// もう不要なのでドロップする。新規DBは `CREATE TABLE` で既に最終形を持つため、
+    /// 各ステップとも冪等（`DROP TABLE IF EXISTS`／`CREATE TABLE IF NOT EXISTS`）。
     fn migrate_to_v2(&self) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
 
-        add_column_if_missing(&tx, "playlist_state", "directory_path", "TEXT")?;
-        add_column_if_missing(&tx, "playlist_state", "history", "TEXT")?;
-        add_column_if_missing(
-            &tx,
-            "playlist_state",
-            "history_position",
-            "INTEGER DEFAULT 0",
+        tx.execute("DROP TABLE IF EXISTS playlist_state", [])?;
+
+        tx.execute(
+            "CREATE TABLE IF NOT EXISTS playlist_list (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                directory_path TEXT,
+                shuffled_list TEXT
+            )",
+            [],
+        )?;
+        tx.execute(
+            "CREATE TABLE IF NOT EXISTS playlist_position (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                next_index INTEGER DEFAULT 0,
+                history TEXT,
+                history_position INTEGER DEFAULT 0
+            )",
+            [],
         )?;
 
         tx.execute("PRAGMA user_version = 2", [])?;
@@ -314,14 +348,16 @@ impl Database {
     /// プレイリストのシャッフル確定時（新規作成・巡の再シャッフル・`update_images`）に
     /// `shuffled_list` を含む全状態を1トランザクションで保存する（#62）。
     ///
+    /// #62レビューM3: `playlist_list`（directory_path/shuffled_list）と
+    /// `playlist_position`（next_index/history/history_position）の2テーブルに書く。
     /// 10万件規模だと `shuffled_list` の JSON は大きくなるため、advance のたびに
-    /// これを書くと重い（`save_playlist_position` が軽量版）。シャッフルが実際に
-    /// 変わった瞬間だけ呼ぶこと。
+    /// これを書くと重い（`save_playlist_position` が軽量版で、`playlist_position` しか
+    /// 触らない）。シャッフルが実際に変わった瞬間だけ呼ぶこと。
     pub fn save_playlist_full(
         &self,
         directory_path: &str,
         shuffled_list: &[String],
-        current_index: usize,
+        next_index: usize,
         history: &[String],
         history_position: usize,
     ) -> Result<()> {
@@ -332,20 +368,23 @@ impl Database {
 
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
-            "INSERT INTO playlist_state
-                (id, directory_path, shuffled_list, current_index, history, history_position)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO playlist_list (id, directory_path, shuffled_list)
+             VALUES (?1, ?2, ?3)
              ON CONFLICT(id) DO UPDATE SET
                  directory_path = excluded.directory_path,
-                 shuffled_list = excluded.shuffled_list,
-                 current_index = excluded.current_index,
+                 shuffled_list = excluded.shuffled_list",
+            params![PLAYLIST_ROW_ID, directory_path, shuffled_list_json],
+        )?;
+        tx.execute(
+            "INSERT INTO playlist_position (id, next_index, history, history_position)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+                 next_index = excluded.next_index,
                  history = excluded.history,
                  history_position = excluded.history_position",
             params![
-                PLAYLIST_STATE_ID,
-                directory_path,
-                shuffled_list_json,
-                current_index as i64,
+                PLAYLIST_ROW_ID,
+                next_index as i64,
                 history_json,
                 history_position as i64,
             ],
@@ -354,81 +393,89 @@ impl Database {
         Ok(())
     }
 
-    /// advance/go_back のたびに呼ぶ軽量な永続化（#62）。`shuffled_list` は書かない
-    /// （10万件規模で毎回書くと重いため）。`save_playlist_full` が一度も呼ばれておらず
-    /// 対象行が無い場合は何も起きない（0行更新、エラーにはならない）。
+    /// advance/go_back のたびに呼ぶ軽量な永続化（#62）。`playlist_position` だけを
+    /// 更新し、`playlist_list`（`shuffled_list`/`directory_path`）には一切触れない
+    /// （#62レビューM3: 10万件規模で毎回 `shuffled_list` を含む行を書き直すと
+    /// 実測で1回あたり数十ms・1日あたり数十GB相当の無駄なI/Oになっていたため、
+    /// テーブル自体を分けて軽量なUPDATEだけで済むようにした）。
+    /// `save_playlist_full` が一度も呼ばれておらず対象行が無い場合は何も起きない
+    /// （0行更新、エラーにはならない）。
     pub fn save_playlist_position(
         &self,
-        current_index: usize,
+        next_index: usize,
         history: &[String],
         history_position: usize,
     ) -> Result<()> {
         let history_json = serde_json::to_string(history)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.conn.execute(
-            "UPDATE playlist_state SET current_index = ?1, history = ?2, history_position = ?3
+            "UPDATE playlist_position SET next_index = ?1, history = ?2, history_position = ?3
              WHERE id = ?4",
             params![
-                current_index as i64,
+                next_index as i64,
                 history_json,
                 history_position as i64,
-                PLAYLIST_STATE_ID,
+                PLAYLIST_ROW_ID,
             ],
         )?;
         Ok(())
     }
 
-    /// 保存済みのプレイリスト状態を読む（#62）。行が無ければ `None`。
-    /// 戻り値: (directory_path, shuffled_list, current_index, history, history_position)
+    /// 保存済みのプレイリスト状態を読む（#62）。`playlist_list` に行が無い、または
+    /// `directory_path` が無ければ復元対象なし（`None`）として扱う。
+    /// 戻り値: (directory_path, shuffled_list, next_index, history, history_position)
+    ///
+    /// #62レビューS3: `shuffled_list`/`history` のJSONが壊れていても（ディスク破損・
+    /// 途中クラッシュ等）エラーにはせず空リストへフォールバックする。特に `history` が
+    /// 壊れていても `playlist_position` 行自体（`next_index`）は数値として健全なら
+    /// そのまま使う。呼び出し元の `Playlist::from_persisted` は履歴が空でも
+    /// `next_index` の続きから正しく再開できる。
     pub fn load_playlist_state(&self) -> Result<Option<PlaylistStateRow>> {
-        let row = self.conn.query_row(
-            "SELECT directory_path, shuffled_list, current_index, history, history_position
-             FROM playlist_state WHERE id = ?1",
-            params![PLAYLIST_STATE_ID],
-            |row| {
-                let directory_path: Option<String> = row.get(0)?;
-                let shuffled_list_json: Option<String> = row.get(1)?;
-                let current_index: i64 = row.get(2)?;
-                let history_json: Option<String> = row.get(3)?;
-                let history_position: i64 = row.get(4)?;
-                Ok((
-                    directory_path,
-                    shuffled_list_json,
-                    current_index,
-                    history_json,
-                    history_position,
-                ))
-            },
-        );
+        let list_row: Option<(Option<String>, Option<String>)> = self
+            .conn
+            .query_row(
+                "SELECT directory_path, shuffled_list FROM playlist_list WHERE id = ?1",
+                params![PLAYLIST_ROW_ID],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
 
-        match row {
-            Ok((
-                Some(directory_path),
-                shuffled_list_json,
-                current_index,
-                history_json,
-                history_position,
-            )) => {
-                let shuffled_list: Vec<String> = shuffled_list_json
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_default();
-                let history: Vec<String> = history_json
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_default();
-                Ok(Some((
-                    directory_path,
-                    shuffled_list,
-                    current_index.max(0) as usize,
-                    history,
-                    history_position.max(0) as usize,
-                )))
+        let (directory_path, shuffled_list_json) = match list_row {
+            Some((Some(directory_path), shuffled_list_json)) => {
+                (directory_path, shuffled_list_json)
             }
-            // directory_path が無い(=save_playlist_fullが一度も呼ばれていない旧行/空行)場合は
-            // 復元対象なしとして扱う
-            Ok((None, ..)) => Ok(None),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
-        }
+            // directory_path が無い(=save_playlist_fullが一度も呼ばれていない)、または
+            // playlist_list行自体が無い場合は復元対象なしとして扱う
+            _ => return Ok(None),
+        };
+        let shuffled_list: Vec<String> = shuffled_list_json
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
+        // playlist_position は save_playlist_full と同じトランザクションで必ず
+        // 一緒に作られるはずだが、念のため行が無い/壊れている場合もエラーにせず
+        // デフォルト値（next_index=0, history=[]）にフォールバックする。
+        let position_row: Option<(i64, Option<String>, i64)> = self
+            .conn
+            .query_row(
+                "SELECT next_index, history, history_position FROM playlist_position
+                 WHERE id = ?1",
+                params![PLAYLIST_ROW_ID],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        let (next_index, history_json, history_position) = position_row.unwrap_or((0, None, 0));
+        let history: Vec<String> = history_json
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
+        Ok(Some((
+            directory_path,
+            shuffled_list,
+            next_index.max(0) as usize,
+            history,
+            history_position.max(0) as usize,
+        )))
     }
 
     /// ファイルメタデータを挿入または更新
@@ -1117,11 +1164,12 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// #62 マイグレーション: 旧スキーマ（`directory_path`/`history`/`history_position`
-    /// 列が無い）の `playlist_state` テーブルを持つDBを開いても、列が追加され
-    /// エラーにならない。
+    /// #62レビュー M3 マイグレーション: 旧スキーマ（`playlist_state` 1テーブルのみ、
+    /// `directory_path`/`history`/`history_position` 列も無い #61以前の実際の形）を
+    /// 持つDBを開いても、旧テーブルはドロップされ、新しい `playlist_list`/
+    /// `playlist_position` の2テーブルに置き換わってエラーにならない。
     #[test]
-    fn migrating_old_playlist_state_schema_adds_v2_columns() {
+    fn migrating_old_playlist_state_table_is_dropped_and_replaced_by_v2_tables() {
         let path = temp_db_path("playlist_state_v2_migration");
 
         {
@@ -1147,11 +1195,25 @@ mod tests {
         let db =
             Database::new(path.clone()).expect("旧playlist_stateスキーマでもエラーにならないはず");
 
-        // directory_path列が無かった(NULL)ので、load_playlist_stateはNoneを返す
-        // (復元対象が無いのと同じ扱い。#62: directory_pathが無いと復元先を判断できない)。
+        // 旧テーブルはドロップされている
+        let old_table_exists: i32 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='playlist_state'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            old_table_exists, 0,
+            "旧playlist_stateテーブルはドロップされるはず"
+        );
+
+        // 旧テーブルの中身（current_index=5等）は引き継がず、復元対象なし扱いになる
+        // （#61以前は一度も実使用されていない未使用テーブルだったため、移行不要）。
         assert!(db.load_playlist_state().unwrap().is_none());
 
-        // 新しい列を使って書き込めることを確認する(冪等マイグレーション後に書込可能)。
+        // 新しいテーブルに書き込めることを確認する(冪等マイグレーション後に書込可能)。
         db.save_playlist_full("/photos", &["x.jpg".to_string()], 0, &[], 0)
             .unwrap();
         let (dir, ..) = db.load_playlist_state().unwrap().unwrap();
@@ -1166,19 +1228,19 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// #62 空・未設定(壊れたJSON): `shuffled_list`/`history` 列の中身がディスク破損や
+    /// #62 空・未設定(壊れたJSON): `playlist_list.shuffled_list` の中身がディスク破損や
     /// 途中クラッシュ等で壊れたJSON文字列になっていても、`load_playlist_state` は
     /// エラーにせず空リストへフォールバックする（`directory_path` は健全なままなら
     /// 復元対象ありとして返す）。
     #[test]
-    fn load_playlist_state_with_corrupted_json_falls_back_to_empty_lists_not_error() {
-        let path = temp_db_path("playlist_state_corrupted_json");
+    fn load_playlist_state_with_corrupted_shuffled_list_json_falls_back_to_empty_list() {
+        let path = temp_db_path("playlist_list_corrupted_json");
         let db = Database::new(path.clone()).unwrap();
 
         db.save_playlist_full(
             "/photos",
             &["a.jpg".to_string()],
-            0,
+            1,
             &["a.jpg".to_string()],
             0,
         )
@@ -1186,12 +1248,12 @@ mod tests {
         // 保存後にJSON列だけを直接壊れた文字列へ書き換える（部分書き込み破損を模す）。
         db.conn
             .execute(
-                "UPDATE playlist_state SET shuffled_list = ?1, history = ?2 WHERE id = 1",
-                params!["not-valid-json{{{", "also-not-valid[["],
+                "UPDATE playlist_list SET shuffled_list = ?1 WHERE id = 1",
+                params!["not-valid-json{{{"],
             )
             .unwrap();
 
-        let (dir, list, idx, hist, hist_pos) = db
+        let (dir, list, idx, hist, _hist_pos) = db
             .load_playlist_state()
             .expect("壊れたJSONでもエラーにはならないはず")
             .expect("directory_pathは健全なので復元対象ありのはず");
@@ -1202,12 +1264,52 @@ mod tests {
             Vec::<String>::new(),
             "壊れたJSONのshuffled_listは空リストにフォールバックするはず"
         );
+        // playlist_position側は無傷なので next_index/history はそのまま読める
+        assert_eq!(idx, 1);
+        assert_eq!(hist, vec!["a.jpg".to_string()]);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #62レビュー S3: `playlist_position.history` のJSONだけが壊れていても、
+    /// `shuffled_list`/`next_index` は健全なまま読める（`history` だけ失っても、
+    /// `Playlist::from_persisted` が `next_index` の続きから再開できるようにするため。
+    /// history が空のJSON配列 `[]` にフォールバックすることを別途 `Playlist` 側の
+    /// テストで検証している）。
+    #[test]
+    fn load_playlist_state_with_corrupted_history_json_still_returns_valid_list_and_next_index() {
+        let path = temp_db_path("playlist_position_corrupted_history");
+        let db = Database::new(path.clone()).unwrap();
+
+        let shuffled_list: Vec<String> = (0..5).map(|i| format!("img{i}.jpg")).collect();
+        db.save_playlist_full("/photos", &shuffled_list, 3, &["img2.jpg".to_string()], 0)
+            .unwrap();
+        db.conn
+            .execute(
+                "UPDATE playlist_position SET history = ?1 WHERE id = 1",
+                params!["also-not-valid[["],
+            )
+            .unwrap();
+
+        let (dir, list, idx, hist, hist_pos) = db
+            .load_playlist_state()
+            .expect("historyのJSONが壊れていてもエラーにはならないはず")
+            .expect("directory_path/shuffled_listは健全なので復元対象ありのはず");
+
+        assert_eq!(dir, "/photos");
+        assert_eq!(
+            list, shuffled_list,
+            "shuffled_listはhistoryの破損と無関係にそのまま読めるはず"
+        );
+        assert_eq!(
+            idx, 3,
+            "next_indexはhistoryの破損と無関係にそのまま読めるはず"
+        );
         assert_eq!(
             hist,
             Vec::<String>::new(),
-            "壊れたJSONのhistoryは空リストにフォールバックするはず"
+            "壊れたhistoryは空リストにフォールバックするはず"
         );
-        assert_eq!(idx, 0);
         assert_eq!(hist_pos, 0);
 
         let _ = std::fs::remove_file(&path);

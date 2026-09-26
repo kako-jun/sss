@@ -34,6 +34,17 @@ export async function scanDirectory(directoryPath: string): Promise<ScanProgress
 }
 
 /**
+ * 起動時、DBに保存済みのプレイリスト状態を復元する（#62レビューS1）。
+ * スキャン完了を待たずに表示を始めるため、`scanDirectory` とは独立して呼ぶ。
+ * `true`（復元できた）ならスキャンはバックグラウンドで実行してよい。
+ * `false`（保存が無い/ディレクトリ不一致）ならスキャン完了を待つ従来のフローに
+ * フォールバックする。
+ */
+export async function restorePlaylist(directoryPath: string): Promise<boolean> {
+  return await invoke<boolean>('restore_playlist', { directoryPath });
+}
+
+/**
  * 次の画像を取得
  */
 export async function getNextImage(): Promise<ImageInfo | null> {

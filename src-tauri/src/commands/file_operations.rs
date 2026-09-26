@@ -1,4 +1,5 @@
 use crate::asset_scope::{resolve_and_sanitize_share_directory, resolve_share_directory};
+use crate::commands::playlist_persistence;
 use crate::commands::types::AppState;
 use crate::ignore::{glob_check_pattern, IgnoreFilter, IgnoreRule, RuleType};
 use crate::image_processor::{extract_date_only, get_exif_info};
@@ -232,6 +233,26 @@ pub async fn add_ignore_pattern(pattern: String, state: State<'_, AppState>) -> 
         .map_err(|e| format!("Failed to add ignore rule: {e}"))
 }
 
+/// `exclude_image` が `update_images` でプレイリストのメンバーシップを変えた直後に
+/// フル保存する（#62レビューM2）。`state.directory_path` が未設定（プレイリスト初期化前）
+/// の場合は保存しようがないため、ログだけ出してスキップする。
+fn persist_current_playlist(state: &State<AppState>, playlist: &crate::playlist::Playlist) {
+    let directory = state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    match directory {
+        Some(dir) => {
+            let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+            playlist_persistence::save_full(&db, &dir.to_string_lossy(), playlist);
+        }
+        None => {
+            eprintln!("exclude_image: directory_path is not set, skipping playlist persistence");
+        }
+    }
+}
+
 /// 除外機能：画像をDBのignore_rulesに追加
 #[tauri::command]
 pub async fn exclude_image(
@@ -287,9 +308,13 @@ pub async fn exclude_image(
     if exclude_type == "file" {
         // ファイル除外は即座にプレイリストから削除
         drop(db);
+        // #62レビューM2(must): update_images(メンバーシップ変更)は必ず保存とセットで
+        // 行う。ここで保存し忘れると、再起動を跨いだときに除外したはずの画像が
+        // 保存済みプレイリストから復活し、二重表示になる。
         let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(ref mut playlist) = *playlist_lock {
             playlist.update_images(vec![], vec![image_path.clone()]);
+            persist_current_playlist(&state, playlist);
         }
         drop(playlist_lock);
         Ok(format!("除外パターン追加: {pattern}"))
@@ -319,9 +344,11 @@ pub async fn exclude_image(
             .map(|(path, _)| path)
             .collect();
         if !matched.is_empty() {
+            // #62レビューM2(must): こちらもupdate_images後は必ず保存する。
             let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(ref mut playlist) = *playlist_lock {
                 playlist.update_images(vec![], matched);
+                persist_current_playlist(&state, playlist);
             }
         }
         Ok(format!(

@@ -42,14 +42,14 @@ fn advance_and_persist(db: &Database, directory: &str, playlist: &mut Playlist) 
         db.save_playlist_full(
             directory,
             playlist.shuffled_list(),
-            playlist.current_index(),
+            playlist.next_index(),
             playlist.history(),
             playlist.history_position(),
         )
         .unwrap();
     } else {
         db.save_playlist_position(
-            playlist.current_index(),
+            playlist.next_index(),
             playlist.history(),
             playlist.history_position(),
         )
@@ -122,7 +122,7 @@ fn scan_directory_restores_saved_playlist_across_simulated_restart() {
         assert_eq!(
             playlist.current_position(),
             TOTAL / 2,
-            "復元後は保存済みのcurrent_indexの続きになっているはず（先頭に巻き戻っていない）"
+            "復元後は保存済みのnext_indexの続きになっているはず（先頭に巻き戻っていない）"
         );
 
         let db = db_mutex.lock().unwrap();
