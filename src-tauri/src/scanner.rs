@@ -373,10 +373,23 @@ impl ImageScanner {
         let duration_ms = start_time.elapsed().as_millis();
 
         let error_count = scan_errors.len();
+        // PR#77レビュー nit: `walkdir::Error`（ディレクトリ単位のエラー）の`Display`は
+        // 対象パスを自前で含めて表示するため、単純に `"{path}: {message}"` と組み立てると
+        // パスが二重に表示されていた（例: "/x/locked: IO error for operation on
+        // /x/locked: Permission denied"）。メッセージに既にパスが含まれていれば
+        // メッセージだけを使い、含まれていなければ（ファイル単位のエラー等）明示的に
+        // 前置する。
         let error_examples = scan_errors
             .iter()
             .take(MAX_ERROR_EXAMPLES)
-            .map(|e| format!("{}: {}", e.path.display(), e.message))
+            .map(|e| {
+                let path_str = e.path.display().to_string();
+                if e.message.contains(&path_str) {
+                    e.message.clone()
+                } else {
+                    format!("{path_str}: {}", e.message)
+                }
+            })
             .collect();
 
         Ok(ScanResult {
@@ -776,6 +789,61 @@ mod tests {
         std::fs::set_permissions(&probe_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _ = std::fs::remove_dir_all(&probe_dir);
         denied
+    }
+
+    /// #63 PR#77レビュー nit: 読み取りエラーでファイルが1件も見つからなくても
+    /// （`entries`が空）、進捗コールバックが最低1回（`(0, 0)`）は必ず呼ばれること
+    /// （早期returnで呼ばれずじまいになる退行を防ぐ）。
+    #[test]
+    #[cfg(unix)]
+    fn progress_callback_fires_even_when_root_is_unreadable_and_zero_files_found() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+        use std::sync::Arc;
+
+        if !chmod_000_actually_denies_read() {
+            eprintln!("root権限で実行されているためスキップ（chmodによる権限拒否が効かない）");
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "sss_scanner_unreadable_root_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("hidden.jpg"), b"x").unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_cb = Arc::clone(&calls);
+
+        let scanner = ImageScanner::new();
+        let no_prune_filter = crate::ignore::IgnoreFilter::from_patterns(&[]);
+        let result = scanner.scan_directory_with_progress(
+            &root,
+            &no_prune_filter,
+            move |_current, _total| {
+                calls_cb.fetch_add(1, AtomicOrdering::Relaxed);
+            },
+        );
+
+        // 後片付け（remove_dir_allの前に権限を戻す）は結果に関わらず必ず行う。
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (files, errors) =
+            result.expect("ルート自体を開けなくてもErrにはせず空の結果+エラーで返すはず");
+
+        assert!(files.is_empty(), "読めないので0件のはず");
+        assert!(
+            !errors.is_empty(),
+            "ルート自体の読み取りエラーが記録されるはず"
+        );
+        assert!(
+            calls.load(AtomicOrdering::Relaxed) >= 1,
+            "0件でも進捗コールバックが最低1回(0,0)で呼ばれるはず"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

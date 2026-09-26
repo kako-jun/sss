@@ -18,6 +18,12 @@ use tauri::{Emitter, Manager, State};
 /// （#61: 毎スキャン走ってしまい `.sssignore.bak` を上書きし続けるバグの修正）。
 const SSSIGNORE_MIGRATED_KEY: &str = "sssignore_migrated";
 
+/// Stage3（`apply_file_metadata_changes`によるDB反映）のロック保持時間がこれを
+/// 超えたら`eprintln!`で記録する閾値（ミリ秒）。#63 PR#77レビュー nit: マジックナンバー
+/// を定数化。10万件規模での性能計測時に異常の疑いがある水準として選んだ値で、
+/// 閾値以下は毎回のログでノイズになるので出さない。
+const STAGE3_LOCK_WARNING_THRESHOLD_MS: u128 = 100;
+
 /// `scan_directory` の二重実行を防ぐRAIIガード（#61レビュー nit）。
 ///
 /// `AppState::scan_in_progress` を `compare_exchange` で `false → true` にできた
@@ -413,9 +419,7 @@ where
         }
     }; // ロック解放
     let stage3_lock_ms = stage3_lock_start.elapsed().as_millis();
-    if stage3_lock_ms > 100 {
-        // #63: 100ms超は10万件規模での性能計測時に異常の疑いがあるため記録する
-        // （閾値以下は毎回のログでノイズになるので出さない）。
+    if stage3_lock_ms > STAGE3_LOCK_WARNING_THRESHOLD_MS {
         eprintln!("[perform_scan] Stage 3 DBロック保持時間: {stage3_lock_ms}ms");
     }
 
