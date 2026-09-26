@@ -18,18 +18,24 @@ export function InfoSection() {
   const handleResetSettings = async () => {
     if (
       !confirm(
-        '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。',
+        '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。完了後アプリが再起動します。',
       )
     ) {
       return;
     }
 
     setIsResetting(true);
-    setResetMessage('初期化中...');
+    setResetMessage('初期化しています。完了後アプリが再起動します。');
 
     try {
+      // バックエンド（reset_all_data）は初期化が成功すると最後にアプリのプロセス
+      // 自体を再起動する（asset scope・メモリ状態を新規プロセスとして確実に
+      // 作り直すため。以前はプロセスは再起動せず、ここで window.location.reload()
+      // を呼んでいたが、asset scope の取り消し方法を forbid_directory から
+      // プロセス再起動に変更したため不要になった）。そのため成功時、この
+      // invoke 呼び出しはプロセスごと終了して戻ってこない想定で、以降の処理は
+      // 書かない。失敗した場合のみ catch に落ちてエラーを表示する。
       await resetAllData();
-      window.location.reload();
     } catch (err) {
       console.error('Failed to reset settings:', err);
       setResetMessage(`エラー: ${err}`);

@@ -29,13 +29,17 @@ const STAGE3_LOCK_WARNING_THRESHOLD_MS: u128 = 100;
 /// `AppState::scan_in_progress` を `compare_exchange` で `false → true` にできた
 /// 場合のみ生成でき、生成に成功すると必ず1つの `Drop` で `false` に戻す
 /// （panic・早期`return`（`?`）・正常終了のいずれの経路でも解除される）。
-struct ScanGuard<'a> {
+///
+/// `pub(crate)`: `commands::system::reset_all_data`（#64）も同じ `AtomicBool` で
+/// 同じガードを取得し、スキャン中の初期化・初期化中のスキャン開始の両方を
+/// 一箇所のロジックで防ぐ。
+pub(crate) struct ScanGuard<'a> {
     flag: &'a AtomicBool,
 }
 
 impl<'a> ScanGuard<'a> {
     /// 既にスキャンが実行中（`flag == true`）なら `Err` を返す。
-    fn acquire(flag: &'a AtomicBool) -> Result<Self, String> {
+    pub(crate) fn acquire(flag: &'a AtomicBool) -> Result<Self, String> {
         flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map(|_| ScanGuard { flag })
             .map_err(|_| "スキャン実行中です。完了までお待ちください。".to_string())

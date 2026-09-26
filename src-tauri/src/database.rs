@@ -91,6 +91,45 @@ fn ignore_rules_has_composite_pk(conn: &Connection) -> Result<bool> {
     Ok(pk > 0)
 }
 
+/// 既定の除外ルール（`rule_type = "glob"`）。新規DB作成時（`ignore_rules` が空の場合）と
+/// `reset_all_data`（#64: 全データ初期化）の両方から再利用する。文字列自体は#61以降
+/// 変更していない（末尾 `/` の判定ロジック側の修正のみで新しい挙動が効くため）。
+const DEFAULT_IGNORE_RULES: [&str; 6] = [
+    "**/.thumbnails/",
+    "**/Thumbs.db",
+    "**/.DS_Store",
+    "**/@eaDir/",
+    "**/desktop.ini",
+    "**/.**/",
+];
+
+/// `reset_to_defaults` がDELETEする対象テーブル（#79レビューshould3で配列化した。
+/// 新しいユーザーデータテーブルを追加したら必ずここに追記すること。追記漏れは
+/// `reset_to_defaults_user_tables_matches_all_tables_in_sqlite_master`（テスト）が
+/// `sqlite_master` の実テーブル一覧と突き合わせて検知する）。
+const USER_TABLES: [&str; 8] = [
+    "file_metadata",
+    "image_stats",
+    "playlist_list",
+    "playlist_position",
+    "ignore_rules",
+    "exif_cache",
+    "scan_history",
+    "app_settings",
+];
+
+/// `DEFAULT_IGNORE_RULES` を `ignore_rules` に挿入する（`INSERT OR IGNORE` なので
+/// 既存行があっても冪等）。`conn` は `Connection`/`Transaction` のどちらでも可。
+fn insert_default_ignore_rules(conn: &Connection) -> Result<()> {
+    for rule in &DEFAULT_IGNORE_RULES {
+        conn.execute(
+            "INSERT OR IGNORE INTO ignore_rules (pattern, rule_type) VALUES (?1, 'glob')",
+            [rule],
+        )?;
+    }
+    Ok(())
+}
+
 /// `file_metadata` の1行（path, modified_time, file_size）
 type FileMetadataRow = (String, i64, i64);
 
@@ -274,22 +313,36 @@ impl Database {
             .query_row("SELECT COUNT(*) FROM ignore_rules", [], |row| row.get(0))
             .unwrap_or(0);
         if rule_count == 0 {
-            let default_rules = [
-                "**/.thumbnails/",
-                "**/Thumbs.db",
-                "**/.DS_Store",
-                "**/@eaDir/",
-                "**/desktop.ini",
-                "**/.**/",
-            ];
-            for rule in &default_rules {
-                self.conn.execute(
-                    "INSERT OR IGNORE INTO ignore_rules (pattern, rule_type) VALUES (?1, 'glob')",
-                    [rule],
-                )?;
-            }
+            insert_default_ignore_rules(&self.conn)?;
         }
 
+        Ok(())
+    }
+
+    /// 全データ初期化（#64）: DBファイルは削除せず、開いた接続のまま**1トランザクション**で
+    /// 全ユーザーデータテーブルの中身を空にし、既定除外ルールを再投入する。
+    ///
+    /// - `PRAGMA user_version` とスキーマ（`CREATE TABLE` 群）はそのまま維持する
+    ///   （`DELETE FROM` はテーブル定義に触れない）。
+    /// - `app_settings`（`last_directory_path`/`apply_exif_rotation`/`share_directory_path`/
+    ///   `display_interval`/`sssignore_migrated` 等）も対象に含める。「設定を初期化」ボタンの
+    ///   名の通り、ユーザー設定も含めて工場出荷状態に戻すのが仕様の意図（Issue #64）で、
+    ///   ここだけ除外すると再起動後に「初期化したのに前の間隔設定が残る」ことになる。
+    /// - 途中で失敗したら丸ごとロールバックされ、中途半端な空テーブルにはならない。
+    /// - 対象テーブルは `USER_TABLES` にまとめてある（#79レビューshould3）。加えて
+    ///   `scan_history.id`（`AUTOINCREMENT`）の採番カウンタが記録された内部テーブル
+    ///   `sqlite_sequence` も明示的にクリアする。`sqlite_sequence` 自体は SQLite の
+    ///   内部テーブル（`sqlite_` 接頭辞）のため `USER_TABLES` には含めないが、
+    ///   クリアし忘れると初期化後も `scan_history.id` が古い最大値の続きから
+    ///   採番されてしまう。
+    pub fn reset_to_defaults(&self) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        for table in USER_TABLES {
+            tx.execute(&format!("DELETE FROM {table}"), [])?;
+        }
+        tx.execute("DELETE FROM sqlite_sequence", [])?;
+        insert_default_ignore_rules(&tx)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1979,6 +2032,238 @@ mod tests {
         let all = db.get_all_exif_cache().unwrap();
         assert_eq!(all.len(), 1, "同じpathへの2回目呼び出しは更新のはず");
         assert_eq!(all[0], ("/p/a.jpg".to_string(), None, 200));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// 全テーブルのカウントを一括取得するテスト専用ヘルパー
+    /// （path/file_metadata/image_stats/playlist_list/playlist_position/ignore_rules/
+    /// exif_cache/scan_history/app_settings の順）。
+    fn table_counts(db: &Database) -> [i32; 8] {
+        let count = |table: &str| -> i32 {
+            db.conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        [
+            count("file_metadata"),
+            count("image_stats"),
+            count("playlist_list"),
+            count("playlist_position"),
+            count("ignore_rules"),
+            count("exif_cache"),
+            count("scan_history"),
+            count("app_settings"),
+        ]
+    }
+
+    /// #64 メインシナリオ: 全ユーザーデータテーブルに1件以上データを入れた状態から
+    /// `reset_to_defaults` を呼ぶと、DBファイル・接続はそのままに全テーブルが空になり、
+    /// `ignore_rules` だけは既定の6ルールで再投入されること。
+    #[test]
+    fn reset_to_defaults_clears_all_user_data_tables_and_reseeds_default_ignore_rules() {
+        let path = temp_db_path("reset_clears_all");
+        let db = Database::new(path.clone()).unwrap();
+
+        // 各テーブルに最低1件ずつデータを入れる
+        db.upsert_file_metadata("/p/a.jpg", 100, 1000).unwrap();
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.save_playlist_full("/p", &["/p/a.jpg".to_string()], 1, &[], 0)
+            .unwrap();
+        db.add_ignore_rule("/p/custom.jpg", RuleType::Glob).unwrap();
+        db.upsert_exif_cache("/p/a.jpg", Some("2023-05-15"), 100)
+            .unwrap();
+        db.record_scan_history("/p", 1, 1, 0, 5).unwrap();
+        db.save_setting("last_directory_path", "/p").unwrap();
+
+        // 既定除外ルール分も含め、ignore_rulesは 6(既定) + 1(追加) = 7件のはず
+        assert_eq!(db.get_ignore_rules().unwrap().len(), 7);
+
+        let version_before: i32 = db
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+
+        db.reset_to_defaults()
+            .expect("開いたままの接続でリセットできるはず");
+
+        let counts = table_counts(&db);
+        assert_eq!(counts[0], 0, "file_metadataは空のはず");
+        assert_eq!(counts[1], 0, "image_statsは空のはず");
+        assert_eq!(counts[2], 0, "playlist_listは空のはず");
+        assert_eq!(counts[3], 0, "playlist_positionは空のはず");
+        assert_eq!(counts[4], 6, "ignore_rulesは既定の6件だけに戻るはず");
+        assert_eq!(counts[5], 0, "exif_cacheは空のはず");
+        assert_eq!(counts[6], 0, "scan_historyは空のはず");
+        assert_eq!(
+            counts[7], 0,
+            "app_settingsも空のはず（last_directory_path等の設定も初期化対象）"
+        );
+
+        let rules = db.get_ignore_rules().unwrap();
+        assert!(
+            rules.iter().all(|(_, t)| *t == RuleType::Glob),
+            "再投入されるのは既定のglobルールのみのはず"
+        );
+        assert!(
+            !rules.iter().any(|(p, _)| p == "/p/custom.jpg"),
+            "ユーザーが追加したルールは残らないはず"
+        );
+
+        let version_after: i32 = db
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            version_before, version_after,
+            "PRAGMA user_versionはリセットで変化しないはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #64: リセット後もスキーマは健全なままで、再スキャン相当の書き込み
+    /// （file_metadata upsert・表示回数インクリメント）が問題なく行えること。
+    #[test]
+    fn reset_to_defaults_leaves_db_usable_for_subsequent_scan() {
+        let path = temp_db_path("reset_then_reuse");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/old/a.jpg", 1, 1).unwrap();
+        db.reset_to_defaults().unwrap();
+
+        // リセット直後に新しいディレクトリを再スキャンしたのと同等の操作が通ること
+        db.upsert_file_metadata("/new/b.jpg", 200, 2000).unwrap();
+        db.increment_display_count("/new/b.jpg").unwrap();
+        db.save_setting("last_directory_path", "/new").unwrap();
+
+        assert_eq!(db.get_total_image_count().unwrap(), 1);
+        assert_eq!(
+            db.get_setting("last_directory_path").unwrap(),
+            Some("/new".to_string())
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #64: 空DB（初回起動直後、既定ルールが既に入っているだけの状態）に対して
+    /// `reset_to_defaults` を呼んでもエラーにならず、既定ルールは6件のまま
+    /// （重複挿入や欠落が起きない）こと。
+    #[test]
+    fn reset_to_defaults_on_fresh_db_is_a_no_op_besides_reseeding_defaults() {
+        let path = temp_db_path("reset_fresh_db");
+        let db = Database::new(path.clone()).unwrap();
+
+        assert_eq!(db.get_ignore_rules().unwrap().len(), 6);
+
+        db.reset_to_defaults().unwrap();
+
+        assert_eq!(db.get_ignore_rules().unwrap().len(), 6);
+        assert_eq!(table_counts(&db)[4], 6);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #64 冪等性の直接確認: `reset_to_defaults` を連続2回呼んでも、2回目もエラーに
+    /// ならず結果（既定6件のみ）が変わらないこと。1回目の呼び出しだけでは
+    /// 「たまたま初回が正しかった」ことしか示せないため、同じ状態に対する
+    /// 2回目の呼び出しが同じ結果を返すことまで確認する。
+    #[test]
+    fn reset_to_defaults_is_idempotent_when_called_twice_in_a_row() {
+        let path = temp_db_path("reset_idempotent_twice");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.reset_to_defaults().expect("1回目は成功するはず");
+        assert_eq!(db.get_ignore_rules().unwrap().len(), 6);
+
+        db.reset_to_defaults()
+            .expect("2回目も成功するはず（INSERT OR IGNOREで重複挿入エラーにならない）");
+        assert_eq!(
+            db.get_ignore_rules().unwrap().len(),
+            6,
+            "2回連続で呼んでも既定6件のまま増減しないはず"
+        );
+        assert_eq!(table_counts(&db)[4], 6);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #64 失敗系: トランザクション途中のDELETEが失敗したら、それより前に同じ
+    /// トランザクション内で実行済みのDELETE（file_metadata/ignore_rules等）も
+    /// まとめてロールバックされ、部分的に空になったテーブルが残らないこと。
+    /// `reset_to_defaults` が最後にDELETEする`app_settings`を事前に破壊して
+    /// 意図的に失敗させ、それより先に実行される他テーブルのDELETEが
+    /// 有効化されていないことを確認する。
+    #[test]
+    fn reset_to_defaults_rolls_back_completely_when_a_later_delete_fails() {
+        let path = temp_db_path("reset_rollback");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/a.jpg", 100, 1000).unwrap();
+        db.add_ignore_rule("/p/custom.jpg", RuleType::Glob).unwrap();
+        assert_eq!(
+            db.get_ignore_rules().unwrap().len(),
+            7,
+            "既定6件+追加1件のはず"
+        );
+
+        // reset_to_defaults内で最後にDELETEされるapp_settingsを壊し、
+        // トランザクションの途中で確実に失敗させる。
+        db.conn.execute("DROP TABLE app_settings", []).unwrap();
+
+        let result = db.reset_to_defaults();
+        assert!(
+            result.is_err(),
+            "app_settingsが無くなっていればエラーになるはず"
+        );
+
+        // ロールバックにより、app_settings以外の（先に実行された）DELETEも
+        // 巻き戻っているはず
+        assert_eq!(
+            db.get_total_image_count().unwrap(),
+            1,
+            "ロールバックによりfile_metadataの削除も取り消され、元のデータが残るはず"
+        );
+        assert_eq!(
+            db.get_ignore_rules().unwrap().len(),
+            7,
+            "ロールバックによりignore_rulesの削除・既定再投入も取り消され、元の7件のままのはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #79レビューshould3: `USER_TABLES`（`reset_to_defaults`がDELETEする対象）が、
+    /// 実際のスキーマ（`sqlite_master`の`type='table'`一覧から、SQLite内部テーブル
+    /// `sqlite_%`接頭辞を除いたもの）と過不足なく一致すること。新しいテーブルを
+    /// 追加したのに`USER_TABLES`への追記を忘れると、そのテーブルだけ
+    /// `reset_to_defaults`で空にならず初期化が中途半端になる事故を機械的に検知する。
+    #[test]
+    fn reset_to_defaults_user_tables_matches_all_tables_in_sqlite_master() {
+        let path = temp_db_path("user_tables_matches_schema");
+        let db = Database::new(path.clone()).unwrap();
+
+        let mut actual_tables: Vec<String> = db
+            .conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        actual_tables.retain(|name| !name.starts_with("sqlite_"));
+        actual_tables.sort();
+
+        let mut expected_tables: Vec<String> = USER_TABLES.iter().map(|s| s.to_string()).collect();
+        expected_tables.sort();
+
+        assert_eq!(
+            actual_tables, expected_tables,
+            "USER_TABLESとsqlite_masterの実テーブル一覧（sqlite_%接頭辞を除く）は\
+             過不足なく一致するはず"
+        );
 
         let _ = std::fs::remove_file(&path);
     }
