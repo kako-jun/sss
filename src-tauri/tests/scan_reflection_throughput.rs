@@ -1,5 +1,6 @@
-//! #63 (6) 計測用ベンチマーク。「ファイル実体1万件程度でのWalkDir〜DB反映の所要時間」を
-//! 実測し、docs（architecture.md 等）に載せる実測値の根拠にする。
+//! #63 (6) / PR#77レビューM4(must) 計測用ベンチマーク。「ファイル実体10万件規模での
+//! WalkDir〜DB反映の所要時間」を実測し、docs（architecture.md 等）に載せる実測値の
+//! 根拠にする。
 //!
 //! `perform_scan`（Tauri非依存の本体）を、実際にディスク上へ書いた `FIXTURE_COUNT` 件の
 //! フィクスチャファイルに対して呼び、WalkDir・（撮影日ルールなしなのでEXIF読みは無し）・
@@ -11,7 +12,8 @@
 //! cargo test --release -- --ignored --nocapture scan_reflection_throughput
 //! ```
 //!
-//! で行う。tempdir はテスト終了時（パニック時含む）に必ず削除する。
+//! で行う。tempdir はテスト終了時（パニック時含む）に必ず削除する。ディスク空きが
+//! 閾値（1.5GB）を切ったらフィクスチャ作成を中断してpanicする（`abort_if_disk_low`）。
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -21,8 +23,15 @@ use sss_lib::commands::scan::perform_scan;
 use sss_lib::database::Database;
 use sss_lib::playlist::Playlist;
 
-/// 実運用（10万件規模）の縮小版。ディスク・実行時間を抑えつつ「1万件規模」を測る。
-const FIXTURE_COUNT: usize = 10_000;
+/// #63の狙い（10万枚規模での差分スキャン）そのままの規模で計測する
+/// （PR#77レビューM4: 以前は1万件に縮小していたが、10万件の通しで計測すること）。
+const FIXTURE_COUNT: usize = 100_000;
+
+/// ディスク空き容量チェックの間隔（フィクスチャ作成件数ベース）。
+const DISK_CHECK_INTERVAL: usize = 20_000;
+
+/// ディスク空きの下限閾値（GB）。これを切ったら測定を中止する。
+const MIN_FREE_DISK_GB: f64 = 1.5;
 
 struct TempDirGuard(PathBuf);
 
@@ -32,35 +41,35 @@ impl Drop for TempDirGuard {
     }
 }
 
-/// `df -h /` の空き容量が閾値を下回っていないか確認する（macOSの `df` 前提。
-/// 失敗時は測れないだけなので測定は続行し、標準エラーに警告を出す）。
-fn warn_if_disk_low() {
-    let Ok(output) = std::process::Command::new("df").arg("-k").arg("/").output() else {
-        return;
-    };
-    let Ok(text) = String::from_utf8(output.stdout) else {
-        return;
-    };
-    if let Some(line) = text.lines().nth(1) {
-        if let Some(avail_kb) = line
-            .split_whitespace()
-            .nth(3)
-            .and_then(|s| s.parse::<u64>().ok())
-        {
-            let avail_gb = avail_kb as f64 / 1024.0 / 1024.0;
-            if avail_gb < 1.5 {
-                eprintln!(
-                    "警告: ディスク空きが {avail_gb:.2}GB しかありません（閾値1.5GB）。中止を検討してください。"
-                );
-            }
-        }
+/// `df -k /` の空き容量（GB）を返す（macOSの `df` 前提）。取得に失敗したら
+/// `None`（判定不能。呼び出し元は続行してよい）。
+fn free_disk_gb() -> Option<f64> {
+    let output = std::process::Command::new("df")
+        .arg("-k")
+        .arg("/")
+        .output()
+        .ok()?;
+    let text = String::from_utf8(output.stdout).ok()?;
+    let line = text.lines().nth(1)?;
+    let avail_kb: u64 = line.split_whitespace().nth(3)?.parse().ok()?;
+    Some(avail_kb as f64 / 1024.0 / 1024.0)
+}
+
+/// #63(6)/PR#77レビューM4: ディスク空きが `MIN_FREE_DISK_GB` を切っていたら
+/// 即座にpanicして測定を中止する（警告するだけで続行はしない）。
+fn abort_if_disk_low(context: &str) {
+    if let Some(avail_gb) = free_disk_gb() {
+        assert!(
+            avail_gb >= MIN_FREE_DISK_GB,
+            "ディスク空きが{avail_gb:.2}GBまで低下しました（閾値{MIN_FREE_DISK_GB}GB、{context}）。測定を中止します。"
+        );
     }
 }
 
 #[test]
 #[ignore]
 fn scan_reflection_throughput() {
-    warn_if_disk_low();
+    abort_if_disk_low("開始前");
 
     let dir = std::env::temp_dir().join(format!(
         "sss_scan_reflection_throughput_{}",
@@ -71,9 +80,13 @@ fn scan_reflection_throughput() {
     let _guard = TempDirGuard(dir.clone());
 
     for i in 0..FIXTURE_COUNT {
+        if i.is_multiple_of(DISK_CHECK_INTERVAL) {
+            abort_if_disk_low(&format!("フィクスチャ作成中 {i}/{FIXTURE_COUNT}件"));
+        }
         // サイズ・内容は問わない（scanner は拡張子のみでメディア判定し中身は読まない）。
         std::fs::write(dir.join(format!("IMG_{i:06}.jpg")), b"x").unwrap();
     }
+    abort_if_disk_low("フィクスチャ作成完了後");
 
     let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
     let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
@@ -123,5 +136,5 @@ fn scan_reflection_throughput() {
         "[#63計測] 2回目scan(差分なし) {FIXTURE_COUNT}件 / {secs2:.3}秒 (file_metadataへの書込は0件のはず)"
     );
 
-    warn_if_disk_low();
+    abort_if_disk_low("終了時");
 }
