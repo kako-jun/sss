@@ -47,6 +47,7 @@ npm run tauri:build
 ### 基本操作
 
 #### マウス操作
+
 - **マウス移動**: UIを表示 & 自動一時停止
 - **オーバーレイ外クリック**: UIを即座に非表示 & 再開
 - **前へボタン**: 前の画像に戻る（履歴から、表示回数は増やさない）
@@ -55,6 +56,7 @@ npm run tauri:build
 - **設定ボタン**: 設定画面を開く
 
 #### キーボードショートカット
+
 - **ESC**: アプリを終了
 - **左矢印キー**: 前の画像へ戻る
 - **右矢印キー**: 次の画像へ進む
@@ -80,6 +82,7 @@ screenshot_*.png
 ## 技術スタック
 
 ### バックエンド (Rust)
+
 - **Tauri v2**: デスクトップアプリフレームワーク（最新版、モバイル対応準備）
 - **rusqlite v0.32**: SQLiteデータベース
 - **rayon v1**: 並列処理
@@ -90,6 +93,7 @@ screenshot_*.png
 - **keepawake v0.4**: スクリーンセーバー抑制
 
 ### フロントエンド (React)
+
 - **React 19**: UIライブラリ
 - **TypeScript**: 型安全性
 - **Vite v7**: 高速ビルドツール
@@ -100,6 +104,7 @@ screenshot_*.png
 ## オーバーレイUI情報
 
 マウス移動時に表示される情報：
+
 - 📁 ファイルパス（フルパス）
 - 🖼️ 画像サイズ（幅x高さ）
 - 💾 ファイルサイズ
@@ -117,18 +122,23 @@ screenshot_*.png
 - 画像切り替え: < 100ms
 - メモリ使用量: < 500MB
 
+上記は目標値です。内部ベンチマーク（`src-tauri/tests/scan_reflection_throughput.rs`・`db_reflection_throughput.rs`、いずれも`#[ignore]`）による実測値は `docs/architecture.md`「6. 主要な設計判断 (b) 差分スキャン」を参照してください。
+
 ## サイネージ用途での運用
 
 常時稼働させる場合は、OS側で自動起動・終了を管理することを推奨します：
 
 ### Windows: タスクスケジューラー
+
 - 毎日8:00に起動、22:00に終了を設定
 - PCの再起動後も自動で動作
 
 ### Linux: cron / systemd timer
+
 - cronで起動・終了を設定
 
 ### macOS: launchd
+
 - plistファイルで起動・終了を設定
 
 詳細は `CLAUDE.md` を参照してください。
@@ -140,6 +150,7 @@ screenshot_*.png
 [photo-returns](https://github.com/kako-jun/photo-returns) は、EXIFメタデータに基づいて写真・動画を `YYYY/YYYYMM/YYYYMMDD` 形式のフォルダ構造へ整理するツールです。
 
 **推奨フロー:**
+
 1. **photo-returns** でカメラやスマートフォンから取り込んだ写真を年月日フォルダへ整理
 2. **sss** で整理済みフォルダをスライドショーとして鑑賞
 
