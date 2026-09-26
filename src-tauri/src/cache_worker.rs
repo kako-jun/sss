@@ -383,4 +383,88 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&cache_dir);
     }
+
+    fn empty_worker() -> CacheWorker {
+        CacheWorker {
+            state: Arc::new((
+                Mutex::new(Queue {
+                    jobs: VecDeque::new(),
+                    queued: HashSet::new(),
+                }),
+                Condvar::new(),
+            )),
+        }
+    }
+
+    /// 同一バッチ内に同じ cache_file が複数含まれていても1件にまとめる（重複排除）。
+    #[test]
+    fn request_prefetch_dedups_duplicate_cache_file_within_same_batch() {
+        let cache_dir = workspace("dedup_batch");
+        let worker = empty_worker();
+
+        let cache_file = cache_dir.join("dup.jpg");
+        worker.request_prefetch(
+            vec![
+                (PathBuf::from("/tmp/dup.jpg"), cache_file.clone()),
+                (PathBuf::from("/tmp/dup.jpg"), cache_file.clone()),
+            ],
+            true,
+        );
+
+        let (lock, _) = &*worker.state;
+        let queue = lock.lock().unwrap();
+        assert_eq!(
+            queue.jobs.len(),
+            1,
+            "同一バッチ内の重複cache_fileは1件にまとめられるはず"
+        );
+
+        let _ = std::fs::remove_dir_all(&cache_dir);
+    }
+
+    /// 既にディスク上にキャッシュファイルが存在する場合、先読みキューへは積まない
+    /// （ワーカーが起動後に無駄な再生成をしないため）。
+    #[test]
+    fn request_prefetch_skips_entries_whose_cache_file_already_exists() {
+        let cache_dir = workspace("prefetch_existing");
+        let worker = empty_worker();
+
+        let cache_file = cache_dir.join("already.jpg");
+        std::fs::write(&cache_file, b"already-cached").unwrap();
+
+        worker.request_prefetch(
+            vec![(PathBuf::from("/tmp/already.jpg"), cache_file.clone())],
+            true,
+        );
+
+        let (lock, _) = &*worker.state;
+        let queue = lock.lock().unwrap();
+        assert!(
+            queue.jobs.is_empty(),
+            "既にキャッシュが存在するファイルはキューに積まれないはず"
+        );
+
+        let _ = std::fs::remove_dir_all(&cache_dir);
+    }
+
+    /// 既にディスク上にキャッシュファイルが存在する場合、現在画像要求としても積まない。
+    #[test]
+    fn request_current_skips_when_cache_file_already_exists() {
+        let cache_dir = workspace("current_existing");
+        let worker = empty_worker();
+
+        let cache_file = cache_dir.join("already.jpg");
+        std::fs::write(&cache_file, b"already-cached").unwrap();
+
+        worker.request_current(PathBuf::from("/tmp/already.jpg"), cache_file.clone(), true);
+
+        let (lock, _) = &*worker.state;
+        let queue = lock.lock().unwrap();
+        assert!(
+            queue.jobs.is_empty(),
+            "既にキャッシュが存在するファイルは current 要求でも積まれないはず"
+        );
+
+        let _ = std::fs::remove_dir_all(&cache_dir);
+    }
 }

@@ -36,6 +36,12 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
 
+# `test` フィーチャは resolver v2 (edition 2021) のため通常ビルドには混入しない。
+# get_next_image 等の #[tauri::command] を tauri::test::mock_app() 経由で
+# 直接呼ぶ結合テスト用（#60: 存在しないファイルで表示回数が加算されないことの検証）。
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

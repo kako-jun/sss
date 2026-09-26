@@ -575,4 +575,91 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// 回転のみが理由でキャッシュ対象になるケース（4K未満・WebView対応形式）。
+    /// #60 のデシジョンテーブルの「回転要否=要, 4K超=否, アニメ=否」セル。
+    #[test]
+    fn plan_cache_file_some_when_rotation_needed_only() {
+        let dir = std::env::temp_dir().join(format!(
+            "sss_plan_cache_rotation_only_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Orientation 6 は90度回転が必要（16x32 が回転後32x16、いずれも4K未満）
+        let (path, _) = write_test_jpeg(&dir, "o6.jpg", 6);
+        let plan = plan_cache_file(&path, true, &dir.join("cache"));
+        assert!(plan.is_some(), "回転のみが理由でもキャッシュ対象になるはず");
+        assert_eq!(
+            plan.unwrap().extension().and_then(|e| e.to_str()),
+            Some("jpg")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// apply_rotation=false は回転要否の判定自体を無効化する。
+    /// #60 のデシジョンテーブルの「回転要否=要だが apply_rotation=false」セル
+    /// （EXIF は回転を求めているが設定でOFF → キャッシュ不要）。
+    #[test]
+    fn plan_cache_file_none_when_apply_rotation_false_ignores_orientation() {
+        let dir = std::env::temp_dir().join(format!(
+            "sss_plan_cache_rotation_off_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Orientation 6 は本来回転が必要だが、apply_rotation=false なので無視される。
+        // 4K未満・JPEG形式（WebView対応）なので他に理由もない → None。
+        let (path, _) = write_test_jpeg(&dir, "o6.jpg", 6);
+        assert_eq!(plan_cache_file(&path, false, &dir.join("cache")), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 4K超のみが理由でキャッシュ対象になるケース（回転不要・WebView対応形式）。
+    /// 拡張子ごとに出力フォーマットが分かれる（JPEGソース→jpg、PNGソース→png＝透過保持）
+    /// ことも同時に検証する。
+    #[test]
+    fn plan_cache_file_some_when_oversized_only_and_extension_follows_source_format() {
+        let dir =
+            std::env::temp_dir().join(format!("sss_plan_cache_oversized_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 幅のみが4K超（3840を上回る）。高さは小さくして画素数を抑える。
+        let oversized = image::DynamicImage::ImageRgb8(image::RgbImage::new(MAX_WIDTH_4K + 1, 4));
+
+        let jpg_path = dir.join("big.jpg");
+        std::fs::write(&jpg_path, encode(&oversized, ImageFormat::Jpeg)).unwrap();
+        let jpg_plan = plan_cache_file(&jpg_path, true, &dir.join("cache"));
+        assert!(jpg_plan.is_some(), "4K超のみでもキャッシュ対象になるはず");
+        assert_eq!(
+            jpg_plan.unwrap().extension().and_then(|e| e.to_str()),
+            Some("jpg"),
+            "JPEGソースはjpgでキャッシュされるはず"
+        );
+
+        let png_path = dir.join("big.png");
+        std::fs::write(&png_path, encode(&oversized, ImageFormat::Png)).unwrap();
+        let png_plan = plan_cache_file(&png_path, true, &dir.join("cache"));
+        assert!(png_plan.is_some(), "4K超のみでもキャッシュ対象になるはず");
+        assert_eq!(
+            png_plan.unwrap().extension().and_then(|e| e.to_str()),
+            Some("png"),
+            "PNGソースは透過保持のためpngでキャッシュされるはず"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// テスト用: 画像を指定フォーマットでエンコードしたバイト列を返す。
+    fn encode(img: &image::DynamicImage, format: ImageFormat) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buffer), format)
+            .expect("failed to encode test fixture");
+        buffer
+    }
 }
