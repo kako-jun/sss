@@ -53,8 +53,11 @@ describe('InfoSection GitHub link (openUrl)', () => {
   });
 });
 
-// #64: 「設定を初期化」ボタンの 確認→実行→ようこそ画面へ戻る流れ、および
-// エラー時に日本語メッセージを表示することを固定する。
+// #64: 「設定を初期化」ボタンの 確認→実行 の流れ、および失敗時に日本語メッセージを
+// 表示することを固定する。成功時は backend（reset_all_data）が最後にアプリの
+// プロセス自体を再起動するため、フロント側は resetAllData() を呼ぶだけで以降は
+// 何もしない（window.location.reload() 等は呼ばない。プロセスごと終了して
+// ようこそ画面から再スタートする）。
 describe('InfoSection reset button (resetAllData)', () => {
   it('does not call resetAllData when the confirmation dialog is declined', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
@@ -70,13 +73,11 @@ describe('InfoSection reset button (resetAllData)', () => {
     confirmSpy.mockRestore();
   });
 
-  it('calls resetAllData and reloads the page when confirmed and successful', async () => {
+  it('calls resetAllData when confirmed, and leaves the button disabled afterward without reloading', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const reloadSpy = vi.fn();
-    Object.defineProperty(window, 'location', {
-      value: { ...window.location, reload: reloadSpy },
-      writable: true,
-    });
+    // 実際の本番環境では、成功すればバックエンドがプロセスごと再起動するため
+    // このinvokeは戻ってこない。テストではモックがresolveするが、それでも
+    // コンポーネント側はreload等の後処理を一切行わないことを固定する。
     resetAllData.mockResolvedValue(undefined);
 
     render(<InfoSection />);
@@ -88,19 +89,16 @@ describe('InfoSection reset button (resetAllData)', () => {
 
     await waitFor(() => {
       expect(resetAllData).toHaveBeenCalledTimes(1);
-      // ようこそ画面へ戻る唯一の経路（App側の状態を作り直すためリロードする）
-      expect(reloadSpy).toHaveBeenCalledTimes(1);
     });
+
+    // 成功後も再起動を待つだけで、ボタンを再度有効化する処理は無い
+    // （isResettingをfalseに戻すのはcatchブロックのみ）。
+    expect(button.disabled).toBe(true);
   });
 
-  it('shows a Japanese error message and re-enables the button without reloading when resetAllData fails', async () => {
+  it('shows a Japanese error message and re-enables the button when resetAllData fails', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const reloadSpy = vi.fn();
-    Object.defineProperty(window, 'location', {
-      value: { ...window.location, reload: reloadSpy },
-      writable: true,
-    });
     // #64: scan_in_progress中の拒否も含め、バックエンドのエラーは日本語メッセージの
     // 文字列として reject される（Tauri commandの `Result<_, String>`）。
     resetAllData.mockRejectedValue('スキャン実行中です。完了までお待ちください。');
@@ -115,7 +113,6 @@ describe('InfoSection reset button (resetAllData)', () => {
       expect(screen.getByText('エラー: スキャン実行中です。完了までお待ちください。')).toBeTruthy();
     });
 
-    expect(reloadSpy).not.toHaveBeenCalled();
     // ボタンが再度クリックできる状態（disabled解除）に戻ること
     const button = screen.getByText('設定を初期化').closest('button') as HTMLButtonElement;
     expect(button.disabled).toBe(false);

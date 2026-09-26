@@ -356,11 +356,16 @@ CREATE TABLE scan_history (
   16. `reset_all_data`: 全データ初期化（#64）。DBファイルは削除せず、開いた接続のまま
       `Database::reset_to_defaults`で全ユーザーデータテーブル（`app_settings`含む）を
       1トランザクションで空にし既定除外ルールを再投入する（スキーマ・`user_version`は
-      維持）。メモリ上の`playlist`/`directory_path`もクリアし、旧スキャン対象は
-      `app.asset_protocol_scope().forbid_directory()`で明示的に取り消す（`forbid`は
-      `allow`より常に優先されるためアプリ再起動なしに即座に読み込み拒否できる。詳細は
-      `docs/architecture.md`§5⑤）。キャッシュクリア（`clear_cache_dir`）・ワーカーの
-      失敗セットクリアも行い、`scan_directory`と同じ`ScanGuard`でスキャンと排他する
+      維持）。メモリ上の`playlist`/`directory_path`もクリアし、キャッシュクリア
+      （`clear_cache_dir`）・ワーカーの失敗セットクリアも行った後、`app.restart()`で
+      プロセス自体を再起動する。当初はasset scopeを`forbid_directory()`で明示的に
+      取り消しフロントが`window.location.reload()`するだけの設計だったが、実測で
+      「`forbid_directory`したディレクトリはその後`allow_directory`しても許可が
+      復活しない（取り消すAPIが無い）」ことが判明し、初期化後に同じフォルダを
+      選び直すと画像が二度と表示できなくなる実装バグだったため撤回した。プロセス
+      再起動なら asset scope・メモリ状態が新規プロセスとして確実に作り直される
+      （詳細は`docs/architecture.md`§5⑤）。`scan_directory`と同じ`ScanGuard`で
+      スキャンと排他する
   17. `get_ignore_patterns`: 除外ルール一覧を取得
   18. `remove_ignore_pattern`: 除外ルールを削除
   19. `add_ignore_pattern`: 除外ルールを手動追加

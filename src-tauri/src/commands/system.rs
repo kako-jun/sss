@@ -14,6 +14,17 @@ pub fn exit_app(app: AppHandle) {
 /// `remove_file` していたが、実行中のTauriプロセスが同じ接続を保持し続けるため、
 /// 別プロセス（例: エクスプローラーでファイルを開いている等）がいなくても
 /// Windowsではファイルロックで削除に失敗しうる不安定さがあった）。
+///
+/// 初期化の最後に `app.restart()` でプロセス自体を再起動する。**当初はプロセスを
+/// 再起動せず、asset scope（`convertFileSrc` が読み込めるディレクトリ）を
+/// `forbid_directory` で明示的に取り消す設計だったが、実測で「`forbid_directory`
+/// した後に同じディレクトリへ`allow_directory`しても`is_allowed`はfalseのまま
+/// （forbiddenが恒久的に優先され続け、取り消すAPIが無い）」ことが判明し撤回した**
+/// （テスト担当が`src-tauri/tests/reset_all_data_e2e.rs`で実測確認済み。詳細は
+/// `docs/architecture.md`§5⑤）。この設計では初期化→同じフォルダを選び直す、という
+/// ごく普通の操作をしただけで画像が二度と表示できなくなる実装バグだった。
+/// プロセスを丸ごと再起動すれば、asset scope・`AppState`のメモリ状態のどちらも
+/// 新規プロセスとして最初から構築されるため、この問題は原理的に起きない。
 #[tauri::command]
 pub async fn reset_all_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     // スキャンとの排他（#64）。scan_directory と同じ `AtomicBool` を使う `ScanGuard` を
@@ -29,32 +40,23 @@ pub async fn reset_all_data(app: AppHandle, state: State<'_, AppState>) -> Resul
             .map_err(|e| format!("データベースの初期化に失敗しました: {e}"))?;
     }
 
-    // 2. メモリ上のプレイリスト・スキャン対象ディレクトリをクリアする。
-    //    directory_path は forbid_directory（後述）で使うため take() で退避してから空にする。
-    let previous_directory = state
+    // 2. メモリ上のプレイリスト・スキャン対象ディレクトリをクリアする。この直後に
+    //    プロセスごと再起動するため厳密には不要だが、再起動が実際にプロセスを
+    //    終了させるまでのごく短い間（下記4番のコメント参照）に他のコマンドが
+    //    呼ばれても、古い状態を見せないための保険として残す。
+    *state
         .directory_path
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
+        .unwrap_or_else(|e| e.into_inner()) = None;
     *state.playlist.lock().unwrap_or_else(|e| e.into_inner()) = None;
 
-    // 3. asset scope（convertFileSrc が読み込めるディレクトリ）で許可していた旧スキャン対象を
-    //    明示的に取り消す。`tauri::scope::fs::Scope::forbid_directory` は
-    //    `forbidden_patterns` に追加するだけで、`is_allowed()` は forbidden を allowed より
-    //    常に優先判定する（tauri 2.10.3 `scope/fs.rs` の実装・テストで確認済み）ため、
-    //    再起動なしに即座に旧フォルダへのアクセスを拒否できる。`allow_directory` で
-    //    許可した pattern 自体は残るが、`forbid_directory` が優先されるため実害はない。
-    if let Some(dir) = previous_directory {
-        if let Err(e) = app.asset_protocol_scope().forbid_directory(&dir, true) {
-            eprintln!("Failed to forbid asset scope for {}: {e}", dir.display());
-        }
-    }
-
-    // 4. キャッシュの中身を削除する（ディレクトリ自体は残す。#60）。
+    // 3. キャッシュの中身を削除する（ディレクトリ自体は残す。#60）。
     // cache_dir は起動時に asset scope へ許可済みで、実行中の CacheWorker もこの
     // パスへ書き続けるため、ディレクトリ自体を消すと以後のキャッシュ書込が失敗する。
     // アプリ稼働中に呼ばれるため中身を1件ずつ削除するとワーカーの新規書込と競合しうる。
     // 起動時クリアと同じ rename→再作成の手順（`clear_cache_dir`）でレースを避ける。
+    // rename自体は同期的に完了し、退避先の実削除だけがバックグラウンドスレッドへ
+    // 逃がされるため、この直後に4番でプロセスを再起動しても取りこぼさない。
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -62,9 +64,20 @@ pub async fn reset_all_data(app: AppHandle, state: State<'_, AppState>) -> Resul
     let cache_dir = app_data_dir.join("cache");
     clear_cache_dir(&app_data_dir, &cache_dir);
 
-    // 5. 失敗セットもクリアする（nit）。キャッシュを丸ごと作り直すのに、過去の失敗記録が
+    // 4. 失敗セットもクリアする（nit）。キャッシュを丸ごと作り直すのに、過去の失敗記録が
     // 居座って同じ画像が以後ずっと再試行されなくなるのを防ぐ。
     state.cache_worker.clear_failed();
 
-    Ok(())
+    // 5. プロセスを再起動する。`AppHandle::restart` の戻り値は `!`（絶対に戻らない。
+    // tauri 2.10.3 `app.rs`で確認済み）: メインスレッド上での呼び出しなら新プロセスを
+    // spawnしてから`exit(0)`、そうでなければ`RunEvent::ExitRequested`/`Exit`を
+    // トリガーしてこの呼び出し自体は戻らずスレッドをブロックし続ける（イベントループが
+    // 実際の終了処理を担う）。`?`を挟まずこの関数の最後の式にすることで、`!`が
+    // `Result<(), String>`へ型強制され、以降のコードは書けない（＝書く必要が無い）。
+    //
+    // `tauri dev` 実行時の挙動: コンパイル済みのdevバイナリを直接再execするだけで、
+    // `npm run tauri dev`のオーケストレーション（vite dev serverの起動）自体は
+    // 再実行しない。バイナリに埋め込まれた開発サーバーURLは変わらず、既に立っている
+    // vite dev serverへ再接続するだけなので、通常のリリースビルドと同様に動作する。
+    app.restart()
 }

@@ -8,9 +8,18 @@
 //! の `MockRuntime` では直接呼び出せない（各e2eテストのコメント参照）。ここでは
 //! Tauri非依存の中核部分（`Database::reset_to_defaults` と `Mutex` のクリア）を
 //! 直接組み立てて呼び、実際の `perform_scan` で再スキャンできることまで確認する。
-//! （asset scopeの`forbid_directory`呼び出しはTauri依存のため対象外。
-//! `Database::reset_to_defaults`単体の詳細な網羅は`src/database.rs`のユニットテスト、
+//! （`Database::reset_to_defaults`単体の詳細な網羅は`src/database.rs`のユニットテスト、
 //! スキャン中の排他は`src/commands/scan.rs`の`ScanGuard`ユニットテストが担う）
+//!
+//! asset scope（`convertFileSrc` が読み込めるディレクトリ）の取り消しは、当初
+//! `forbid_directory`を`reset_all_data`内で呼ぶ設計だったが、実測で「一度
+//! `forbid_directory`したディレクトリは、その後`allow_directory`を呼んでも
+//! `is_allowed`がfalseのまま戻らない（forbiddenが恒久的に優先され続け、取り消す
+//! APIが無い）」ことが判明し（下記のコメント参照）、`commands::system::reset_all_data`
+//! は`forbid_directory`を使わず**プロセス自体を`app.restart()`で再起動する**方式に
+//! 変更した。asset scopeは新規プロセスとして最初から構築されるため、初期化後に
+//! 同じフォルダを選び直しても問題なく表示できる。この`AppHandle`依存の部分（asset
+//! scope・実際のプロセス再起動）自体はここでは検証できないため対象外とする。
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -125,15 +134,16 @@ fn reset_clears_state_and_allows_scanning_a_new_directory_afterward() {
 /// 「新規追加」として再検出されること（#63の差分比較はDB上の記録が基準であり、
 /// resetでその記録が消えれば実ファイルが変わっていなくても新規扱いになる）を確認する。
 ///
-/// 注: asset scope（`convertFileSrc` が読み込めるディレクトリ）の
-/// `forbid_directory`/`allow_directory` は `AppHandle` が必要なため、この
-/// perform_scan直呼びテストの対象外（`commands::system::reset_all_data`本体の
-/// コメント参照）。**そちらを直接検証したところ、同じディレクトリに対して
-/// `forbid_directory` した後に `allow_directory` を呼んでも許可は復活しない
-/// （forbidが恒久的に優先され続ける）ことを確認済み。** これは
-/// `reset_all_data`→同一ディレクトリ再スキャンという運用上あり得る手順で、
-/// 再スキャン後も画像がasset scopeにより読み込めなくなり続ける実装バグの疑いが
-/// 強い（詳細はテスト結果報告を参照。本ファイルでは修正・追加テストをしない）。
+/// 注: asset scope（`convertFileSrc` が読み込めるディレクトリ）の検証は `AppHandle`
+/// が必要なため、この perform_scan直呼びテストの対象外。過去に一度、
+/// `reset_all_data`内で`forbid_directory`を呼んでから同じディレクトリへ
+/// `allow_directory`しても許可が復活しない（forbiddenが恒久的に優先され続け、
+/// 取り消すAPIが無い）ことが実測で判明し、初期化→同じフォルダを選び直すという
+/// 普通の操作で画像が二度と表示できなくなる実装バグになっていた。
+/// `commands::system::reset_all_data`は現在`forbid_directory`を使わず、初期化の
+/// 最後にプロセス自体を`app.restart()`で再起動する方式に修正済み（asset scopeは
+/// 新規プロセスとして最初から構築されるため、この問題は原理的に起きない。詳細は
+/// `commands::system::reset_all_data`本体のコメント・`docs/architecture.md`§5⑤）。
 #[test]
 fn reset_clears_state_and_allows_rescanning_the_same_directory_afterward() {
     let dir = workspace("rescan_same_dir");
