@@ -1,5 +1,6 @@
+use crate::asset_scope::{resolve_share_directory, sanitize_allow_dir};
+use crate::commands::file_operations::home_pictures_dir;
 use crate::commands::types::AppState;
-use std::path::Path;
 use tauri::{AppHandle, Manager, State};
 
 /// 設定を保存
@@ -16,13 +17,28 @@ pub fn save_setting(
     drop(db);
 
     // ピック先ディレクトリが変更された場合、次回起動を待たずに asset scope へ許可する
-    // （「ピック済み」タブのサムネイル表示に必要）
+    // （「ピック済み」タブのサムネイル表示に必要）。resolve_share_directory で空文字設定を
+    // デフォルトへ正規化し、sanitize_allow_dir で絶対パス・実在ディレクトリ・非ルートを
+    // 検証してから allow する（空文字列がそのまま scope に渡ると事故になる、レビュー #73 M1）。
     if key == "share_directory_path" {
-        if let Err(e) = app
-            .asset_protocol_scope()
-            .allow_directory(Path::new(&value), true)
-        {
-            eprintln!("Failed to allow asset scope for {value}: {e}");
+        if let Ok(pictures_dir) = home_pictures_dir() {
+            let resolved = resolve_share_directory(&pictures_dir, Some(value.as_str()));
+            match sanitize_allow_dir(&resolved) {
+                Some(safe_dir) => {
+                    if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
+                        eprintln!(
+                            "Failed to allow asset scope for {}: {e}",
+                            safe_dir.display()
+                        );
+                    }
+                }
+                None => {
+                    eprintln!(
+                        "Refusing to allow unsafe asset scope directory: {}",
+                        resolved.display()
+                    );
+                }
+            }
         }
     }
 

@@ -13,7 +13,7 @@ pub mod image_processor;
 pub mod playlist;
 pub mod scanner;
 
-use asset_scope::startup_allow_dirs;
+use asset_scope::{sanitize_allow_dir, startup_allow_dirs};
 use commands::file_operations::get_picked_directory;
 use commands::AppState;
 use database::Database;
@@ -29,7 +29,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // 2つ目のインスタンス起動時は、新規ウィンドウを作らず既存ウィンドウへフォーカスする
+            // （最小化されていた場合は unminimize() してから show/focus しないと前面に出てこない）
             if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
             }
@@ -78,6 +80,10 @@ pub fn run() {
             // tauri.conf.json の静的 scope は空にしてあるため、表示に必要な全ディレクトリを
             // ここと scan_directory コマンドの両方で明示的に許可する（起動直後の3経路: 手動スキャン・
             // 起動時自動スキャンは scan_directory 側、DB保存済みディレクトリの即時許可はここ）。
+            //
+            // sanitize_allow_dir() を必ず通す: 空文字列や相対パス・ファイルシステムルートを
+            // そのまま allow_directory に渡すと、tauri の scope 実装が意図せず広いパターン
+            // （最悪 "/**" 相当）を生成しうるため（レビュー #73 M1）。
             let last_directory = db
                 .get_setting("last_directory_path")
                 .ok()
@@ -93,8 +99,21 @@ pub fn run() {
                 share_directory.as_deref(),
                 last_directory.as_deref(),
             ) {
-                if let Err(e) = scope.allow_directory(&dir, true) {
-                    eprintln!("Failed to allow asset scope for {}: {e}", dir.display());
+                match sanitize_allow_dir(&dir) {
+                    Some(safe_dir) => {
+                        if let Err(e) = scope.allow_directory(&safe_dir, true) {
+                            eprintln!(
+                                "Failed to allow asset scope for {}: {e}",
+                                safe_dir.display()
+                            );
+                        }
+                    }
+                    None => {
+                        eprintln!(
+                            "Refusing to allow unsafe asset scope directory: {}",
+                            dir.display()
+                        );
+                    }
                 }
             }
 

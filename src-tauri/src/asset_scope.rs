@@ -38,6 +38,36 @@ pub fn startup_allow_dirs(
     dirs
 }
 
+/// asset scope に実際に許可してよいディレクトリかどうかを検証する（M1修正: レビュー #73）。
+///
+/// `tauri::scope::fs::Scope::allow_directory` は与えられたパスをそのままパターン化するため、
+/// 空文字列（`Path::new("")`）を渡すと `"/**"` 相当の全ファイルシステム許可パターンが
+/// 生成されてしまう事故があった。この関数はそれを防ぐゲートで、以下をすべて満たす
+/// ディレクトリだけを許可し、`canonicalize` 済みの絶対パスを返す:
+///
+/// - 空文字列でない
+/// - 絶対パスである
+/// - 実在するディレクトリである（`is_dir()`）
+/// - `canonicalize` 後にファイルシステムルート自体（`/` や `C:\` 等、`parent()` が
+///   `None` になるパス）ではない
+///
+/// `startup_allow_dirs` の出力・`save_setting` で保存された共有先・`scan_directory` の
+/// スキャン対象など、`allow_directory` を呼ぶ直前のすべての候補に適用する。
+pub fn sanitize_allow_dir(path: &Path) -> Option<PathBuf> {
+    if path.as_os_str().is_empty() {
+        return None;
+    }
+    if !path.is_absolute() {
+        return None;
+    }
+    if !path.is_dir() {
+        return None;
+    }
+    let canonical = path.canonicalize().ok()?;
+    canonical.parent()?;
+    Some(canonical)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +212,62 @@ mod tests {
             startup_allow_dirs(cache, Some(same), Some(same)),
             vec![cache.to_path_buf(), same.to_path_buf(), same.to_path_buf()]
         );
+    }
+
+    // --- sanitize_allow_dir ---
+    //
+    // M1(must, レビュー #73): 拒否側の不変条件を固定する。
+    // 空/相対/存在しない/ファイル/ファイルシステムルートは必ず None、
+    // 正常な絶対ディレクトリだけが Some(canonicalize済み) になることを保証する。
+
+    /// テスト専用のユニークな一時ディレクトリを作る（並列テストでも衝突しない）。
+    fn unique_tempdir(tag: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("sss_asset_scope_test_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn sanitize_allow_dir_rejects_empty_path() {
+        assert_eq!(sanitize_allow_dir(Path::new("")), None);
+    }
+
+    #[test]
+    fn sanitize_allow_dir_rejects_relative_path() {
+        // カレントディレクトリ相対では意図しない場所を許可しかねないため拒否する
+        assert_eq!(sanitize_allow_dir(Path::new("relative/dir")), None);
+        assert_eq!(sanitize_allow_dir(Path::new(".")), None);
+    }
+
+    #[test]
+    fn sanitize_allow_dir_rejects_nonexistent_absolute_path() {
+        let missing = std::env::temp_dir().join("sss_asset_scope_test_does_not_exist_xyz");
+        let _ = std::fs::remove_dir_all(&missing);
+        assert_eq!(sanitize_allow_dir(&missing), None);
+    }
+
+    #[test]
+    fn sanitize_allow_dir_rejects_file_path() {
+        let dir = unique_tempdir("rejects_file");
+        let file_path = dir.join("not_a_dir.txt");
+        std::fs::write(&file_path, b"x").unwrap();
+        assert_eq!(sanitize_allow_dir(&file_path), None);
+    }
+
+    #[test]
+    fn sanitize_allow_dir_rejects_filesystem_root() {
+        // ルート自体（parent() が None）は "/**" 相当のパターンになり全FS許可になるため拒否
+        assert_eq!(sanitize_allow_dir(Path::new("/")), None);
+        #[cfg(windows)]
+        assert_eq!(sanitize_allow_dir(Path::new("C:\\")), None);
+    }
+
+    #[test]
+    fn sanitize_allow_dir_accepts_valid_absolute_directory_and_canonicalizes() {
+        let dir = unique_tempdir("accepts_valid");
+        let expected = dir.canonicalize().unwrap();
+        assert_eq!(sanitize_allow_dir(&dir), Some(expected));
     }
 }

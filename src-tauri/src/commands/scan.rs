@@ -1,3 +1,4 @@
+use crate::asset_scope::sanitize_allow_dir;
 use crate::commands::types::{AppState, ScanProgress};
 use crate::ignore::IgnoreFilter;
 use crate::playlist::Playlist;
@@ -59,17 +60,31 @@ pub async fn scan_directory(
 ) -> Result<ScanProgress, String> {
     let directory = PathBuf::from(&directory_path);
 
-    if !directory.exists() {
-        return Err(format!("Directory does not exist: {directory_path}"));
+    if !directory.is_dir() {
+        return Err(format!(
+            "Directory does not exist or is not a directory: {directory_path}"
+        ));
     }
 
     // asset scope（convertFileSrc が読み込めるディレクトリ）にスキャン対象を動的に許可する。
     // 手動スキャン・起動時自動スキャンはどちらもこのコマンドを通るため、ここ1箇所で両方をカバーする。
-    if let Err(e) = app.asset_protocol_scope().allow_directory(&directory, true) {
-        eprintln!(
-            "Failed to allow asset scope for {}: {e}",
-            directory.display()
-        );
+    // sanitize_allow_dir() で is_dir・絶対パス・非ルートを再検証してから allow する
+    // （空文字列/相対パスが紛れ込んで意図せず広い scope になる事故を防ぐ、レビュー #73 M1）。
+    match sanitize_allow_dir(&directory) {
+        Some(safe_dir) => {
+            if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
+                eprintln!(
+                    "Failed to allow asset scope for {}: {e}",
+                    safe_dir.display()
+                );
+            }
+        }
+        None => {
+            eprintln!(
+                "Refusing to allow unsafe asset scope directory: {}",
+                directory.display()
+            );
+        }
     }
 
     // マイグレーション処理：~/.sssignore が存在する場合は DB にインポート
