@@ -17,7 +17,47 @@ use tauri::State;
 /// 影響しない。上限を設けるのは、万一ほとんどのファイルが一斉に消えている
 /// （フォルダごとアンマウント等）異常事態で無限ループにならないようにするため。
 /// 上限に到達した場合は従来どおり `Ok(None)` を返す。
+///
+/// #62レビュー3巡目 T-M1(must): この上限は「個々のファイルが飛び飛びに消えている」
+/// 場合の話であり、スキャン対象ディレクトリ自体（NAS/USB）が丸ごと外れている場合は
+/// 別扱いにする。ディレクトリ自体が無いなら、`advance` するたびに（ほぼ）必ず
+/// ファイルが見つからず`MAX_MISSING_FILE_SKIPS`回フルに消費してしまい、鑑賞中に
+/// 数秒おきに呼ばれる`get_next_image`のたびに最大20件ずつ未表示画像を無駄に
+/// 消費し続ける（「1巡で全件ちょうど1回」への実害は無くても、体感的に「見ないまま
+/// 巡がどんどん進む」異常な速さになる）。ループの各反復の前に
+/// `directory_root_is_accessible` でルート自体の生死を確認し、無ければその時点で
+/// 一切 `advance` せずに打ち切る。
 const MAX_MISSING_FILE_SKIPS: usize = 20;
+
+/// `get_image_info_internal` の結果（#62レビュー3巡目 S-b）。
+///
+/// 「ファイルが存在しない」（`Missing`、軽い。次のファイルへ進み直してよい）と
+/// 「存在はするがキャッシュ変換が失敗/タイムアウトした」（`ProcessingFailed`、重い。
+/// `request_current_and_wait` が最大 `CACHE_WAIT_TIMEOUT`（既定5秒）待つ）を区別する。
+/// 両者を同じ `None` として扱いループで読み飛ばすと、同じ理由（壊れたファイル群等）で
+/// 何枚も連続して同じ待ちが発生した場合に最悪 `MAX_MISSING_FILE_SKIPS ×
+/// CACHE_WAIT_TIMEOUT`（20×5秒=100秒）ブロックしてしまう。`ProcessingFailed` は
+/// ループで繰り返さず1回で打ち切る。
+enum ImageLookup {
+    Found(ImageInfo),
+    Missing,
+    ProcessingFailed,
+}
+
+/// スキャン対象ディレクトリ自体が今アクセス可能かどうかを確認する
+/// （#62レビュー3巡目 T-M1 must）。`AppState.directory_path` が未設定（テスト等）の
+/// 場合はチェック対象が無いので `true`（許可）を返す。
+fn directory_root_is_accessible(state: &State<AppState>) -> bool {
+    let directory = state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    match directory {
+        Some(dir) => dir.is_dir(),
+        None => true,
+    }
+}
 
 /// `advance()` 後の永続化（#62）。再シャッフルが起きた場合のみ `shuffled_list` を
 /// 含むフル保存（1トランザクション）、それ以外は `next_index`/履歴だけの
@@ -56,6 +96,16 @@ fn persist_playlist_after_advance(state: &State<AppState>, playlist: &Playlist, 
 /// `MAX_MISSING_FILE_SKIPS` 回を上限に内部で次へ進み直し、最初に実在する画像が
 /// 見つかったものだけを返す。表示回数はその実在する画像1件にだけ加算する
 /// （欠損ファイルの分は加算しない、従来どおり）。
+///
+/// #62レビュー3巡目 T-M1(must): ループの各反復の前に、対象ディレクトリ自体が
+/// アクセス可能かを確認する。無ければ（advance すら行わず）即座に `Ok(None)` を
+/// 返す。個々のファイルの消失（`ImageLookup::Missing`）とは別に、ディレクトリ
+/// 自体の消失は「ほぼ全件が必ず見つからない」状態を意味するため、通常のスキップ
+/// ループに任せると毎回上限（20件）ぶん無駄に `advance`+保存してしまう。
+///
+/// #62レビュー3巡目 S-b: `ImageLookup::ProcessingFailed`（キャッシュ変換の失敗/
+/// タイムアウト）は `Missing` と違ってループで読み飛ばさず、その場で打ち切る
+/// （詳細は `ImageLookup` のdoc参照）。
 #[tauri::command]
 pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
     // apply_exif_rotation 設定を取得（デフォルト true）。欠損ファイルのスキップで
@@ -70,6 +120,11 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
     };
 
     for _ in 0..MAX_MISSING_FILE_SKIPS {
+        // T-M1(must): ディレクトリ自体が無いなら、ここでadvanceせず打ち切る。
+        if !directory_root_is_accessible(&state) {
+            return Ok(None);
+        }
+
         let (path_str, should_count, prefetch_paths) = {
             let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
             let playlist = playlist_lock
@@ -106,21 +161,27 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
         };
 
         // 画像情報を取得（内部で存在確認・現在画像のキャッシュ要求まで行う）
-        let info = get_image_info_internal(&path_str, &state, apply_rotation).await?;
+        match get_image_info_internal(&path_str, &state, apply_rotation).await? {
+            ImageLookup::Found(info) => {
+                // 表示回数の加算はファイル存在確認後（#60 問題9: 消失ファイルを無駄カウントしない）
+                if should_count {
+                    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+                    let _ = db.increment_display_count(&path_str);
+                }
 
-        if info.is_some() {
-            // 表示回数の加算はファイル存在確認後（#60 問題9: 消失ファイルを無駄カウントしない）
-            if should_count {
-                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-                let _ = db.increment_display_count(&path_str);
+                // 5枚先まで先読みキュー投入（単一ワーカーが直列処理・重複排除・世代管理する）
+                enqueue_prefetch(&state, prefetch_paths, apply_rotation);
+
+                return Ok(Some(info));
             }
-
-            // 5枚先まで先読みキュー投入（単一ワーカーが直列処理・重複排除・世代管理する）
-            enqueue_prefetch(&state, prefetch_paths, apply_rotation);
-
-            return Ok(info);
+            ImageLookup::Missing => {
+                // ファイルが存在しない: カウントせず、次のループでさらに advance し直す。
+            }
+            ImageLookup::ProcessingFailed => {
+                // S-b: キャッシュ変換の失敗/タイムアウトはループで繰り返さず打ち切る。
+                return Ok(None);
+            }
         }
-        // ファイルが存在しない: カウントせず、次のループでさらに advance し直す。
     }
 
     // 上限に到達（ほとんどのファイルが一斉に消えている等の異常事態）。従来どおり None。
@@ -131,6 +192,8 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
 ///
 /// #62レビュー2巡目 N-S1: `get_next_image` と同様、実ファイルが消えている画像に
 /// 当たったら `MAX_MISSING_FILE_SKIPS` 回を上限にさらに前へ戻り直す。
+/// #62レビュー3巡目 T-M1/S-b: ディレクトリ自体の消失チェックと
+/// `ImageLookup::ProcessingFailed` の即時打ち切りも `get_next_image` と同様に行う。
 #[tauri::command]
 pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
     // apply_exif_rotation 設定を取得（デフォルト true）
@@ -144,6 +207,11 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
     };
 
     for _ in 0..MAX_MISSING_FILE_SKIPS {
+        // T-M1(must): ディレクトリ自体が無いなら、ここでgo_backせず打ち切る。
+        if !directory_root_is_accessible(&state) {
+            return Ok(None);
+        }
+
         let path_str = {
             let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
             let playlist = playlist_lock
@@ -172,12 +240,17 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
         };
 
         // 画像情報を取得（カウントは増やさない）
-        let info = get_image_info_internal(&path_str, &state, apply_rotation).await?;
-        if info.is_some() {
-            return Ok(info);
+        match get_image_info_internal(&path_str, &state, apply_rotation).await? {
+            ImageLookup::Found(info) => return Ok(Some(info)),
+            ImageLookup::Missing => {
+                // ファイルが存在しない: 次のループでさらに go_back し直す
+                // （履歴の先頭に達したら can_go_back() が false になり Ok(None) で終わる）。
+            }
+            ImageLookup::ProcessingFailed => {
+                // S-b: キャッシュ変換の失敗/タイムアウトはループで繰り返さず打ち切る。
+                return Ok(None);
+            }
         }
-        // ファイルが存在しない: 次のループでさらに go_back し直す
-        // （履歴の先頭に達したら can_go_back() が false になり Ok(None) で終わる）。
     }
 
     Ok(None)
@@ -191,8 +264,10 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
 /// `requires_synchronous_cache` が true のケース（原本をそのまま返すと表示が誤る:
 /// WebView非対応形式、または apply_rotation=false なのにEXIF回転が必要）は、
 /// ワーカーの完了を待ってからキャッシュパスを返す（#60 レビュー1巡目 must2、
-/// 2巡目 must B）。失敗/タイムアウト時はファイル不在と同様に `Ok(None)` を返し
-/// スキップさせる（自動で次へ進める仕組み自体は #65）。
+/// 2巡目 must B）。失敗/タイムアウト時は `ImageLookup::ProcessingFailed` を返す
+/// （#62レビュー3巡目 S-b: ファイル不在の `Missing` とは区別する。呼び出し元は
+/// `ProcessingFailed` をループで読み飛ばさず即座に打ち切る。自動で次へ進める
+/// 仕組み自体の本格整理は #65）。
 ///
 /// この同期待ちは `tauri::async_runtime::spawn_blocking` に逃がし、非同期コマンドの
 /// 実行スレッドを最大 `CACHE_WAIT_TIMEOUT` 秒ブロックしないようにする
@@ -206,11 +281,11 @@ async fn get_image_info_internal(
     image_path: &str,
     state: &State<'_, AppState>,
     apply_rotation: bool,
-) -> Result<Option<ImageInfo>, String> {
+) -> Result<ImageLookup, String> {
     let path = Path::new(image_path);
 
     if !path.exists() {
-        return Ok(None);
+        return Ok(ImageLookup::Missing);
     }
 
     // 動画ファイルかどうかを判定
@@ -259,7 +334,9 @@ async fn get_image_info_internal(
                 Some(cache_file.to_string_lossy().to_string())
             } else {
                 // 失敗/タイムアウト: 表示不能/表示が誤る原本を返すよりスキップ扱いにする。
-                return Ok(None);
+                // #62レビュー3巡目 S-b: ファイル不在(Missing)とは区別し、呼び出し元の
+                // スキップループでは繰り返さず即座に打ち切らせる。
+                return Ok(ImageLookup::ProcessingFailed);
             }
         } else {
             // 4K超のみが理由の場合は非同期。単一ワーカーへ優先要求してから元画像を返す
@@ -309,7 +386,7 @@ async fn get_image_info_internal(
     }
     drop(db);
 
-    Ok(Some(ImageInfo {
+    Ok(ImageLookup::Found(ImageInfo {
         path: image_path.to_string(),
         optimized_path,
         is_video,

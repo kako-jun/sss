@@ -10,7 +10,8 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use sss_lib::commands::scan::{perform_restore, perform_scan, RestoreOutcome};
 use sss_lib::database::Database;
@@ -235,8 +236,10 @@ fn restore_playlist_returns_false_when_saved_directory_is_currently_inaccessible
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #62レビュー2巡目 N-S2: `playlist_mutex` が既に `Some`（既に復元済み/
-/// 初期化済み）なら、何もせず`AlreadyReady`（呼び出し元はtrue）を返す（既存維持）。
+/// #62レビュー2巡目 N-S2（#62レビュー3巡目 nit で directory_path_mutex との
+/// 一致確認を追加）: `playlist_mutex` が既に `Some`（既に復元済み/初期化済み）で、
+/// かつ `directory_path_mutex` が今回リクエストされたディレクトリと一致するなら、
+/// 何もせず `AlreadyReady`（呼び出し元はtrue）を返す（既存維持）。
 #[test]
 fn restore_playlist_returns_already_ready_without_changes_when_playlist_already_set() {
     let dir = workspace("already_set");
@@ -246,10 +249,12 @@ fn restore_playlist_returns_already_ready_without_changes_when_playlist_already_
 
     let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
     // 意図的に、DBには何も保存していない状態で、メモリ上にだけ既にプレイリストがある
-    // 状況を作る(scan_directoryが先に完了していた等を模す)。
+    // 状況を作る(scan_directoryが先に完了していた等を模す)。directory_path_mutexも
+    // 今回リクエストするディレクトリと一致させておく(既にこのディレクトリの状態が
+    // 復元済みという想定)。
     let existing_playlist = Playlist::new(vec!["/already/loaded.jpg".to_string()]);
     let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(Some(existing_playlist));
-    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(Some(photos_dir.clone()));
     let scan_in_progress = AtomicBool::new(false);
 
     let outcome = perform_restore(
@@ -273,9 +278,60 @@ fn restore_playlist_returns_already_ready_without_changes_when_playlist_already_
             "既存のプレイリストを勝手に作り直していないはず"
         );
     }
-    assert!(
-        directory_path_mutex.lock().unwrap().is_none(),
+    assert_eq!(
+        directory_path_mutex.lock().unwrap().as_deref(),
+        Some(photos_dir.as_path()),
         "既存維持パスではdirectory_pathも書き換えないはず"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #62レビュー3巡目 nit: `playlist_mutex` が既に `Some` でも、それが
+/// `directory_path_mutex` の指すディレクトリと**一致しない**場合（例: 別ディレクトリ
+/// への切替直後で、まだ古いディレクトリのプレイリストが残っている）は、
+/// 「既存維持」を騙って `AlreadyReady` を返してはいけない（`NotRestored` を返し、
+/// 呼び出し元の通常の新規/差分更新フローに委ねる）。
+#[test]
+fn restore_playlist_returns_not_restored_when_existing_playlist_is_for_a_different_directory() {
+    let dir = workspace("already_set_different_dir");
+    let photos_dir_a = dir.join("a");
+    let photos_dir_b = dir.join("b");
+    std::fs::create_dir_all(&photos_dir_a).unwrap();
+    std::fs::create_dir_all(&photos_dir_b).unwrap();
+
+    let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
+    let existing_playlist = Playlist::new(vec!["/a/loaded.jpg".to_string()]);
+    let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(Some(existing_playlist));
+    // メモリ上のplaylistはフォルダA向けだが、今回リクエストするのはフォルダB。
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(Some(photos_dir_a.clone()));
+    let scan_in_progress = AtomicBool::new(false);
+
+    let outcome = perform_restore(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        &scan_in_progress,
+        &photos_dir_b,
+    );
+
+    assert_eq!(
+        outcome,
+        RestoreOutcome::NotRestored,
+        "既存playlistが別ディレクトリのものなら既存維持を騙ってはいけない"
+    );
+    // 既存のplaylist/directory_pathはA向けのまま変更されない
+    // (Bの状態を勝手に作ったり上書きしたりしない)。
+    assert!(playlist_mutex
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .current_paths()
+        .contains("/a/loaded.jpg"));
+    assert_eq!(
+        directory_path_mutex.lock().unwrap().as_deref(),
+        Some(photos_dir_a.as_path())
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -312,6 +368,82 @@ fn restore_playlist_returns_false_while_scan_is_in_progress() {
         "スキャン中は復元しないはず"
     );
     assert!(restored_playlist_mutex.lock().unwrap().is_none());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #62レビュー3巡目 nit: `is_some` 確認から `Some(playlist)` 設定までロックを
+/// 保持し続ける（TOCTOU対策）ため、複数スレッドから同時に `perform_restore` を
+/// 呼んでも、`playlist_mutex` の総順序により実際に復元するのはちょうど1本だけで、
+/// 残りは（既に正しく設定された `directory_path_mutex` と一致するので）
+/// `AlreadyReady` になる。`NotRestored` が紛れ込む（＝一瞬でも矛盾した状態を
+/// 観測してしまう）ことは無い。
+#[test]
+fn perform_restore_is_race_free_under_concurrent_calls() {
+    let dir = workspace("concurrent_restore");
+    let photos_dir = dir.join("photos");
+    std::fs::create_dir_all(&photos_dir).unwrap();
+    for i in 0..5 {
+        std::fs::write(photos_dir.join(format!("img{i}.jpg")), b"x").unwrap();
+    }
+
+    let db_mutex = Arc::new(Mutex::new(
+        Database::new(dir.join("sss.db")).expect("db init"),
+    ));
+    let playlist_mutex: Arc<Mutex<Option<Playlist>>> = Arc::new(Mutex::new(None));
+    scan(&db_mutex, &playlist_mutex, &photos_dir);
+    // scan()はperform_scan経由でplaylistを設定してしまうため、「再起動直後で
+    // メモリ上は空」の状態を作るためにリセットする(DBには保存済み)。
+    *playlist_mutex.lock().unwrap() = None;
+
+    let directory_path_mutex: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
+    let scan_in_progress = Arc::new(AtomicBool::new(false));
+
+    const THREADS: usize = 8;
+    let handles: Vec<_> = (0..THREADS)
+        .map(|_| {
+            let db_mutex = Arc::clone(&db_mutex);
+            let playlist_mutex = Arc::clone(&playlist_mutex);
+            let directory_path_mutex = Arc::clone(&directory_path_mutex);
+            let scan_in_progress = Arc::clone(&scan_in_progress);
+            let photos_dir = photos_dir.clone();
+            thread::spawn(move || {
+                perform_restore(
+                    &db_mutex,
+                    &playlist_mutex,
+                    &directory_path_mutex,
+                    &scan_in_progress,
+                    &photos_dir,
+                )
+            })
+        })
+        .collect();
+
+    let outcomes: Vec<RestoreOutcome> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+    let restored_count = outcomes
+        .iter()
+        .filter(|o| matches!(o, RestoreOutcome::Restored(_)))
+        .count();
+    let already_ready_count = outcomes
+        .iter()
+        .filter(|o| **o == RestoreOutcome::AlreadyReady)
+        .count();
+    let not_restored_count = outcomes
+        .iter()
+        .filter(|o| **o == RestoreOutcome::NotRestored)
+        .count();
+
+    assert_eq!(
+        restored_count, 1,
+        "TOCTOUが無ければ実際に復元するのはちょうど1本のはず: {outcomes:?}"
+    );
+    assert_eq!(
+        already_ready_count,
+        THREADS - 1,
+        "残りは全てAlreadyReadyになるはず(NotRestoredが紛れ込まない): {outcomes:?}"
+    );
+    assert_eq!(not_restored_count, 0);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

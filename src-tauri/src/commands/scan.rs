@@ -654,7 +654,11 @@ pub enum RestoreOutcome {
 /// - `playlist_mutex` が既に `Some`（既に復元済み/初期化済み）なら、何もせず
 ///   `AlreadyReady` を返す（「既存維持」。呼び出し元は現在の状態をそのまま使ってよい、
 ///   という意味で `Ok(true)` を返す設計にした。呼ぶたびに毎回作り直すと、既に
-///   advance 済みの状態を巻き戻してしまうため）。
+///   advance 済みの状態を巻き戻してしまうため）。**#62レビュー3巡目 nit**:
+///   ただし既存の `playlist` が「今回リクエストされたディレクトリ」のものとは
+///   限らない（例: 別ディレクトリへの切替直後で、まだ古いディレクトリの
+///   プレイリストが残っている）ため、`directory_path_mutex` の現在値と正規化キーで
+///   突き合わせ、一致しない場合は「既存維持」を騙らず `NotRestored` を返す。
 /// - `scan_in_progress` が立っている（`scan_directory` 実行中）間は何もせず
 ///   `NotRestored` を返す。スキャンの Stage 4 が `playlist_mutex`/`db_mutex` を
 ///   段階的に触っている最中にここから割り込むと、スキャン側の反映と競合しうるため
@@ -667,6 +671,15 @@ pub enum RestoreOutcome {
 /// `get_next_image` が内部リトライ（#62レビュー2巡目 N-S1）で `advance` を
 /// 繰り返しながら実質的に巡全体を無言で消費してしまう（画面には何も表示されないまま
 /// 「完全平等」の前提であるはずの巡が壊れる）。
+///
+/// #62レビュー3巡目 nit: `playlist_mutex` の `is_some` 確認から実際に
+/// `Some(playlist)` を設定するまでの間、ロックを保持し続ける（`MutexGuard` を
+/// 関数の最後まで生かす）ことで TOCTOU（確認と代入の間に別スレッドの
+/// `perform_restore`/`perform_scan` が割り込んで `playlist` を書き換える隙）を塞ぐ。
+/// `db_mutex`/`directory_path_mutex` が必要な箇所ではこの `playlist_mutex` の
+/// ロックを保持したまま内側で取る（順序は playlist→db／playlist→directory_path。
+/// `perform_scan` の Stage 4 と同じ順序で、逆順に取っている箇所は無いためデッド
+/// ロックしない）。
 pub fn perform_restore(
     db_mutex: &Mutex<Database>,
     playlist_mutex: &Mutex<Option<Playlist>>,
@@ -674,13 +687,29 @@ pub fn perform_restore(
     scan_in_progress: &AtomicBool,
     directory: &Path,
 ) -> RestoreOutcome {
-    if playlist_mutex
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .is_some()
-    {
-        return RestoreOutcome::AlreadyReady;
+    let directory_key = normalize_directory_key(directory);
+
+    // #62レビュー3巡目 nit: is_some確認から末尾のSome設定まで、このロックを
+    // 保持し続ける（TOCTOU対策）。
+    let mut playlist_lock = playlist_mutex.lock().unwrap_or_else(|e| e.into_inner());
+
+    if playlist_lock.is_some() {
+        let current_dir_matches = directory_path_mutex
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_deref()
+            .map(|dir| normalize_directory_key(dir) == directory_key)
+            .unwrap_or(false);
+        return if current_dir_matches {
+            RestoreOutcome::AlreadyReady
+        } else {
+            // 既存のplaylistは今回リクエストされたディレクトリのものではない。
+            // 「既存維持」を騙らずNotRestoredを返し、呼び出し元(scan_directory)の
+            // 通常の新規/差分更新フローに委ねる。
+            RestoreOutcome::NotRestored
+        };
     }
+
     if scan_in_progress.load(Ordering::SeqCst) {
         return RestoreOutcome::NotRestored;
     }
@@ -690,8 +719,6 @@ pub fn perform_restore(
         Some(dir) => dir,
         None => return RestoreOutcome::NotRestored,
     };
-
-    let directory_key = normalize_directory_key(directory);
 
     let restored = {
         let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
@@ -711,7 +738,7 @@ pub fn perform_restore(
         return RestoreOutcome::NotRestored;
     }
 
-    *playlist_mutex.lock().unwrap_or_else(|e| e.into_inner()) = Some(playlist);
+    *playlist_lock = Some(playlist);
     *directory_path_mutex
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(directory.to_path_buf());
