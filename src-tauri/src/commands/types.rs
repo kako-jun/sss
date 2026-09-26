@@ -29,6 +29,11 @@ pub struct ScanProgress {
     pub new_files: usize,
     pub deleted_files: usize,
     pub duration_ms: u128,
+    /// 走査中に発生したエラーの件数（`WalkDir`読み取りエラー＋ファイル単位の
+    /// メタデータ/mtime取得エラー。1970年より前のmtimeを含む）。#63。
+    pub error_count: usize,
+    /// エラーの代表例（最大5件、`"{path}: {message}"`形式）。UIにそのまま表示する。#63。
+    pub error_examples: Vec<String>,
 }
 
 /// 統計情報

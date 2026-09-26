@@ -22,6 +22,53 @@ fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &st
     Ok(())
 }
 
+/// SQLite の `LIKE` パターン中のワイルドカード文字（`%`/`_`）と、エスケープ文字自体
+/// （`\`）をエスケープする（#63、`get_file_metadata_under` のディレクトリ前方一致用）。
+/// `ESCAPE '\'` と対で使うこと。
+fn like_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+/// `file_metadata` へのupsertを1件以上、指定の `conn`（`Connection`/`Transaction` の
+/// どちらでも可、`prepare_cached`はどちらにも生えている）上で行う（#63）。
+/// トランザクション境界は呼び出し元が管理する（このfnはcommitしない）。
+fn upsert_file_metadata_within(conn: &Connection, entries: &[(String, i64, i64)]) -> Result<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare_cached(
+        "INSERT INTO file_metadata (path, modified_time, file_size)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(path) DO UPDATE SET
+             modified_time = excluded.modified_time,
+             file_size = excluded.file_size",
+    )?;
+    for (path, modified_time, file_size) in entries {
+        stmt.execute(params![path, modified_time, file_size])?;
+    }
+    Ok(())
+}
+
+/// 指定パス群を `file_metadata`/`image_stats`/`exif_cache` から削除する（確定削除。
+/// #63）。`upsert_file_metadata_within` と対で使い、`conn` 上でトランザクション境界は
+/// 呼び出し元が管理する。
+fn delete_file_metadata_within(conn: &Connection, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let mut del_fm = conn.prepare_cached("DELETE FROM file_metadata WHERE path = ?1")?;
+    let mut del_stats = conn.prepare_cached("DELETE FROM image_stats WHERE path = ?1")?;
+    let mut del_exif = conn.prepare_cached("DELETE FROM exif_cache WHERE path = ?1")?;
+    for path in paths {
+        del_fm.execute([path])?;
+        del_stats.execute([path])?;
+        del_exif.execute([path])?;
+    }
+    Ok(())
+}
+
 /// `ignore_rules` の主キーが既に `(pattern, rule_type)` の複合キーになっているか
 /// （`pragma_table_info` の `pk` 列は主キー内の並び1始まり、非主キーは0）。
 fn ignore_rules_has_composite_pk(conn: &Connection) -> Result<bool> {
@@ -500,12 +547,84 @@ impl Database {
         Ok(())
     }
 
+    /// ファイルメタデータをまとめて挿入または更新する（#63）。
+    ///
+    /// `perform_scan` Stage 3 は、以前は生スキャンで見つかった全ファイル
+    /// （10万件規模なら10万件）を1件ずつ`upsert_file_metadata`していたが、実際に
+    /// DBへの反映が必要なのは新規/変更分だけ（`scanner::ScanResult::new_files`/
+    /// `modified_files`）で、大半を占める「変更なし」のファイルへの書き込みは
+    /// 無駄なI/O・ロック保持時間の伸長でしかない。呼び出し元が新規/変更分だけに
+    /// 絞った `entries` を渡すこと。1トランザクション＋`prepare_cached`で発行する。
+    pub fn upsert_file_metadata_batch(&self, entries: &[(String, i64, i64)]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        upsert_file_metadata_within(&tx, entries)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// `perform_scan` Stage 3 の file_metadata 反映本体（#63）。新規/変更分の
+    /// upsertと確定削除分の削除（`file_metadata`/`image_stats`/`exif_cache`）を
+    /// **1トランザクション**・`prepare_cached`でまとめて行う。以前は
+    /// `upsert_file_metadata_batch`と`mark_deleted`を別々に（＝別トランザクションで）
+    /// 呼んでおり、ロックを握ったままDBへ2往復していた。
+    pub fn apply_file_metadata_changes(
+        &self,
+        upserts: &[(String, i64, i64)],
+        deleted_paths: &[String],
+    ) -> Result<()> {
+        if upserts.is_empty() && deleted_paths.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        upsert_file_metadata_within(&tx, upserts)?;
+        delete_file_metadata_within(&tx, deleted_paths)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// ファイルメタデータを取得（ディスク上の物理的な事実のみ。撮影日は `exif_cache` 参照）
     pub fn get_all_file_metadata(&self) -> Result<Vec<FileMetadataRow>> {
         let mut stmt = self
             .conn
             .prepare("SELECT path, modified_time, file_size FROM file_metadata")?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// `directory` 配下（`directory` 自身とその子孫パス）の `file_metadata` だけを取得する
+    /// （#63）。
+    ///
+    /// `perform_scan` の差分比較（前回スキャンとの突き合わせ）は、**今回スキャンする
+    /// ディレクトリ配下のパスだけ**を対象にすること。以前は `get_all_file_metadata`
+    /// （DB全件）を使っていたため、フォルダA→B→Aと切り替えて使うと、Bをスキャンした
+    /// 時点でAの`file_metadata`が「今回の生スキャン（B配下）には存在しない」と判定され
+    /// 確定削除されてしまう事故があった（`ignore::IgnoreFilter::has_pruned_ancestor_dir`
+    /// も対象外のディレクトリに対しては`starts_with`が偽になり救えない）。
+    ///
+    /// 前方一致の境界は区切り文字で取る（`/p/foo` を境界指定に `/p/foo/bar.jpg` はマッチ
+    /// させるが `/p/foobar/x.jpg` はマッチさせない）。`LIKE ... ESCAPE` でSQL側の
+    /// ワイルドカード文字（`%`/`_`）をエスケープしてから前方一致させ、`directory`
+    /// 自身のパス（通常ファイルは無いが念のため）も等価一致で拾う。
+    pub fn get_file_metadata_under(&self, directory: &str) -> Result<Vec<FileMetadataRow>> {
+        let dir_trimmed = directory.trim_end_matches(['/', '\\']);
+        let sep = std::path::MAIN_SEPARATOR;
+        let prefix_pattern = format!("{}{sep}%", like_escape(dir_trimmed));
+
+        let mut stmt = self.conn.prepare(
+            "SELECT path, modified_time, file_size FROM file_metadata
+             WHERE path = ?1 OR path LIKE ?2 ESCAPE '\\'",
+        )?;
+        let rows = stmt.query_map(params![dir_trimmed, prefix_pattern], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
 
         let mut result = Vec::new();
         for row in rows {
@@ -596,12 +715,11 @@ impl Database {
     /// （`ScanResult::unknown_files`）はここに渡さないこと。それらは file_metadata/
     /// image_stats/exif_cache のいずれも保持し続ける（#61レビュー S-a）。
     pub fn mark_deleted(&self, paths: &[String]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        for path in paths {
-            tx.execute("DELETE FROM file_metadata WHERE path = ?1", [path])?;
-            tx.execute("DELETE FROM image_stats WHERE path = ?1", [path])?;
-            tx.execute("DELETE FROM exif_cache WHERE path = ?1", [path])?;
+        if paths.is_empty() {
+            return Ok(());
         }
+        let tx = self.conn.unchecked_transaction()?;
+        delete_file_metadata_within(&tx, paths)?;
         tx.commit()?;
         Ok(())
     }
@@ -1330,6 +1448,103 @@ mod tests {
             db.load_playlist_state().unwrap().is_none(),
             "save_playlist_fullを呼んでいないので依然として復元対象は無いはず"
         );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63: `get_file_metadata_under` は指定ディレクトリ配下のパスだけを返し、他の
+    /// ディレクトリ（フォルダA→B→Aの「B」相当）を巻き込まない。差分比較をスキャン対象
+    /// ディレクトリ配下に限定する変更の直接的な回帰テスト。
+    #[test]
+    fn get_file_metadata_under_scopes_to_directory_and_preserves_other_directories() {
+        let path = temp_db_path("file_metadata_under_scope");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/foo/a.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/foo/sub/b.jpg", 200, 20)
+            .unwrap();
+        db.upsert_file_metadata("/p/bar/c.jpg", 300, 30).unwrap();
+
+        let under_foo = db.get_file_metadata_under("/p/foo").unwrap();
+        let paths: Vec<&str> = under_foo.iter().map(|(p, ..)| p.as_str()).collect();
+
+        assert_eq!(under_foo.len(), 2, "/p/foo配下の2件だけが返るはず");
+        assert!(paths.contains(&"/p/foo/a.jpg"));
+        assert!(paths.contains(&"/p/foo/sub/b.jpg"));
+        assert!(
+            !paths.contains(&"/p/bar/c.jpg"),
+            "別ディレクトリ(/p/bar)のファイルを巻き込んではいけない"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63 境界テスト: `/p/foo` を指定したとき、`/p/foo/bar.jpg`（配下）はヒットするが
+    /// `/p/foobar/x.jpg`（名前が前方一致するだけの別ディレクトリ）はヒットしない。
+    /// 区切り文字境界で前方一致を取ることの直接的な検証。
+    #[test]
+    fn get_file_metadata_under_respects_path_separator_boundary() {
+        let path = temp_db_path("file_metadata_under_boundary");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/foo/bar.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/foobar/x.jpg", 200, 20).unwrap();
+
+        let under_foo = db.get_file_metadata_under("/p/foo").unwrap();
+        let paths: Vec<&str> = under_foo.iter().map(|(p, ..)| p.as_str()).collect();
+
+        assert_eq!(paths, vec!["/p/foo/bar.jpg"]);
+        assert!(
+            !paths.contains(&"/p/foobar/x.jpg"),
+            "/p/foo と /p/foobar は別ディレクトリとして区別されるはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63: `LIKE` のワイルドカード文字（`%`/`_`）を含むディレクトリパスでも、
+    /// リテラルとして扱われエスケープが効くこと（ワイルドカードとして誤爆しない）。
+    #[test]
+    fn get_file_metadata_under_escapes_like_wildcard_characters_in_directory() {
+        let path = temp_db_path("file_metadata_under_escape");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/100%_done/a.jpg", 100, 10)
+            .unwrap();
+        // "%" が本物のワイルドカードとして働くと、無関係な "/p/100X_done" もヒットしてしまう。
+        db.upsert_file_metadata("/p/100X_done/a.jpg", 200, 20)
+            .unwrap();
+
+        let under = db.get_file_metadata_under("/p/100%_done").unwrap();
+        let paths: Vec<&str> = under.iter().map(|(p, ..)| p.as_str()).collect();
+
+        assert_eq!(paths, vec!["/p/100%_done/a.jpg"]);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63: `upsert_file_metadata_batch` は新規/更新をまとめて1トランザクションで
+    /// 反映し、`added_at` を保つ既存の `upsert_file_metadata` と同じ `ON CONFLICT`
+    /// 挙動になる。空配列はエラーにならず何もしない。
+    #[test]
+    fn upsert_file_metadata_batch_inserts_and_updates_in_one_transaction() {
+        let path = temp_db_path("upsert_batch");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata_batch(&[]).unwrap();
+
+        db.upsert_file_metadata("/p/a.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata_batch(&[
+            ("/p/a.jpg".to_string(), 999, 999), // 既存: 更新される
+            ("/p/b.jpg".to_string(), 200, 20),  // 新規
+        ])
+        .unwrap();
+
+        let all = db.get_all_file_metadata().unwrap();
+        let a = all.iter().find(|(p, ..)| p == "/p/a.jpg").unwrap();
+        let b = all.iter().find(|(p, ..)| p == "/p/b.jpg").unwrap();
+        assert_eq!((a.1, a.2), (999, 999), "既存パスは新しい値に更新されるはず");
+        assert_eq!((b.1, b.2), (200, 20), "新規パスは挿入されるはず");
 
         let _ = std::fs::remove_file(&path);
     }

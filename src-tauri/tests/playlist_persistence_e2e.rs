@@ -327,6 +327,115 @@ fn scan_directory_mismatch_discards_saved_state_and_shuffles_fresh() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #63 直接の回帰テスト: フォルダA→B→Aと切り替えてスキャンしても、Aの
+/// `file_metadata`/`image_stats`（表示統計）が消えない。
+///
+/// 以前は差分比較（前回スキャンとの突き合わせ）に `get_all_file_metadata`
+/// （DB全件）を使っていたため、Bをスキャンした時点で「今回の生スキャン（B配下）
+/// には存在しない」と誤判定されたAのfile_metadataが確定削除されてしまう事故が
+/// あった。`get_file_metadata_under`（スキャン対象ディレクトリ配下だけに限定）に
+/// 直したことで、Aへ戻ったときに削除0件・件数維持・表示統計維持となることを
+/// 直接検証する。
+#[test]
+fn switching_a_to_b_and_back_to_a_preserves_a_file_metadata_and_display_stats() {
+    let dir = workspace("a_b_a_roundtrip");
+    let photos_dir_a = dir.join("photos_a");
+    let photos_dir_b = dir.join("photos_b");
+    std::fs::create_dir_all(&photos_dir_a).unwrap();
+    std::fs::create_dir_all(&photos_dir_b).unwrap();
+
+    const TOTAL_A: usize = 5;
+    for i in 0..TOTAL_A {
+        write_jpeg(&photos_dir_a.join(format!("img{i}.jpg")));
+    }
+    write_jpeg(&photos_dir_b.join("pic0.jpg"));
+
+    let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
+
+    // 1. フォルダAを初回スキャンし、1枚表示して display_count を進める。
+    let playlist_mutex_a1: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex_a1: Mutex<Option<PathBuf>> = Mutex::new(None);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex_a1,
+        &directory_path_mutex_a1,
+        None,
+        &photos_dir_a,
+        |_, _| {},
+    )
+    .expect("フォルダAの初回scanは成功するはず");
+    let advanced_path = {
+        let db = db_mutex.lock().unwrap();
+        let mut playlist_lock = playlist_mutex_a1.lock().unwrap();
+        let playlist = playlist_lock.as_mut().unwrap();
+        let path = advance_and_persist(&db, &photos_dir_a.to_string_lossy(), playlist);
+        // `advance_and_persist`（テストヘルパー）自体は位置の永続化だけで表示回数を
+        // 増やさない（実アプリでは `get_next_image` コマンドが別途
+        // `increment_display_count` を呼ぶ）。ここでは「表示統計が消えないこと」を
+        // 検証したいので、直接1回分の表示統計を作る。
+        db.increment_display_count(&path).unwrap();
+        path
+    };
+    {
+        let db = db_mutex.lock().unwrap();
+        let (count, _) = db.get_image_stats(&advanced_path).unwrap();
+        assert_eq!(count, 1, "increment直後は表示回数1のはず");
+        let a_metadata_count = db
+            .get_file_metadata_under(&photos_dir_a.to_string_lossy())
+            .unwrap()
+            .len();
+        assert_eq!(a_metadata_count, TOTAL_A);
+    }
+
+    // 2. フォルダBへ切り替えてスキャン（再起動想定: current_directory=None）。
+    let playlist_mutex_b: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex_b: Mutex<Option<PathBuf>> = Mutex::new(None);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex_b,
+        &directory_path_mutex_b,
+        None,
+        &photos_dir_b,
+        |_, _| {},
+    )
+    .expect("フォルダBへのscanは成功するはず");
+
+    // 3. 再度フォルダAへ切り替えてスキャン。
+    let playlist_mutex_a2: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex_a2: Mutex<Option<PathBuf>> = Mutex::new(None);
+    let progress = perform_scan(
+        &db_mutex,
+        &playlist_mutex_a2,
+        &directory_path_mutex_a2,
+        None,
+        &photos_dir_a,
+        |_, _| {},
+    )
+    .expect("フォルダAへの再scanは成功するはず");
+
+    // Aのfile_metadataが全件残っている（Bのスキャンで誤って確定削除されていない）。
+    assert_eq!(
+        progress.deleted_files, 0,
+        "Aへ戻った再scanで削除扱いは0件のはず"
+    );
+    let db = db_mutex.lock().unwrap();
+    let a_metadata_count_after = db
+        .get_file_metadata_under(&photos_dir_a.to_string_lossy())
+        .unwrap()
+        .len();
+    assert_eq!(
+        a_metadata_count_after, TOTAL_A,
+        "フォルダBを挟んでもAのfile_metadataは消えないはず"
+    );
+
+    // Aの表示統計（display_count）も保持されている。
+    let (count, _) = db.get_image_stats(&advanced_path).unwrap();
+    assert_eq!(count, 1, "フォルダBを挟んでもAの表示統計は保持されるはず");
+    drop(db);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #62 事故パターン: 保存済みのプレイリストが指していた画像が、再起動までの間に
 /// フォルダごと全部物理削除されていた場合、復元処理はクラッシュせず、
 /// 差分適用の結果として空のプレイリストになる。
