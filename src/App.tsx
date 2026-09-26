@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
@@ -7,7 +7,14 @@ import { Settings } from './components/Settings';
 import type { TabType } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
 import { useMouseIdle } from './hooks/useMouseIdle';
-import { getPlaylistInfo, getLastDirectoryPath, scanDirectory, getSetting } from './lib/tauri';
+import {
+  getPlaylistInfo,
+  getLastDirectoryPath,
+  restorePlaylist,
+  scanDirectory,
+  getSetting,
+} from './lib/tauri';
+import { runStartupSequence } from './lib/startup';
 import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
 import { X, Settings as SettingsIcon, Minimize2, Maximize2 } from 'lucide-react';
@@ -104,66 +111,25 @@ function App() {
 
     // 最初に画面描画を完了させるため、初期化処理を次のイベントループで実行
     const timeoutId = setTimeout(() => {
-      const init = async () => {
-        try {
-          initRef.current = true; // 初期化開始をマーク
+      initRef.current = true; // 初期化開始をマーク
 
-          setInitStatus('設定を読み込んでいます...');
-          // 表示間隔を読み込む
-          const intervalSetting = await getSetting('display_interval');
-          if (intervalSetting) {
-            setDisplayInterval(parseInt(intervalSetting, 10));
-          }
-
-          setInitStatus('前回フォルダを確認しています...');
-          // 前回ディレクトリがあれば差分スキャンして最新ファイル一覧を取得
-          const lastDirectory = await getLastDirectoryPath();
-          if (lastDirectory) {
-            let unlisten: UnlistenFn | null = null;
-            try {
-              setInitStatus('ディレクトリをスキャンしています...');
-
-              // リアルタイム進捗イベントをリッスン
-              unlisten = await listen<{ current: number; total: number }>(
-                'scan-progress',
-                (event) => {
-                  setRealtimeProgress(event.payload);
-                },
-              );
-
-              const progress = await scanDirectory(lastDirectory);
-              setRealtimeProgress(null); // スキャン完了後はリアルタイム進捗をクリア
-              setInitStatus(`スキャン完了: ${progress.totalFiles.toLocaleString()}ファイル検出`);
-
-              setInitStatus('画像を読み込んでいます...');
-              await initialize(true);
-              setIsInitialized(true);
-              await updatePlaylistInfo();
-            } catch (scanErr) {
-              console.error('Failed to scan last directory:', scanErr);
-              // エラーが発生しても初期化を完了させ、設定画面を開けるようにする
-              setInitStatus('');
-              setIsInitialized(true);
-            } finally {
-              // リスナーをクリーンアップ
-              if (unlisten) {
-                unlisten();
-              }
-            }
-          } else {
-            // 前回ディレクトリがなければ初回起動として設定画面を開けるようにする
-            setInitStatus('');
-            setIsInitialized(true);
-          }
-        } catch (err) {
-          console.error('Failed to initialize:', err);
-          // エラーが発生しても初期化を完了させ、設定画面を開けるようにする
-          setInitStatus('');
-          setIsInitialized(true);
-        }
-      };
-
-      init();
+      // #62レビューS1: 起動時の初期化シーケンス（前回状態の復元→可能なら即表示、
+      // スキャンはバックグラウンド）は React から切り離した純粋関数に委譲する
+      // （src/lib/startup.ts。単体テストしやすくするため）。
+      runStartupSequence({
+        getSetting,
+        getLastDirectoryPath,
+        restorePlaylist,
+        scanDirectory,
+        initialize,
+        listenScanProgress: (cb) =>
+          listen<{ current: number; total: number }>('scan-progress', (event) => cb(event.payload)),
+        setInitStatus,
+        setRealtimeProgress,
+        setIsInitialized,
+        setDisplayInterval,
+        updatePlaylistInfo,
+      });
     }, 0);
 
     // クリーンアップ関数

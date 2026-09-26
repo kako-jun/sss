@@ -25,7 +25,13 @@ pub struct FileMetadata {
 #[derive(Debug)]
 pub struct ScanResult {
     pub files: Vec<FileMetadata>,
+    /// 前回は存在しなかった（パス自体が初めて見つかった）ファイル。
     pub new_files: Vec<String>,
+    /// 前回から存在するが `mtime` が変わったファイル（#62: `new_files` とは区別する。
+    /// 同じパスのまま内容だけ変わったファイルはプレイリスト上は既存メンバーの
+    /// ままでよく、`perform_scan` の集合差分でも「新規」扱いされない。ここでの区別は
+    /// 主に統計・テストの正確性のため）。
+    pub modified_files: Vec<String>,
     pub deleted_files: Vec<String>,
     /// 前回は追跡していたが今回のスキャン範囲外（ディレクトリ系除外で枝刈りされた
     /// 配下）だったため、存在するかどうか不明なパス。「削除」とは区別し、
@@ -33,6 +39,7 @@ pub struct ScanResult {
     pub unknown_files: Vec<String>,
     pub total_count: usize,
     pub new_count: usize,
+    pub modified_count: usize,
     pub deleted_count: usize,
     pub unknown_count: usize,
     pub duration_ms: u128,
@@ -184,18 +191,22 @@ impl ImageScanner {
             self.scan_directory_with_progress(directory, walk_filter, progress_callback)?;
 
         let mut new_files = Vec::new();
+        let mut modified_files = Vec::new();
 
-        // 新規ファイルと変更されたファイルを検出
+        // 新規ファイルと変更されたファイルを区別して検出（#62: 呼び出し元
+        // `perform_scan` がプレイリストへの反映を「含めるべき集合」との
+        // パス差分で行うため、modified はプレイリストに新規追加されない。
+        // ここでの区別は統計・テストの正確性のため）。
         for file in &current_files {
             match previous_map.remove(&file.path) {
                 None => {
-                    // 新規ファイル
+                    // 新規ファイル（前回は存在しなかったパス）
                     new_files.push(file.path.clone());
                 }
                 Some((prev_mtime, _prev_size)) => {
                     if prev_mtime != file.modified_time {
-                        // 変更されたファイル（新規として扱う）
-                        new_files.push(file.path.clone());
+                        // 既存パスのまま内容が変わったファイル
+                        modified_files.push(file.path.clone());
                     } else {
                         // 変更なし
                     }
@@ -225,10 +236,12 @@ impl ImageScanner {
         Ok(ScanResult {
             total_count: current_files.len(),
             new_count: new_files.len(),
+            modified_count: modified_files.len(),
             deleted_count: deleted_files.len(),
             unknown_count: unknown_files.len(),
             files: current_files,
             new_files,
+            modified_files,
             deleted_files,
             unknown_files,
             duration_ms,
@@ -292,6 +305,73 @@ mod tests {
         assert!(!scanner.is_video_file(Path::new("test.mkv")));
         assert!(!scanner.is_video_file(Path::new("test.jpg")));
         assert!(!scanner.is_video_file(Path::new("test.txt")));
+    }
+
+    /// #62: 既存パスのまま `mtime` が変わったファイルは `modified_files` に入り、
+    /// `new_files` には混ざらない（呼び出し元 `perform_scan` はパス集合の差分で
+    /// プレイリスト反映を行うため、modified が重複してプレイリストに追加されることは
+    /// 無いが、ここでの区別自体が正しく行われることを直接検証する）。
+    #[test]
+    fn incremental_scan_separates_modified_from_new_files() {
+        let root =
+            std::env::temp_dir().join(format!("sss_scanner_modified_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let unchanged_path = root.join("unchanged.jpg");
+        let changed_path = root.join("changed.jpg");
+        std::fs::write(&unchanged_path, b"unchanged").unwrap();
+        std::fs::write(&changed_path, b"before-edit").unwrap();
+
+        let scanner = ImageScanner::new();
+        let no_prune_filter = crate::ignore::IgnoreFilter::from_patterns(&[]);
+
+        let first = scanner
+            .scan_directory_with_progress(&root, &no_prune_filter, |_, _| {})
+            .expect("first scan");
+        let previous: Vec<(String, i64, i64)> = first
+            .iter()
+            .map(|f| (f.path.clone(), f.modified_time, f.file_size))
+            .collect();
+
+        // changed.jpg の内容とmtimeを変える。new.jpg は今回初めて現れる。
+        std::fs::write(&changed_path, b"after-edit-longer-content").unwrap();
+        let new_mtime = std::time::SystemTime::now() + std::time::Duration::from_secs(120);
+        let file = std::fs::File::options()
+            .write(true)
+            .open(&changed_path)
+            .unwrap();
+        file.set_modified(new_mtime)
+            .expect("mtimeを明示的に変更できるはず");
+
+        let new_path = root.join("new.jpg");
+        std::fs::write(&new_path, b"brand-new").unwrap();
+
+        let result = scanner
+            .scan_directory_incremental_with_progress(&root, previous, &no_prune_filter, |_, _| {})
+            .expect("incremental scan");
+
+        let changed_str = changed_path.to_string_lossy().to_string();
+        let new_str = new_path.to_string_lossy().to_string();
+
+        assert!(
+            result.modified_files.contains(&changed_str),
+            "mtimeが変わった既存ファイルはmodified_filesに入るはず"
+        );
+        assert!(
+            !result.new_files.contains(&changed_str),
+            "mtime変更ファイルはnew_filesに混ざってはいけない(#62)"
+        );
+        assert!(
+            result.new_files.contains(&new_str),
+            "初めて見つかったファイルはnew_filesに入るはず"
+        );
+        assert!(!result.modified_files.contains(&new_str));
+        assert_eq!(result.modified_count, result.modified_files.len());
+        assert_eq!(result.new_count, result.new_files.len());
+        assert!(result.deleted_files.is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

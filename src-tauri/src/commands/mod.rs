@@ -1,6 +1,7 @@
 // サブモジュール宣言
 pub mod file_operations;
 pub mod image;
+pub mod playlist_persistence;
 pub mod scan;
 pub mod settings;
 pub mod stats;

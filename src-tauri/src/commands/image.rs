@@ -1,11 +1,87 @@
 use crate::cache_worker::CACHE_WAIT_TIMEOUT;
+use crate::commands::playlist_persistence;
 use crate::commands::types::AppState;
 use crate::image_processor::{
     extract_date_only, get_display_dimensions, get_exif_info, is_video_file, plan_cache_file,
     requires_synchronous_cache, ImageInfo,
 };
+use crate::playlist::Playlist;
 use std::path::Path;
 use tauri::State;
+
+/// 実ファイルが消えている（NAS/USB切断・外部ツールでの削除等）画像に当たった場合に
+/// 内部でさらに次/前へ進み直す上限回数（#62レビュー2巡目 N-S1）。
+///
+/// 消えたファイルは次回スキャンでプレイリストから除去される（母集団自体から
+/// 外れる）ため、ここで飛ばしても「1巡で全件ちょうど1回」という完全平等の保証には
+/// 影響しない。上限を設けるのは、万一ほとんどのファイルが一斉に消えている
+/// （フォルダごとアンマウント等）異常事態で無限ループにならないようにするため。
+/// 上限に到達した場合は従来どおり `Ok(None)` を返す。
+///
+/// #62レビュー3巡目 T-M1(must): この上限は「個々のファイルが飛び飛びに消えている」
+/// 場合の話であり、スキャン対象ディレクトリ自体（NAS/USB）が丸ごと外れている場合は
+/// 別扱いにする。ディレクトリ自体が無いなら、`advance` するたびに（ほぼ）必ず
+/// ファイルが見つからず`MAX_MISSING_FILE_SKIPS`回フルに消費してしまい、鑑賞中に
+/// 数秒おきに呼ばれる`get_next_image`のたびに最大20件ずつ未表示画像を無駄に
+/// 消費し続ける（「1巡で全件ちょうど1回」への実害は無くても、体感的に「見ないまま
+/// 巡がどんどん進む」異常な速さになる）。ループの各反復の前に
+/// `directory_root_is_accessible` でルート自体の生死を確認し、無ければその時点で
+/// 一切 `advance` せずに打ち切る。
+const MAX_MISSING_FILE_SKIPS: usize = 20;
+
+/// `get_image_info_internal` の結果（#62レビュー3巡目 S-b）。
+///
+/// 「ファイルが存在しない」（`Missing`、軽い。次のファイルへ進み直してよい）と
+/// 「存在はするがキャッシュ変換が失敗/タイムアウトした」（`ProcessingFailed`、重い。
+/// `request_current_and_wait` が最大 `CACHE_WAIT_TIMEOUT`（既定5秒）待つ）を区別する。
+/// 両者を同じ `None` として扱いループで読み飛ばすと、同じ理由（壊れたファイル群等）で
+/// 何枚も連続して同じ待ちが発生した場合に最悪 `MAX_MISSING_FILE_SKIPS ×
+/// CACHE_WAIT_TIMEOUT`（20×5秒=100秒）ブロックしてしまう。`ProcessingFailed` は
+/// ループで繰り返さず1回で打ち切る。
+enum ImageLookup {
+    Found(ImageInfo),
+    Missing,
+    ProcessingFailed,
+}
+
+/// スキャン対象ディレクトリ自体が今アクセス可能かどうかを確認する
+/// （#62レビュー3巡目 T-M1 must）。`AppState.directory_path` が未設定（テスト等）の
+/// 場合はチェック対象が無いので `true`（許可）を返す。
+fn directory_root_is_accessible(state: &State<AppState>) -> bool {
+    let directory = state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    match directory {
+        Some(dir) => dir.is_dir(),
+        None => true,
+    }
+}
+
+/// `advance()` 後の永続化（#62）。再シャッフルが起きた場合のみ `shuffled_list` を
+/// 含むフル保存（1トランザクション）、それ以外は `next_index`/履歴だけの
+/// 軽量な `UPDATE` にする。10万件規模のプレイリストで毎 advance 全件を書き直すと
+/// 重いため、シャッフルが確定したタイミングだけフル保存する設計（docs参照）。
+fn persist_playlist_after_advance(state: &State<AppState>, playlist: &Playlist, reshuffled: bool) {
+    if !reshuffled {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        playlist_persistence::save_position(&db, playlist);
+        return;
+    }
+
+    let directory = state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    if let Some(dir) = directory {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        playlist_persistence::save_full(&db, &dir.to_string_lossy(), playlist);
+    } else {
+        eprintln!("advance: directory_path is not set, skipping playlist persistence");
+    }
+}
 
 /// 次の画像を取得（カウント+1）
 ///
@@ -13,37 +89,27 @@ use tauri::State;
 /// `get_image_info_internal` 呼び出し）をまたいで生存させられない。ブロックで
 /// スコープを切り、await の前に確実にドロップさせる（#60 レビュー2巡目
 /// should(2) で `get_image_info_internal` を async 化した際に必要になった）。
+///
+/// #62レビュー2巡目 N-S1: 実ファイルが消えている画像に当たった場合、`Ok(None)` を
+/// 即座に返す（＝フロントは「No more images」のエラー画面にフォールバックする）
+/// 旧実装は、1件消えただけでスライドショーが止まって見えてしまっていた。
+/// `MAX_MISSING_FILE_SKIPS` 回を上限に内部で次へ進み直し、最初に実在する画像が
+/// 見つかったものだけを返す。表示回数はその実在する画像1件にだけ加算する
+/// （欠損ファイルの分は加算しない、従来どおり）。
+///
+/// #62レビュー3巡目 T-M1(must): ループの各反復の前に、対象ディレクトリ自体が
+/// アクセス可能かを確認する。無ければ（advance すら行わず）即座に `Ok(None)` を
+/// 返す。個々のファイルの消失（`ImageLookup::Missing`）とは別に、ディレクトリ
+/// 自体の消失は「ほぼ全件が必ず見つからない」状態を意味するため、通常のスキップ
+/// ループに任せると毎回上限（20件）ぶん無駄に `advance`+保存してしまう。
+///
+/// #62レビュー3巡目 S-b: `ImageLookup::ProcessingFailed`（キャッシュ変換の失敗/
+/// タイムアウト）は `Missing` と違ってループで読み飛ばさず、その場で打ち切る
+/// （詳細は `ImageLookup` のdoc参照）。
 #[tauri::command]
 pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
-    let (path_str, should_count, prefetch_paths) = {
-        let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
-        let playlist = playlist_lock
-            .as_mut()
-            .ok_or_else(|| "Playlist not initialized".to_string())?;
-
-        // プレイリストが空の場合はエラー
-        if playlist.is_empty() {
-            return Err("Playlist is empty".to_string());
-        }
-
-        let (image_path, should_count) = playlist.advance();
-        let path_str = match image_path {
-            Some(p) => p.clone(),
-            None => return Ok(None),
-        };
-
-        // 5枚先までのパスを取得（先読み用）
-        let mut prefetch_paths = Vec::new();
-        for i in 1..=5 {
-            if let Some(path) = playlist.peek_next_n(i) {
-                prefetch_paths.push(path.clone());
-            }
-        }
-
-        (path_str, should_count, prefetch_paths)
-    };
-
-    // apply_exif_rotation 設定を取得（デフォルト true）
+    // apply_exif_rotation 設定を取得（デフォルト true）。欠損ファイルのスキップで
+    // 何度もadvanceし直しても、この設定自体はループの外で一度読めば十分。
     let apply_rotation = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
         db.get_setting("apply_exif_rotation")
@@ -53,45 +119,83 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             .unwrap_or(true)
     };
 
-    // 画像情報を取得（内部で存在確認・現在画像のキャッシュ要求まで行う）
-    let info = get_image_info_internal(&path_str, &state, apply_rotation).await?;
-
-    // 表示回数の加算はファイル存在確認後（#60 問題9: 消失ファイルを無駄カウントしない）
-    if info.is_some() && should_count {
-        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = db.increment_display_count(&path_str);
-    }
-
-    // 5枚先まで先読みキュー投入（単一ワーカーが直列処理・重複排除・世代管理する）
-    enqueue_prefetch(&state, prefetch_paths, apply_rotation);
-
-    Ok(info)
-}
-
-/// 前の画像を取得（カウント増やさない）
-#[tauri::command]
-pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
-    let path_str = {
-        let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
-        let playlist = playlist_lock
-            .as_mut()
-            .ok_or_else(|| "Playlist not initialized".to_string())?;
-
-        // プレイリストが空の場合はエラー
-        if playlist.is_empty() {
-            return Err("Playlist is empty".to_string());
-        }
-
-        if !playlist.can_go_back() {
+    for _ in 0..MAX_MISSING_FILE_SKIPS {
+        // T-M1(must): ディレクトリ自体が無いなら、ここでadvanceせず打ち切る。
+        if !directory_root_is_accessible(&state) {
             return Ok(None);
         }
 
-        match playlist.go_back() {
-            Some(p) => p.clone(),
-            None => return Ok(None),
-        }
-    };
+        let (path_str, should_count, prefetch_paths) = {
+            let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
+            let playlist = playlist_lock
+                .as_mut()
+                .ok_or_else(|| "Playlist not initialized".to_string())?;
 
+            // プレイリストが空の場合はエラー
+            if playlist.is_empty() {
+                return Err("Playlist is empty".to_string());
+            }
+
+            let (image_path, should_count, reshuffled) = playlist.advance();
+            let path_str = match image_path {
+                Some(p) => p.clone(),
+                None => return Ok(None),
+            };
+
+            // 5枚先までのパスを取得（先読み用。peek_next_n(0)が次に表示される画像）
+            let mut prefetch_paths = Vec::new();
+            for i in 0..5 {
+                if let Some(path) = playlist.peek_next_n(i) {
+                    prefetch_paths.push(path.clone());
+                }
+            }
+
+            // 永続化(#62): 再シャッフルが起きたときだけ shuffled_list を含むフル保存、
+            // それ以外は next_index/履歴だけの軽量更新にする（10万件規模で毎advance
+            // 全件書き込むと重いため）。ファイルが後で存在しないと分かった場合でも、
+            // プレイリストの進行自体は「消費済み」として確定させてよい（次回スキャンで
+            // 除去される前提のため、#62レビュー2巡目 N-S1 コメント参照）。
+            persist_playlist_after_advance(&state, playlist, reshuffled);
+
+            (path_str, should_count, prefetch_paths)
+        };
+
+        // 画像情報を取得（内部で存在確認・現在画像のキャッシュ要求まで行う）
+        match get_image_info_internal(&path_str, &state, apply_rotation).await? {
+            ImageLookup::Found(info) => {
+                // 表示回数の加算はファイル存在確認後（#60 問題9: 消失ファイルを無駄カウントしない）
+                if should_count {
+                    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+                    let _ = db.increment_display_count(&path_str);
+                }
+
+                // 5枚先まで先読みキュー投入（単一ワーカーが直列処理・重複排除・世代管理する）
+                enqueue_prefetch(&state, prefetch_paths, apply_rotation);
+
+                return Ok(Some(info));
+            }
+            ImageLookup::Missing => {
+                // ファイルが存在しない: カウントせず、次のループでさらに advance し直す。
+            }
+            ImageLookup::ProcessingFailed => {
+                // S-b: キャッシュ変換の失敗/タイムアウトはループで繰り返さず打ち切る。
+                return Ok(None);
+            }
+        }
+    }
+
+    // 上限に到達（ほとんどのファイルが一斉に消えている等の異常事態）。従来どおり None。
+    Ok(None)
+}
+
+/// 前の画像を取得（カウント増やさない）。
+///
+/// #62レビュー2巡目 N-S1: `get_next_image` と同様、実ファイルが消えている画像に
+/// 当たったら `MAX_MISSING_FILE_SKIPS` 回を上限にさらに前へ戻り直す。
+/// #62レビュー3巡目 T-M1/S-b: ディレクトリ自体の消失チェックと
+/// `ImageLookup::ProcessingFailed` の即時打ち切りも `get_next_image` と同様に行う。
+#[tauri::command]
+pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
     // apply_exif_rotation 設定を取得（デフォルト true）
     let apply_rotation = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
@@ -102,8 +206,54 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
             .unwrap_or(true)
     };
 
-    // 画像情報を取得（カウントは増やさない）
-    get_image_info_internal(&path_str, &state, apply_rotation).await
+    for _ in 0..MAX_MISSING_FILE_SKIPS {
+        // T-M1(must): ディレクトリ自体が無いなら、ここでgo_backせず打ち切る。
+        if !directory_root_is_accessible(&state) {
+            return Ok(None);
+        }
+
+        let path_str = {
+            let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
+            let playlist = playlist_lock
+                .as_mut()
+                .ok_or_else(|| "Playlist not initialized".to_string())?;
+
+            // プレイリストが空の場合はエラー
+            if playlist.is_empty() {
+                return Err("Playlist is empty".to_string());
+            }
+
+            if !playlist.can_go_back() {
+                return Ok(None);
+            }
+
+            let path = match playlist.go_back() {
+                Some(p) => p.clone(),
+                None => return Ok(None),
+            };
+
+            // 永続化(#62): go_back は next_index を変えないため常に軽量保存でよい。
+            let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+            playlist_persistence::save_position(&db, playlist);
+
+            path
+        };
+
+        // 画像情報を取得（カウントは増やさない）
+        match get_image_info_internal(&path_str, &state, apply_rotation).await? {
+            ImageLookup::Found(info) => return Ok(Some(info)),
+            ImageLookup::Missing => {
+                // ファイルが存在しない: 次のループでさらに go_back し直す
+                // （履歴の先頭に達したら can_go_back() が false になり Ok(None) で終わる）。
+            }
+            ImageLookup::ProcessingFailed => {
+                // S-b: キャッシュ変換の失敗/タイムアウトはループで繰り返さず打ち切る。
+                return Ok(None);
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 /// 画像情報を取得（内部ヘルパー関数）
@@ -114,8 +264,10 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
 /// `requires_synchronous_cache` が true のケース（原本をそのまま返すと表示が誤る:
 /// WebView非対応形式、または apply_rotation=false なのにEXIF回転が必要）は、
 /// ワーカーの完了を待ってからキャッシュパスを返す（#60 レビュー1巡目 must2、
-/// 2巡目 must B）。失敗/タイムアウト時はファイル不在と同様に `Ok(None)` を返し
-/// スキップさせる（自動で次へ進める仕組み自体は #65）。
+/// 2巡目 must B）。失敗/タイムアウト時は `ImageLookup::ProcessingFailed` を返す
+/// （#62レビュー3巡目 S-b: ファイル不在の `Missing` とは区別する。呼び出し元は
+/// `ProcessingFailed` をループで読み飛ばさず即座に打ち切る。自動で次へ進める
+/// 仕組み自体の本格整理は #65）。
 ///
 /// この同期待ちは `tauri::async_runtime::spawn_blocking` に逃がし、非同期コマンドの
 /// 実行スレッドを最大 `CACHE_WAIT_TIMEOUT` 秒ブロックしないようにする
@@ -129,11 +281,11 @@ async fn get_image_info_internal(
     image_path: &str,
     state: &State<'_, AppState>,
     apply_rotation: bool,
-) -> Result<Option<ImageInfo>, String> {
+) -> Result<ImageLookup, String> {
     let path = Path::new(image_path);
 
     if !path.exists() {
-        return Ok(None);
+        return Ok(ImageLookup::Missing);
     }
 
     // 動画ファイルかどうかを判定
@@ -182,7 +334,9 @@ async fn get_image_info_internal(
                 Some(cache_file.to_string_lossy().to_string())
             } else {
                 // 失敗/タイムアウト: 表示不能/表示が誤る原本を返すよりスキップ扱いにする。
-                return Ok(None);
+                // #62レビュー3巡目 S-b: ファイル不在(Missing)とは区別し、呼び出し元の
+                // スキップループでは繰り返さず即座に打ち切らせる。
+                return Ok(ImageLookup::ProcessingFailed);
             }
         } else {
             // 4K超のみが理由の場合は非同期。単一ワーカーへ優先要求してから元画像を返す
@@ -232,7 +386,7 @@ async fn get_image_info_internal(
     }
     drop(db);
 
-    Ok(Some(ImageInfo {
+    Ok(ImageLookup::Found(ImageInfo {
         path: image_path.to_string(),
         optimized_path,
         is_video,

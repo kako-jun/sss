@@ -1,4 +1,5 @@
 use crate::asset_scope::sanitize_allow_dir;
+use crate::commands::playlist_persistence::{self, normalize_directory_key};
 use crate::commands::types::{AppState, ScanProgress};
 use crate::database::{Database, ExifCacheRow};
 use crate::ignore::{IgnoreFilter, IgnoreRule, RuleType};
@@ -239,8 +240,8 @@ fn migrate_sssignore_to_db(db: &crate::database::Database) {
 /// 2. **ロック無し** — 生スキャン（`WalkDir`。ディレクトリ系除外は枝刈り）＋
 ///    必要なら並列EXIF読み。
 /// 3. 短時間のDBロック — `file_metadata`/`exif_cache`/スキャン履歴への反映のみ。
-/// 4. 短時間のDBロック — 除外ルールを読み直す（#61レビュー S-1。下記参照）。
-/// 5. 短時間のplaylistロック — 「含めるべき集合」との差分適用のみ。
+/// 4. 短時間のplaylistロック — 除外ルールの読み直し＋「含めるべき集合」の算出＋
+///    差分適用＋確定保存（#61レビュー S-1、#62レビュー2巡目 N-S3。下記参照）。
 ///
 /// #61レビュー M2/S1 の骨格（各段階の詳細）:
 /// - 生スキャン（除外ルール抜き）でディスク上の物理的な事実だけを集め、
@@ -250,15 +251,36 @@ fn migrate_sssignore_to_db(db: &crate::database::Database) {
 ///   「含めるべき集合」の差分で更新する。除外ルールで対象外になったファイルも
 ///   物理削除されたファイルも同じ経路でプレイリストから外れるが、
 ///   `file_metadata`/`image_stats` は除外だけでは消えない。
-/// - **#61レビュー S-1**: 「含める集合」はStage 1で読んだ古いルールではなく、
-///   Stage 4で読み直した最新のルールで作る。生スキャン・EXIF並列読みが
-///   長時間かかる間にユーザーが除外ルールを追加/削除しても、その変更をスキャン
-///   完了時点のプレイリストに正しく反映するため（さもないとスキャン中に除外した
-///   画像がスキャン完了時に復活してしまう）。`captured_dates`（EXIF撮影日）は
-///   Stage 2の結果をそのまま流用し、遡って読み直さない。
+/// - **#61レビュー S-1 → #62レビュー2巡目 N-S3(must)で強化**: 「含める集合」は
+///   Stage 1で読んだ古いルールではなく、**Stage 4（playlistロックを取った直後）**
+///   で読み直した最新のルールで作る。当初（#61時点）はStage 4を独立した短時間DB
+///   ロックとして playlist ロックの**外**で行っていたが、それだと「ルール読み直し」
+///   と「playlist ロック取得」の間に隙間ができ、その隙間で `exclude_image`
+///   （file/date即時反映。DB書込→playlist更新の順で行う）が割り込むと、
+///   Stage 4が読んだルールにはまだ新しい除外が反映されておらず、`exclude_image`
+///   側は既にplaylistから該当画像を消した直後、という食い違いが起きて、
+///   Stage 4以降の「含める集合」との差分計算がその画像を「新規追加」と誤認し、
+///   除外したはずの画像をplaylistへ再追加してしまう競合があった。ルール読み直しを
+///   playlist ロックを取得した**後**に行うことで、`playlist_mutex` の総順序により
+///   「`exclude_image` が先にロックを取得していたら、そのDB書込は必ずこの読み直し
+///   より前に完了している（`exclude_image` はDB書込→playlist更新の順なので）」
+///   ことが保証され、競合が構造的に無くなる（`exclude_image` が後からロックを
+///   取得する場合は、そちらが最終的な状態を決める＝正しく上書きする）。
+///   `captured_dates`（EXIF撮影日）はStage 2の結果をそのまま流用し、遡って
+///   読み直さない。
+///
+/// #62レビュー2巡目 nit: `directory_path_mutex`（`AppState.directory_path` 相当）は
+/// Stage 4の中で、playlistロックを保持したまま設定する。以前は呼び出し元
+/// （`scan_directory` コマンド）が `perform_scan` の**戻り値を受け取った後**に
+/// 別途設定していたため、「Stage 4完了〜directory_path更新」の間に小さな窓があり、
+/// その間に他コマンド（`get_next_image`/`exclude_image`）が `state.directory_path`
+/// を読んで軽量保存すると、まだ更新されていない古いディレクトリパスを
+/// `playlist_list.directory_path` に書いてしまう（せっかくStage 4で正しく設定した
+/// 値を上書きしてしまう）おそれがあった。同じロック区間内で設定することでこの窓を無くす。
 pub fn perform_scan<F>(
     db_mutex: &Mutex<Database>,
     playlist_mutex: &Mutex<Option<Playlist>>,
+    directory_path_mutex: &Mutex<Option<PathBuf>>,
     current_directory: Option<&Path>,
     directory: &Path,
     progress_callback: F,
@@ -374,41 +396,48 @@ where
         }
     }; // ロック解放
 
-    // --- Stage 4: 短時間のDBロック（除外ルールの読み直しのみ） ---
-    // 除外ルールを読み直す（#61レビュー S-1）。
-    // Stage 1〜ここまでの生スキャン・EXIF並列読みは10万件規模だと数秒〜数十秒かかり、
-    // その間にユーザーがオーバーレイの「除外」操作等で新しいルールを追加/削除しうる。
-    // Stage 1で読んだ`rules`のまま「含める集合」を作ると、スキャン中に追加した除外が
-    // 完了時点で無視され、除外したはずの画像がプレイリストに再び現れてしまう。
-    // ここで短時間のDBロックを取ってルールだけ読み直し、フィルタを作り直す。
-    // captured_dates（EXIF撮影日の並列読み取り結果）はStage 2で計算済みのものを
-    // そのまま流用する（スキャン中に新しく追加された日付ルールの分までは
-    // 遡ってEXIFを読み直さない。次回スキャンで拾われる）。
-    let fresh_rules: Vec<IgnoreRule> = {
-        let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
-        db.get_ignore_rules()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(pattern, rule_type)| IgnoreRule { pattern, rule_type })
-            .collect()
-    }; // ロック解放
-
-    let ignore_filter = IgnoreFilter::from_rules_with_captured_dates(&fresh_rules, captured_dates);
-
-    // プレイリストに含めるべき集合（除外ルール適用後）。物理的な新規/削除判定
-    // （上のfile_metadata操作）とは完全に独立した、別の段階として計算する
-    // （ロック不要の純粋計算）。
-    let included: Vec<String> = scan_result
-        .files
-        .iter()
-        .filter(|f| !ignore_filter.is_ignored(Path::new(&f.path), directory))
-        .map(|f| f.path.clone())
-        .collect();
-
-    // --- Stage 5: 短時間のplaylistロック（差分適用のみ） ---
+    // --- Stage 4: 短時間のplaylistロック（除外ルール読み直し・差分適用・復元・確定保存） ---
+    let included: Vec<String>;
     {
         let mut playlist_lock = playlist_mutex.lock().unwrap_or_else(|e| e.into_inner());
-        let is_same_directory = current_directory.map(|p| p == directory).unwrap_or(false);
+
+        // 除外ルールを読み直す（#61レビュー S-1 → #62レビュー2巡目 N-S3(must)で
+        // playlistロックの外から中へ移動）。Stage 1で読んだ`rules`のまま「含める集合」を
+        // 作ると、スキャン中（Stage 1〜ここまでの生スキャン・EXIF並列読みは10万件規模だと
+        // 数秒〜数十秒かかる）に追加された除外が無視され、除外したはずの画像がプレイリストに
+        // 再び現れてしまう。**playlistロックを取得した後**にDBロックを取ってルールだけ
+        // 読み直すことで、`exclude_image`（DB書込→playlist更新の順）との競合を構造的に防ぐ
+        // （詳細は関数doc、N-S3参照）。captured_dates（EXIF撮影日の並列読み取り結果）は
+        // Stage 2で計算済みのものをそのまま流用する（スキャン中に新しく追加された日付
+        // ルールの分までは遡ってEXIFを読み直さない。次回スキャンで拾われる）。
+        let fresh_rules: Vec<IgnoreRule> = {
+            let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+            db.get_ignore_rules()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(pattern, rule_type)| IgnoreRule { pattern, rule_type })
+                .collect()
+        }; // DBロック解放（playlistロックは保持したまま）
+
+        let ignore_filter =
+            IgnoreFilter::from_rules_with_captured_dates(&fresh_rules, captured_dates);
+
+        // プレイリストに含めるべき集合（除外ルール適用後）。物理的な新規/削除判定
+        // （上のfile_metadata操作）とは完全に独立した、別の段階として計算する。
+        included = scan_result
+            .files
+            .iter()
+            .filter(|f| !ignore_filter.is_ignored(Path::new(&f.path), directory))
+            .map(|f| f.path.clone())
+            .collect();
+
+        // #62レビューS2: ディレクトリ比較は正規化キーで行う（canonicalize前後・末尾区切り
+        // の有無で文字列表現が食い違っても同じディレクトリと判定できるように）。
+        let directory_key = normalize_directory_key(directory);
+        let is_same_directory = current_directory
+            .map(|p| normalize_directory_key(p) == directory_key)
+            .unwrap_or(false);
+        let directory_str = directory.to_string_lossy().to_string();
 
         if is_same_directory && playlist_lock.is_some() {
             // 同じディレクトリの場合のみ既存のプレイリストを更新。
@@ -422,12 +451,77 @@ where
                 let included_set: HashSet<String> = included.iter().cloned().collect();
                 let added: Vec<String> = included_set.difference(&current_set).cloned().collect();
                 let removed: Vec<String> = current_set.difference(&included_set).cloned().collect();
-                playlist.update_images(added, removed);
+                if !added.is_empty() || !removed.is_empty() {
+                    playlist.update_images(added, removed);
+                    // #62レビューM2(must): メンバーシップを変える操作(update_images)は
+                    // 必ず保存とセットで行う。保存し忘れると、再起動を跨いだときに
+                    // 除外したはずの画像が復活したり(exif_cacheと違いDBには残っている)、
+                    // 二重表示になったりする。
+                    let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+                    playlist_persistence::save_full(&db, &directory_str, playlist);
+                }
             }
         } else {
-            // 別のディレクトリまたは初回の場合は新規プレイリストを作成
-            *playlist_lock = Some(Playlist::new(included.clone()));
+            // メモリ上に無い（起動直後の初回スキャン、または別ディレクトリへの切替）。
+            // #62: 起動直後は `current_directory` が必ず `None`（`AppState.directory_path`は
+            // このスキャン完了後にしかセットされない）になるため、ここで無条件に
+            // 新規シャッフルすると、DBに保存済みのプレイリスト状態（前回の続き）を
+            // 毎回捨ててしまい「完全平等」が達成できない（元issueの問題1）。
+            // 保存済み状態のディレクトリが今回のスキャン対象と一致する場合だけ復元し、
+            // 現在の「含めるべき集合」との差分を `update_images` 相当で適用する。
+            //
+            // #62レビューS1: この復元自体は `restore_playlist` コマンドが起動直後に
+            // 先に行うため、実際にはここに来る前に `playlist_lock` が既に復元済みの
+            // ことが多い（その場合は上の `is_same_directory` 分岐に入る）。ここに来るのは
+            // `restore_playlist` が復元できなかった場合（保存が無い/ディレクトリ不一致）や、
+            // ディレクトリを選び直した場合。
+            let restored = {
+                let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+                db.load_playlist_state().unwrap_or(None)
+            };
+
+            let playlist = match restored {
+                Some((saved_dir, shuffled_list, next_index, history, history_position))
+                    if normalize_directory_key(Path::new(&saved_dir)) == directory_key =>
+                {
+                    let mut playlist = Playlist::from_persisted(
+                        shuffled_list,
+                        next_index,
+                        history,
+                        history_position,
+                    );
+                    let current_set = playlist.current_paths();
+                    let included_set: HashSet<String> = included.iter().cloned().collect();
+                    let added: Vec<String> =
+                        included_set.difference(&current_set).cloned().collect();
+                    let removed: Vec<String> =
+                        current_set.difference(&included_set).cloned().collect();
+                    if !added.is_empty() || !removed.is_empty() {
+                        playlist.update_images(added, removed);
+                    }
+                    playlist
+                }
+                // 保存済み状態が無い、または別ディレクトリのものなら新規シャッフル
+                _ => Playlist::new(included.clone()),
+            };
+
+            // #62: シャッフルが確定した（新規作成・復元後の差分適用のいずれも
+            // shuffled_list が変わりうる）ので、ここで必ずフル保存する
+            // （上の差分が空でも、directory_path をこのディレクトリへ更新するため）。
+            {
+                let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+                playlist_persistence::save_full(&db, &directory_str, &playlist);
+            }
+
+            *playlist_lock = Some(playlist);
         }
+
+        // #62レビュー2巡目 nit: playlistロックを保持したまま directory_path も更新する
+        // （上記の関数docコメント参照。呼び出し元の`scan_directory`が戻り値受領後に
+        // 別途設定する旧方式だと、更新までの間に他コマンドが古い値で軽量保存しうる窓があった）。
+        *directory_path_mutex
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(directory.to_path_buf());
     } // ロック解放
 
     // #61レビュー S-a: ScanProgress の total/new はプレイリスト（含める集合）基準で
@@ -496,6 +590,7 @@ pub async fn scan_directory(
     let progress = perform_scan(
         &state.db,
         &state.playlist,
+        &state.directory_path,
         current_directory.as_deref(),
         &directory,
         |current, total| {
@@ -509,12 +604,8 @@ pub async fn scan_directory(
             );
         },
     )?;
-
-    // ディレクトリパスを保存
-    *state
-        .directory_path
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = Some(directory.clone());
+    // `state.directory_path` は perform_scan の Stage 4 内（playlistロックを保持したまま）
+    // で既に設定済み（#62レビュー2巡目 nit）。ここで改めて設定しない。
 
     // ディレクトリパスをデータベースに永続化
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
@@ -522,4 +613,170 @@ pub async fn scan_directory(
     drop(db);
 
     Ok(progress)
+}
+
+/// `perform_restore` の結果（#62レビュー2巡目）。asset scope への許可は
+/// `AppHandle` が要る副作用のため、その要否だけをここで呼び出し元に伝える
+/// （`AppHandle` は runtime ジェネリクスが `Wry` 固定で `tauri::test::mock_app()` の
+/// `MockRuntime` を受け付けないため、`perform_scan` と同じ理由でロジック本体を
+/// Tauri非依存にしてテストしやすくしている）。
+#[derive(Debug, PartialEq, Eq)]
+pub enum RestoreOutcome {
+    /// 復元しなかった（保存が無い/ディレクトリ不一致/ディレクトリに今アクセス
+    /// できない/スキャン中のいずれか）。呼び出し元は `Ok(false)` を返すこと。
+    NotRestored,
+    /// `playlist` が既に `Some`（既に復元済み/初期化済み）だったので何もしていない。
+    /// 既存維持でそのまま使ってよい。呼び出し元は asset scope の許可は不要
+    /// （既に許可済みのはずのディレクトリのため）で `Ok(true)` を返すこと。
+    AlreadyReady,
+    /// 新たに復元した。asset scope への許可がまだなら、返された安全なパスへ
+    /// 許可してから呼び出し元は `Ok(true)` を返すこと。
+    Restored(PathBuf),
+}
+
+/// 起動時、DBに保存済みのプレイリスト状態を復元する本体（Tauri非依存、#62レビューS1）。
+/// `#[tauri::command] restore_playlist` はこの関数を呼ぶだけの薄いシェルにする。
+///
+/// スキャン完了を待たずに最初の画像を表示できるようにするため、`scan_directory`
+/// とは独立したコマンドとして提供する。フロントは起動直後にまずこれを呼び、
+/// `true`（復元できた、または既に復元/初期化済みで使える状態）ならスキャン完了を
+/// 待たずに即座に `get_next_image` を呼んで表示を始め、スキャンはバックグラウンドで
+/// 実行して差分だけ反映する。`false`（保存が無い/ディレクトリが一致しない/対象
+/// ディレクトリに今アクセスできない/スキャン中）ならスキャン完了を待つ従来の
+/// フローにフォールバックする。
+///
+/// 復元に成功した場合、`directory_path_mutex`（`AppState.directory_path` 相当）も
+/// ここで設定する。直後にバックグラウンドで呼ばれる `scan_directory` の
+/// `current_directory` がこの値と一致し、新規シャッフルではなく「差分更新」経路を
+/// 通るようにするため。
+///
+/// #62レビュー2巡目 N-S2: 呼び出しの前提を明示する。
+/// - `playlist_mutex` が既に `Some`（既に復元済み/初期化済み）なら、何もせず
+///   `AlreadyReady` を返す（「既存維持」。呼び出し元は現在の状態をそのまま使ってよい、
+///   という意味で `Ok(true)` を返す設計にした。呼ぶたびに毎回作り直すと、既に
+///   advance 済みの状態を巻き戻してしまうため）。**#62レビュー3巡目 nit**:
+///   ただし既存の `playlist` が「今回リクエストされたディレクトリ」のものとは
+///   限らない（例: 別ディレクトリへの切替直後で、まだ古いディレクトリの
+///   プレイリストが残っている）ため、`directory_path_mutex` の現在値と正規化キーで
+///   突き合わせ、一致しない場合は「既存維持」を騙らず `NotRestored` を返す。
+/// - `scan_in_progress` が立っている（`scan_directory` 実行中）間は何もせず
+///   `NotRestored` を返す。スキャンの Stage 4 が `playlist_mutex`/`db_mutex` を
+///   段階的に触っている最中にここから割り込むと、スキャン側の反映と競合しうるため
+///   （両者とも `playlist_mutex` を取るので致命的な破損はしないが、意味のある
+///   復元にならない）。この場合はスキャン自体の完了を待つ。
+///
+/// #62レビュー2巡目 N-M1(must): 対象ディレクトリが今アクセスできない（NAS/USB
+/// 未マウント等）場合は復元しない。`sanitize_allow_dir` で存在確認を兼ねる。
+/// これをせず復元してしまうと、保存されていたファイルが軒並み存在しない状態になり、
+/// `get_next_image` が内部リトライ（#62レビュー2巡目 N-S1）で `advance` を
+/// 繰り返しながら実質的に巡全体を無言で消費してしまう（画面には何も表示されないまま
+/// 「完全平等」の前提であるはずの巡が壊れる）。
+///
+/// #62レビュー3巡目 nit: `playlist_mutex` の `is_some` 確認から実際に
+/// `Some(playlist)` を設定するまでの間、ロックを保持し続ける（`MutexGuard` を
+/// 関数の最後まで生かす）ことで TOCTOU（確認と代入の間に別スレッドの
+/// `perform_restore`/`perform_scan` が割り込んで `playlist` を書き換える隙）を塞ぐ。
+/// `db_mutex`/`directory_path_mutex` が必要な箇所ではこの `playlist_mutex` の
+/// ロックを保持したまま内側で取る（順序は playlist→db／playlist→directory_path。
+/// `perform_scan` の Stage 4 と同じ順序で、逆順に取っている箇所は無いためデッド
+/// ロックしない）。
+pub fn perform_restore(
+    db_mutex: &Mutex<Database>,
+    playlist_mutex: &Mutex<Option<Playlist>>,
+    directory_path_mutex: &Mutex<Option<PathBuf>>,
+    scan_in_progress: &AtomicBool,
+    directory: &Path,
+) -> RestoreOutcome {
+    let directory_key = normalize_directory_key(directory);
+
+    // #62レビュー3巡目 nit: is_some確認から末尾のSome設定まで、このロックを
+    // 保持し続ける（TOCTOU対策）。
+    let mut playlist_lock = playlist_mutex.lock().unwrap_or_else(|e| e.into_inner());
+
+    if playlist_lock.is_some() {
+        let current_dir_matches = directory_path_mutex
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_deref()
+            .map(|dir| normalize_directory_key(dir) == directory_key)
+            .unwrap_or(false);
+        return if current_dir_matches {
+            RestoreOutcome::AlreadyReady
+        } else {
+            // 既存のplaylistは今回リクエストされたディレクトリのものではない。
+            // 「既存維持」を騙らずNotRestoredを返し、呼び出し元(scan_directory)の
+            // 通常の新規/差分更新フローに委ねる。
+            RestoreOutcome::NotRestored
+        };
+    }
+
+    if scan_in_progress.load(Ordering::SeqCst) {
+        return RestoreOutcome::NotRestored;
+    }
+
+    // #62レビュー2巡目 N-M1(must): ディレクトリが今アクセスできないなら復元しない。
+    let safe_dir = match sanitize_allow_dir(directory) {
+        Some(dir) => dir,
+        None => return RestoreOutcome::NotRestored,
+    };
+
+    let restored = {
+        let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+        db.load_playlist_state().unwrap_or(None)
+    };
+
+    let (saved_dir, shuffled_list, next_index, history, history_position) = match restored {
+        Some(row) if normalize_directory_key(Path::new(&row.0)) == directory_key => row,
+        _ => return RestoreOutcome::NotRestored,
+    };
+    let _ = saved_dir;
+
+    let playlist = Playlist::from_persisted(shuffled_list, next_index, history, history_position);
+    if playlist.is_empty() {
+        // 保存されていた画像が復元時点で1件も無い(空のディレクトリ等)。
+        // 従来どおりスキャンに任せる。
+        return RestoreOutcome::NotRestored;
+    }
+
+    *playlist_lock = Some(playlist);
+    *directory_path_mutex
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(directory.to_path_buf());
+
+    RestoreOutcome::Restored(safe_dir)
+}
+
+/// 起動時、DBに保存済みのプレイリスト状態を復元する（#62レビューS1）。
+/// 本体は Tauri 非依存の `perform_restore`。ここでは asset scope への許可
+/// （`AppHandle` が要る副作用）だけを行う薄いシェル。
+#[tauri::command]
+pub async fn restore_playlist(
+    directory_path: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<bool, String> {
+    let directory = PathBuf::from(&directory_path);
+
+    match perform_restore(
+        &state.db,
+        &state.playlist,
+        &state.directory_path,
+        &state.scan_in_progress,
+        &directory,
+    ) {
+        RestoreOutcome::NotRestored => Ok(false),
+        RestoreOutcome::AlreadyReady => Ok(true),
+        RestoreOutcome::Restored(safe_dir) => {
+            // asset scope はTauri起動時（`lib.rs` の `setup`、#59）に
+            // `last_directory_path`/`scan_history` の全ディレクトリへ許可済みのはずだが、
+            // 二重に許可しても無害なため念のため行う。
+            if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
+                eprintln!(
+                    "Failed to allow asset scope for {}: {e}",
+                    safe_dir.display()
+                );
+            }
+            Ok(true)
+        }
+    }
 }
