@@ -36,6 +36,8 @@ describe('tauri command wrappers', () => {
       newFiles: 3,
       deletedFiles: 1,
       durationMs: 42,
+      errorCount: 0,
+      errorExamples: [],
     };
     invoke.mockResolvedValue(progress);
     const result = await tauri.scanDirectory('/photos');

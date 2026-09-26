@@ -22,6 +22,64 @@ fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &st
     Ok(())
 }
 
+/// `get_file_metadata_under` のディレクトリ境界を範囲クエリの下限/上限文字列として
+/// 計算する（#63 PR#77レビューM1(must)）。`sep` を引数に取る純粋関数にすることで、
+/// コンパイル時のOS（`std::path::MAIN_SEPARATOR`）に関わらず、Windows形式の区切り文字
+/// （`\`）を明示的に渡してユニットテストできる。
+///
+/// - `lower = dir_trimmed + sep`（`directory` 自身の子孫の最小値。`directory` 自身は
+///   このAPIの呼び出し元が別途 `path = dir_trimmed` の等価一致で拾う）
+/// - `upper = dir_trimmed + (sepの次のバイト)`（`sep` はASCII、`/`=0x2F・`\`=0x5C なので
+///   +1 も必ずASCII範囲に収まり安全。BINARY照合＝バイト単位比較のTEXT主キーに対する
+///   `path >= lower AND path < upper` が、区切り文字境界での前方一致（`/p/foo` は
+///   `/p/foo/bar.jpg` にマッチし `/p/foobar/x.jpg` にはマッチしない）になる。大文字小文字も
+///   区別される（BINARY照合はバイト値そのものを比較するため）
+fn directory_scope_bounds(dir_trimmed: &str, sep: char) -> (String, String) {
+    let lower = format!("{dir_trimmed}{sep}");
+    let sep_next =
+        char::from_u32(sep as u32 + 1).expect("MAIN_SEPARATORはASCIIなので+1もASCII範囲に収まる");
+    let upper = format!("{dir_trimmed}{sep_next}");
+    (lower, upper)
+}
+
+/// `file_metadata` へのupsertを1件以上、指定の `conn`（`Connection`/`Transaction` の
+/// どちらでも可、`prepare_cached`はどちらにも生えている）上で行う（#63）。
+/// トランザクション境界は呼び出し元が管理する（このfnはcommitしない）。
+fn upsert_file_metadata_within(conn: &Connection, entries: &[(String, i64, i64)]) -> Result<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare_cached(
+        "INSERT INTO file_metadata (path, modified_time, file_size)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(path) DO UPDATE SET
+             modified_time = excluded.modified_time,
+             file_size = excluded.file_size",
+    )?;
+    for (path, modified_time, file_size) in entries {
+        stmt.execute(params![path, modified_time, file_size])?;
+    }
+    Ok(())
+}
+
+/// 指定パス群を `file_metadata`/`image_stats`/`exif_cache` から削除する（確定削除。
+/// #63）。`upsert_file_metadata_within` と対で使い、`conn` 上でトランザクション境界は
+/// 呼び出し元が管理する。
+fn delete_file_metadata_within(conn: &Connection, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let mut del_fm = conn.prepare_cached("DELETE FROM file_metadata WHERE path = ?1")?;
+    let mut del_stats = conn.prepare_cached("DELETE FROM image_stats WHERE path = ?1")?;
+    let mut del_exif = conn.prepare_cached("DELETE FROM exif_cache WHERE path = ?1")?;
+    for path in paths {
+        del_fm.execute([path])?;
+        del_stats.execute([path])?;
+        del_exif.execute([path])?;
+    }
+    Ok(())
+}
+
 /// `ignore_rules` の主キーが既に `(pattern, rule_type)` の複合キーになっているか
 /// （`pragma_table_info` の `pk` 列は主キー内の並び1始まり、非主キーは0）。
 fn ignore_rules_has_composite_pk(conn: &Connection) -> Result<bool> {
@@ -500,12 +558,77 @@ impl Database {
         Ok(())
     }
 
+    /// `perform_scan` Stage 3 の file_metadata 反映本体（#63）。新規/変更分の
+    /// upsertと確定削除分の削除（`file_metadata`/`image_stats`/`exif_cache`）を
+    /// **1トランザクション**・`prepare_cached`でまとめて行う。
+    ///
+    /// 以前は生スキャンで見つかった全ファイル（10万件規模なら10万件。大半は
+    /// 「変更なし」）を1件ずつ`upsert_file_metadata`していたが、実際にDBへの反映が
+    /// 必要なのは新規/変更分だけ（`scanner::ScanResult::new_files`/`modified_files`）
+    /// で、無駄なI/O・ロック保持時間の伸長でしかなかった。upsert専用の
+    /// `upsert_file_metadata_batch`と削除専用の`mark_deleted`を別々に（＝別
+    /// トランザクションで）呼ぶ中間実装を経て、**PR#77レビューS5**で本番未使用に
+    /// なった`upsert_file_metadata_batch`を削除しこの1本に統合した（呼び出し元は
+    /// 常に新規/変更upsertと確定削除を同時に持っているため、分ける理由が無かった）。
+    pub fn apply_file_metadata_changes(
+        &self,
+        upserts: &[(String, i64, i64)],
+        deleted_paths: &[String],
+    ) -> Result<()> {
+        if upserts.is_empty() && deleted_paths.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        upsert_file_metadata_within(&tx, upserts)?;
+        delete_file_metadata_within(&tx, deleted_paths)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// ファイルメタデータを取得（ディスク上の物理的な事実のみ。撮影日は `exif_cache` 参照）
     pub fn get_all_file_metadata(&self) -> Result<Vec<FileMetadataRow>> {
         let mut stmt = self
             .conn
             .prepare("SELECT path, modified_time, file_size FROM file_metadata")?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// `directory` 配下（`directory` 自身とその子孫パス）の `file_metadata` だけを取得する
+    /// （#63）。
+    ///
+    /// `perform_scan` の差分比較（前回スキャンとの突き合わせ）は、**今回スキャンする
+    /// ディレクトリ配下のパスだけ**を対象にすること。以前は `get_all_file_metadata`
+    /// （DB全件）を使っていたため、フォルダA→B→Aと切り替えて使うと、Bをスキャンした
+    /// 時点でAの`file_metadata`が「今回の生スキャン（B配下）には存在しない」と判定され
+    /// 確定削除されてしまう事故があった（`ignore::IgnoreFilter::has_pruned_ancestor_dir`
+    /// も対象外のディレクトリに対しては`starts_with`が偽になり救えない）。
+    ///
+    /// **PR#77レビューM1(must)**: 当初は `LIKE ... ESCAPE '\'` で前方一致させていたが、
+    /// エスケープ文字に `\` を使っているため、区切り文字がバックスラッシュのWindows
+    /// （`sep == '\\'`）では `format!("{dir}{sep}%")` が生成するパターンの `\%` が
+    /// 「エスケープされたリテラル`%`」と解釈されてしまい、ワイルドカードとして機能せず
+    /// 常に0件しかマッチしなかった（Windowsで差分スキャンの範囲限定が事実上死んでいた）。
+    /// `path` は主キー（`TEXT PRIMARY KEY`、既定のBINARY照合＝バイト単位比較・大文字小文字
+    /// 区別）なので、`LIKE` ではなく **範囲クエリ** `path >= lower AND path < upper`
+    /// （`lower = dir + sep`、`upper = dir + (sepの次のバイト)`）に置き換える。エスケープが
+    /// 一切不要になるうえ、主キーのインデックスがそのまま効く。
+    pub fn get_file_metadata_under(&self, directory: &str) -> Result<Vec<FileMetadataRow>> {
+        let dir_trimmed = directory.trim_end_matches(['/', '\\']);
+        let (lower, upper) = directory_scope_bounds(dir_trimmed, std::path::MAIN_SEPARATOR);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT path, modified_time, file_size FROM file_metadata
+             WHERE path = ?1 OR (path >= ?2 AND path < ?3)",
+        )?;
+        let rows = stmt.query_map(params![dir_trimmed, lower, upper], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
 
         let mut result = Vec::new();
         for row in rows {
@@ -596,12 +719,11 @@ impl Database {
     /// （`ScanResult::unknown_files`）はここに渡さないこと。それらは file_metadata/
     /// image_stats/exif_cache のいずれも保持し続ける（#61レビュー S-a）。
     pub fn mark_deleted(&self, paths: &[String]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        for path in paths {
-            tx.execute("DELETE FROM file_metadata WHERE path = ?1", [path])?;
-            tx.execute("DELETE FROM image_stats WHERE path = ?1", [path])?;
-            tx.execute("DELETE FROM exif_cache WHERE path = ?1", [path])?;
+        if paths.is_empty() {
+            return Ok(());
         }
+        let tx = self.conn.unchecked_transaction()?;
+        delete_file_metadata_within(&tx, paths)?;
         tx.commit()?;
         Ok(())
     }
@@ -660,16 +782,6 @@ impl Database {
         let count: i32 = self
             .conn
             .query_row("SELECT COUNT(*) FROM file_metadata", [], |row| row.get(0))?;
-        Ok(count)
-    }
-
-    /// 表示済み画像数を取得
-    pub fn get_displayed_image_count(&self) -> Result<i32> {
-        let count: i32 = self.conn.query_row(
-            "SELECT COUNT(*) FROM image_stats WHERE display_count > 0",
-            [],
-            |row| row.get(0),
-        )?;
         Ok(count)
     }
 
@@ -789,13 +901,26 @@ impl Database {
         Ok(())
     }
 
-    /// 全画像の表示回数を取得（グラフ用、パスでソート）
-    pub fn get_all_display_counts(&self) -> Result<Vec<(String, i32)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT path, display_count FROM image_stats ORDER BY path ASC")?;
+    /// `directory` 配下の全画像の表示回数を取得（グラフ用、パスでソート）。
+    ///
+    /// #63 PR#77レビューS2: `get_stats`の`total_images`と母数を揃えるためディレクトリ
+    /// 配下に限定する（以前はDB全件を返しており、GraphSectionに他ディレクトリの画像
+    /// まで混ざって表示されうる状態だった）。`commands::stats::get_stats`はこの結果を
+    /// さらにプレイリストのメンバーシップで絞り込んで`displayed_images`を数える
+    /// （PR#77レビュー2巡目 nit: ディレクトリ配下限定だけでは、表示後に除外ルールが
+    /// 付いたファイルの`display_count`がまだ数に残ってしまうため）。
+    pub fn get_all_display_counts_under(&self, directory: &str) -> Result<Vec<(String, i32)>> {
+        let dir_trimmed = directory.trim_end_matches(['/', '\\']);
+        let (lower, upper) = directory_scope_bounds(dir_trimmed, std::path::MAIN_SEPARATOR);
+        let mut stmt = self.conn.prepare(
+            "SELECT path, display_count FROM image_stats
+             WHERE path = ?1 OR (path >= ?2 AND path < ?3)
+             ORDER BY path ASC",
+        )?;
 
-        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let rows = stmt.query_map(params![dir_trimmed, lower, upper], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -1330,6 +1455,530 @@ mod tests {
             db.load_playlist_state().unwrap().is_none(),
             "save_playlist_fullを呼んでいないので依然として復元対象は無いはず"
         );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63: `get_file_metadata_under` は指定ディレクトリ配下のパスだけを返し、他の
+    /// ディレクトリ（フォルダA→B→Aの「B」相当）を巻き込まない。差分比較をスキャン対象
+    /// ディレクトリ配下に限定する変更の直接的な回帰テスト。
+    #[test]
+    fn get_file_metadata_under_scopes_to_directory_and_preserves_other_directories() {
+        let path = temp_db_path("file_metadata_under_scope");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/foo/a.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/foo/sub/b.jpg", 200, 20)
+            .unwrap();
+        db.upsert_file_metadata("/p/bar/c.jpg", 300, 30).unwrap();
+
+        let under_foo = db.get_file_metadata_under("/p/foo").unwrap();
+        let paths: Vec<&str> = under_foo.iter().map(|(p, ..)| p.as_str()).collect();
+
+        assert_eq!(under_foo.len(), 2, "/p/foo配下の2件だけが返るはず");
+        assert!(paths.contains(&"/p/foo/a.jpg"));
+        assert!(paths.contains(&"/p/foo/sub/b.jpg"));
+        assert!(
+            !paths.contains(&"/p/bar/c.jpg"),
+            "別ディレクトリ(/p/bar)のファイルを巻き込んではいけない"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63 境界テスト: `/p/foo` を指定したとき、`/p/foo/bar.jpg`（配下）はヒットするが
+    /// `/p/foobar/x.jpg`（名前が前方一致するだけの別ディレクトリ）はヒットしない。
+    /// 区切り文字境界で前方一致を取ることの直接的な検証。
+    #[test]
+    fn get_file_metadata_under_respects_path_separator_boundary() {
+        let path = temp_db_path("file_metadata_under_boundary");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/foo/bar.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/foobar/x.jpg", 200, 20).unwrap();
+
+        let under_foo = db.get_file_metadata_under("/p/foo").unwrap();
+        let paths: Vec<&str> = under_foo.iter().map(|(p, ..)| p.as_str()).collect();
+
+        assert_eq!(paths, vec!["/p/foo/bar.jpg"]);
+        assert!(
+            !paths.contains(&"/p/foobar/x.jpg"),
+            "/p/foo と /p/foobar は別ディレクトリとして区別されるはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63 PR#77レビューM1: `LIKE`のワイルドカード文字と紛らわしい `%`/`_` を含む
+    /// ディレクトリパスでも、範囲クエリ（バイト単位比較）は常にリテラルとして扱うため
+    /// 誤爆しないこと（LIKEを使っていた頃のエスケープ回帰テストを、実装変更後も
+    /// 同じ入力で引き続き通ることを確認する形で残す）。
+    #[test]
+    fn get_file_metadata_under_treats_percent_and_underscore_as_literal_bytes() {
+        let path = temp_db_path("file_metadata_under_escape");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/100%_done/a.jpg", 100, 10)
+            .unwrap();
+        // "%"/"_" が本物のワイルドカードとして働くと、無関係な "/p/100X_done" もヒットする。
+        db.upsert_file_metadata("/p/100X_done/a.jpg", 200, 20)
+            .unwrap();
+
+        let under = db.get_file_metadata_under("/p/100%_done").unwrap();
+        let paths: Vec<&str> = under.iter().map(|(p, ..)| p.as_str()).collect();
+
+        assert_eq!(paths, vec!["/p/100%_done/a.jpg"]);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63 PR#77レビューM1(must) 直接の回帰テスト: `directory_scope_bounds`を
+    /// `sep = '\\'`（Windows形式）で明示的に呼び、コンパイル時のホストOSに関わらず
+    /// Windowsの区切り文字での境界計算を検証する。修正前は`LIKE ... ESCAPE '\'`の
+    /// パターンが`format!("{dir}{sep}%")`＝`"C:\Photos\%"`となり、エスケープ文字と
+    /// 区切り文字が一致するWindows環境では`\%`がリテラル`%`と解釈され常に0件だった。
+    #[test]
+    fn directory_scope_bounds_computes_correct_range_for_windows_backslash_separator() {
+        let (lower, upper) = directory_scope_bounds(r"C:\Photos", '\\');
+        assert_eq!(lower, "C:\\Photos\\", "下限はディレクトリ+区切り文字のはず");
+        assert_eq!(
+            upper, "C:\\Photos]",
+            "上限は区切り文字(0x5C)の次のバイト(0x5D=']')のはず"
+        );
+
+        // 実際にWindows形式のパスをこの境界で絞り込めることも確認する（DBの照合は
+        // BINARY＝バイト単位比較なので、区切り文字がバックスラッシュでも問題なく動く）。
+        let path = temp_db_path("windows_style_bounds");
+        let db = Database::new(path.clone()).unwrap();
+        db.upsert_file_metadata(r"C:\Photos\a.jpg", 100, 10)
+            .unwrap();
+        db.upsert_file_metadata(r"C:\Photos\sub\b.jpg", 200, 20)
+            .unwrap();
+        // "C:\Photos" に前方一致するだけの別ディレクトリ（境界外）を巻き込まない。
+        db.upsert_file_metadata(r"C:\PhotosArchive\c.jpg", 300, 30)
+            .unwrap();
+
+        let under: Vec<String> = db
+            .conn
+            .prepare("SELECT path FROM file_metadata WHERE path = ?1 OR (path >= ?2 AND path < ?3)")
+            .unwrap()
+            .query_map(params![r"C:\Photos", lower, upper], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert_eq!(
+            under.len(),
+            2,
+            "C:\\Photos配下(サブフォルダ含む)の2件だけがヒットするはず: {under:?}"
+        );
+        assert!(under.iter().any(|p| p == r"C:\Photos\a.jpg"));
+        assert!(under.iter().any(|p| p == r"C:\Photos\sub\b.jpg"));
+        assert!(
+            !under.iter().any(|p| p.starts_with(r"C:\PhotosArchive")),
+            "前方一致するだけの別ディレクトリを巻き込んではいけない"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63 PR#77レビューS1: 範囲クエリはBINARY照合（バイト単位比較）なので、
+    /// `/p/foo` を指定したとき大文字違いの `/p/Foo` を巻き込まない
+    /// （LIKE除去に伴う範囲クエリ化で、大文字小文字の区別が壊れていないことの確認）。
+    #[test]
+    fn get_file_metadata_under_does_not_conflate_different_case_directories() {
+        let path = temp_db_path("case_sensitive_scope");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/foo/a.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/Foo/b.jpg", 200, 20).unwrap();
+
+        let under_foo = db.get_file_metadata_under("/p/foo").unwrap();
+        let paths: Vec<&str> = under_foo.iter().map(|(p, ..)| p.as_str()).collect();
+
+        assert_eq!(paths, vec!["/p/foo/a.jpg"]);
+        assert!(
+            !paths.contains(&"/p/Foo/b.jpg"),
+            "/p/foo と /p/Foo は大文字小文字が違う別ディレクトリとして区別されるはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63（PR#77レビューS5で`upsert_file_metadata_batch`から`apply_file_metadata_changes`
+    /// に移行）: upsertをまとめて1トランザクションで反映し、`added_at` を保つ既存の
+    /// `upsert_file_metadata` と同じ `ON CONFLICT` 挙動になる。空配列2つはエラーに
+    /// ならず何もしない。
+    #[test]
+    fn apply_file_metadata_changes_batch_inserts_and_updates_in_one_transaction() {
+        let path = temp_db_path("upsert_batch");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.apply_file_metadata_changes(&[], &[]).unwrap();
+
+        db.upsert_file_metadata("/p/a.jpg", 100, 10).unwrap();
+        db.apply_file_metadata_changes(
+            &[
+                ("/p/a.jpg".to_string(), 999, 999), // 既存: 更新される
+                ("/p/b.jpg".to_string(), 200, 20),  // 新規
+            ],
+            &[],
+        )
+        .unwrap();
+
+        let all = db.get_all_file_metadata().unwrap();
+        let a = all.iter().find(|(p, ..)| p == "/p/a.jpg").unwrap();
+        let b = all.iter().find(|(p, ..)| p == "/p/b.jpg").unwrap();
+        assert_eq!((a.1, a.2), (999, 999), "既存パスは新しい値に更新されるはず");
+        assert_eq!((b.1, b.2), (200, 20), "新規パスは挿入されるはず");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63: `apply_file_metadata_changes` は新規/変更のupsertと確定削除の削除を
+    /// 1回の呼び出し（1トランザクション）で反映し、削除側は `mark_deleted` と同じく
+    /// `image_stats`/`exif_cache` も含めて消す。空配列2つはエラーにならず何もしない。
+    #[test]
+    fn apply_file_metadata_changes_upserts_and_deletes_together() {
+        let path = temp_db_path("apply_changes");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.apply_file_metadata_changes(&[], &[]).unwrap();
+
+        // 既存の状態を作る: a(残る・更新なし), b(削除される), の2件。
+        db.upsert_file_metadata("/p/a.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/b.jpg", 200, 20).unwrap();
+        db.increment_display_count("/p/b.jpg").unwrap();
+        db.upsert_exif_cache("/p/b.jpg", Some("2023-05-15"), 200)
+            .unwrap();
+
+        // c は新規、b は確定削除。a には触れない。
+        db.apply_file_metadata_changes(
+            &[("/p/c.jpg".to_string(), 300, 30)],
+            &["/p/b.jpg".to_string()],
+        )
+        .unwrap();
+
+        let all = db.get_all_file_metadata().unwrap();
+        let paths: Vec<&str> = all.iter().map(|(p, ..)| p.as_str()).collect();
+        assert!(paths.contains(&"/p/a.jpg"), "触れていないaは残るはず");
+        assert!(paths.contains(&"/p/c.jpg"), "新規cは追加されるはず");
+        assert!(
+            !paths.contains(&"/p/b.jpg"),
+            "確定削除したbはfile_metadataから消えるはず"
+        );
+
+        let (b_count, _) = db.get_image_stats("/p/b.jpg").unwrap();
+        assert_eq!(
+            b_count, 0,
+            "確定削除したbのimage_statsも消える(get_image_statsは未登録扱いの0を返す)はず"
+        );
+        assert!(
+            db.get_all_exif_cache()
+                .unwrap()
+                .iter()
+                .all(|(p, ..)| p != "/p/b.jpg"),
+            "確定削除したbのexif_cacheも消えるはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #63 テスト観点補完（トランザクション途中失敗時のロールバック）: `apply_file_metadata_changes`
+    /// は upsert → delete の順で1トランザクションにまとめて実行する。途中の1件
+    /// （後続のdelete）が失敗したら、それより**前に同一トランザクション内で成功していた
+    /// 変更（先行するupsert・先行するdelete）も含めて全てロールバックされ、部分反映
+    /// されないことを検証する。SQLiteのトリガーで特定パスのDELETEを意図的に失敗させ、
+    /// 途中失敗を再現する（本番コードは変更しない）。
+    #[test]
+    fn apply_file_metadata_changes_rolls_back_entirely_on_mid_transaction_failure() {
+        let path = temp_db_path("apply_changes_rollback");
+        let db = Database::new(path.clone()).unwrap();
+
+        // 既存の状態: keep(ロールバックで生き残るべき), poison(削除が失敗する対象)。
+        db.upsert_file_metadata("/p/keep.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/poison.jpg", 200, 20).unwrap();
+
+        // poison.jpg のDELETEだけを意図的に失敗させるトリガーを仕込む。
+        db.conn
+            .execute_batch(
+                "CREATE TRIGGER fail_on_poison_delete
+                 BEFORE DELETE ON file_metadata
+                 WHEN OLD.path = '/p/poison.jpg'
+                 BEGIN SELECT RAISE(ABORT, 'forced test failure'); END;",
+            )
+            .unwrap();
+
+        // upsert(new.jpg)は先に処理され、delete(keep.jpg)もpoison.jpgより先に処理される
+        // 実装順（upsert全件→delete全件、deleteは引数順）なので、両方が「失敗より前に
+        // 同一トランザクション内で成功済み」の状態を作れる。
+        let result = db.apply_file_metadata_changes(
+            &[("/p/new.jpg".to_string(), 300, 30)],
+            &["/p/keep.jpg".to_string(), "/p/poison.jpg".to_string()],
+        );
+
+        assert!(
+            result.is_err(),
+            "トリガーによる途中失敗はErrとして伝播するはず"
+        );
+
+        let all = db.get_all_file_metadata().unwrap();
+        let paths: Vec<&str> = all.iter().map(|(p, ..)| p.as_str()).collect();
+        assert!(
+            paths.contains(&"/p/keep.jpg"),
+            "ロールバックによりkeepの削除も取り消され残るはず: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"/p/poison.jpg"),
+            "失敗した削除対象自身もロールバックで残るはず: {paths:?}"
+        );
+        assert!(
+            !paths.contains(&"/p/new.jpg"),
+            "ロールバックにより先行するupsertも反映されないはず（部分反映禁止）: {paths:?}"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `increment_display_count` は初回で1、以降は加算し、`last_displayed` を埋める。
+    /// `get_image_stats` は未登録パスに対して `(0, None)` を返す（エラーにしない）。
+    #[test]
+    fn increment_display_count_accumulates_and_sets_last_displayed() {
+        let path = temp_db_path("increment_display_count");
+        let db = Database::new(path.clone()).unwrap();
+
+        let (count, last) = db.get_image_stats("/p/never_shown.jpg").unwrap();
+        assert_eq!((count, last), (0, None), "未登録パスは(0, None)のはず");
+
+        db.increment_display_count("/p/a.jpg").unwrap();
+        let (count, last) = db.get_image_stats("/p/a.jpg").unwrap();
+        assert_eq!(count, 1, "初回は1のはず");
+        assert!(last.is_some(), "last_displayedが埋まるはず");
+
+        db.increment_display_count("/p/a.jpg").unwrap();
+        let (count, _) = db.get_image_stats("/p/a.jpg").unwrap();
+        assert_eq!(count, 2, "2回目は加算されるはず");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `reset_all_display_counts` は表示回数を全件0に戻すが、行自体（last_displayed等）
+    /// は削除しない。
+    #[test]
+    fn reset_all_display_counts_zeroes_counts_without_deleting_rows() {
+        let path = temp_db_path("reset_display_counts");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/p/b.jpg").unwrap();
+
+        db.reset_all_display_counts().unwrap();
+
+        let (a_count, a_last) = db.get_image_stats("/p/a.jpg").unwrap();
+        let (b_count, _) = db.get_image_stats("/p/b.jpg").unwrap();
+        assert_eq!(a_count, 0);
+        assert_eq!(b_count, 0);
+        assert!(
+            a_last.is_some(),
+            "行自体は残るので last_displayed はリセットされないはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `get_total_image_count`（file_metadata件数）と、`get_all_display_counts_under`
+    /// （指定ディレクトリ配下のimage_stats全件）から`display_count>0`だけを数えた件数は
+    /// 独立に数える。#63 PR#77レビューS2でディレクトリ限定に変更したので、スコープ外
+    /// (`/other`)の表示済み画像が数に混ざらないことも合わせて確認する
+    /// （`commands::stats::get_stats`は、この結果をさらにプレイリストのメンバーシップで
+    /// 絞り込む。そちらは`tests/get_stats_membership.rs`で検証する）。
+    #[test]
+    fn total_and_displayed_image_counts_are_independent() {
+        let path = temp_db_path("image_counts");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/a.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/b.jpg", 200, 20).unwrap();
+        db.upsert_file_metadata("/p/c.jpg", 300, 30).unwrap();
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/other/z.jpg").unwrap();
+
+        assert_eq!(
+            db.get_total_image_count().unwrap(),
+            3,
+            "file_metadataの全件数"
+        );
+        let displayed_under_p = db
+            .get_all_display_counts_under("/p")
+            .unwrap()
+            .into_iter()
+            .filter(|(_, count)| *count > 0)
+            .count();
+        assert_eq!(
+            displayed_under_p, 1,
+            "/p配下でdisplay_count>0のimage_statsだけ数えるはず(/otherは含まない)"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `save_setting`/`get_setting`: 未設定キーは `None`、保存後は値が返り、
+    /// 同じキーへの再保存は上書きする（`INSERT OR REPLACE`）。
+    #[test]
+    fn save_and_get_setting_roundtrip_and_overwrite() {
+        let path = temp_db_path("setting_roundtrip");
+        let db = Database::new(path.clone()).unwrap();
+
+        assert_eq!(db.get_setting("theme").unwrap(), None);
+
+        db.save_setting("theme", "dark").unwrap();
+        assert_eq!(db.get_setting("theme").unwrap(), Some("dark".to_string()));
+
+        db.save_setting("theme", "light").unwrap();
+        assert_eq!(
+            db.get_setting("theme").unwrap(),
+            Some("light".to_string()),
+            "同じキーへの再保存は上書きするはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `add_ignore_rule`/`get_ignore_rules`: 追加した順（`added_at ASC`）で返り、
+    /// `INSERT OR IGNORE` により同じ `(pattern, rule_type)` の重複追加は無視される。
+    #[test]
+    fn add_ignore_rule_and_get_ignore_rules_roundtrip_dedupes_exact_duplicates() {
+        let path = temp_db_path("add_ignore_rule_roundtrip");
+        let db = Database::new(path.clone()).unwrap();
+        // デフォルトルール(6件)をクリアしてから検証する。
+        for (pattern, rule_type) in db.get_ignore_rules().unwrap() {
+            db.remove_ignore_rule(&pattern, rule_type).unwrap();
+        }
+
+        db.add_ignore_rule("*.tmp", RuleType::Glob).unwrap();
+        db.add_ignore_rule("*.tmp", RuleType::Glob).unwrap(); // 重複追加は無視される
+        db.add_ignore_rule("2023-05-15", RuleType::Date).unwrap();
+
+        let rules = db.get_ignore_rules().unwrap();
+        assert_eq!(
+            rules,
+            vec![
+                ("*.tmp".to_string(), RuleType::Glob),
+                ("2023-05-15".to_string(), RuleType::Date),
+            ],
+            "追加順(added_at ASC)で返り、重複は1件にまとまるはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `get_recent_images` は `last_displayed` が非NULLの行だけを降順・limit件で返す。
+    #[test]
+    fn get_recent_images_orders_by_last_displayed_desc_and_respects_limit() {
+        let path = temp_db_path("recent_images");
+        let db = Database::new(path.clone()).unwrap();
+
+        // last_displayedがまだ無い行はrecent_imagesに出ない。
+        db.upsert_file_metadata("/p/never_shown.jpg", 100, 10)
+            .unwrap();
+
+        db.increment_display_count("/p/old.jpg").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100)); // datetime('now')は秒精度
+        db.increment_display_count("/p/new.jpg").unwrap();
+
+        let recent = db.get_recent_images(1).unwrap();
+        assert_eq!(recent.len(), 1, "limit=1なら1件だけ");
+        assert_eq!(recent[0].0, "/p/new.jpg", "最新表示が先頭に来るはず");
+
+        let recent_all = db.get_recent_images(10).unwrap();
+        assert!(
+            recent_all.iter().all(|(p, ..)| p != "/p/never_shown.jpg"),
+            "表示したことのないファイルは含まれないはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `get_distinct_scan_directories` は `scan_history` に記録済みのディレクトリを
+    /// 重複無しで返す。
+    #[test]
+    fn get_distinct_scan_directories_dedupes_repeated_scans_of_same_directory() {
+        let path = temp_db_path("distinct_scan_dirs");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.record_scan_history("/photos/a", 10, 1, 0, 5).unwrap();
+        db.record_scan_history("/photos/a", 10, 0, 0, 3).unwrap(); // 同じディレクトリを再スキャン
+        db.record_scan_history("/photos/b", 5, 5, 0, 2).unwrap();
+
+        let mut dirs = db.get_distinct_scan_directories().unwrap();
+        dirs.sort();
+        assert_eq!(dirs, vec!["/photos/a".to_string(), "/photos/b".to_string()]);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `trim_scan_history` は指定件数を超える古いレコードを削除し、件数を上限以下に保つ。
+    #[test]
+    fn trim_scan_history_caps_row_count_at_max_entries() {
+        let path = temp_db_path("trim_scan_history");
+        let db = Database::new(path.clone()).unwrap();
+
+        for i in 0..10 {
+            db.record_scan_history(&format!("/photos/{i}"), 1, 1, 0, 1)
+                .unwrap();
+        }
+
+        db.trim_scan_history(3).unwrap();
+
+        let count: i32 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM scan_history", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 3, "上限3件まで削減されるはず");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `get_all_display_counts_under` は指定ディレクトリ配下だけをパス昇順で返す
+    /// （display_count=0の行も含む）。#63 PR#77レビューS2: スコープ外(`/other`)は
+    /// 混ざらないことも確認する。
+    #[test]
+    fn get_all_display_counts_under_returns_scoped_rows_sorted_by_path() {
+        let path = temp_db_path("all_display_counts");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.increment_display_count("/p/b.jpg").unwrap();
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/other/z.jpg").unwrap();
+
+        let counts = db.get_all_display_counts_under("/p").unwrap();
+        assert_eq!(
+            counts,
+            vec![("/p/a.jpg".to_string(), 2), ("/p/b.jpg".to_string(), 1)],
+            "パス昇順で全件返るはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `upsert_exif_cache`（単発）は `ON CONFLICT` で既存行を更新する
+    /// （`upsert_exif_cache_batch` と同じSQLだが、単発呼び出し経路もカバーする）。
+    #[test]
+    fn upsert_exif_cache_single_inserts_then_updates() {
+        let path = temp_db_path("upsert_exif_cache_single");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_exif_cache("/p/a.jpg", Some("2023-05-15"), 100)
+            .unwrap();
+        db.upsert_exif_cache("/p/a.jpg", None, 200).unwrap();
+
+        let all = db.get_all_exif_cache().unwrap();
+        assert_eq!(all.len(), 1, "同じpathへの2回目呼び出しは更新のはず");
+        assert_eq!(all[0], ("/p/a.jpg".to_string(), None, 200));
 
         let _ = std::fs::remove_file(&path);
     }

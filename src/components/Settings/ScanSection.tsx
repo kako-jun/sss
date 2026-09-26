@@ -157,6 +157,27 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
               <span className="font-mono">{(scanProgress.durationMs / 1000).toFixed(2)}秒</span>
             </div>
           </div>
+
+          {scanProgress.errorCount > 0 && (
+            <div className="space-y-2 p-4 bg-black/30 rounded border border-white/5">
+              <div className="text-sm text-white/40">
+                読み取りエラー:{' '}
+                <span className="font-mono text-red-400/80">
+                  {scanProgress.errorCount.toLocaleString()}件
+                </span>
+                <span className="text-white/30 text-xs"> （不明として保持、削除しません）</span>
+              </div>
+              {scanProgress.errorExamples.length > 0 && (
+                <ul className="text-xs text-white/30 font-mono space-y-0.5">
+                  {scanProgress.errorExamples.map((example, index) => (
+                    <li key={`${index}-${example}`} className="truncate">
+                      {example}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

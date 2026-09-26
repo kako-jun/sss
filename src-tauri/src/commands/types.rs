@@ -25,10 +25,21 @@ pub struct AppState {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanProgress {
+    /// プレイリストに含まれる件数（除外ルール適用後の「含める集合」の件数）。
+    /// #63 PR#77レビュー2巡目 nit: 今回のスキャンエラーが原因で「不明」になった
+    /// ファイル（`error_unknown_files`。一時的な読み取り失敗の可能性が高く、
+    /// プレイリスト所属を維持する対象）も、プレイリストに残り続ける以上ここに
+    /// 含まれる。ディレクトリ系除外の枝刈りによる「不明」（意図した除外なので
+    /// プレイリストから外れる）は含まれない。
     pub total_files: usize,
     pub new_files: usize,
     pub deleted_files: usize,
     pub duration_ms: u128,
+    /// 走査中に発生したエラーの件数（`WalkDir`読み取りエラー＋ファイル単位の
+    /// メタデータ/mtime取得エラー。1970年より前のmtimeを含む）。#63。
+    pub error_count: usize,
+    /// エラーの代表例（最大5件、`"{path}: {message}"`形式）。UIにそのまま表示する。#63。
+    pub error_examples: Vec<String>,
 }
 
 /// 統計情報

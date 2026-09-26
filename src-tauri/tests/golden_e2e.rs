@@ -122,7 +122,7 @@ fn scan_collects_exactly_media_minus_ignored() {
     let last_total = Arc::new(AtomicUsize::new(0));
     let (calls_cb, last_total_cb) = (Arc::clone(&calls), Arc::clone(&last_total));
 
-    let files = scanner
+    let (files, _errors) = scanner
         .scan_directory_with_progress(&root, &filter, move |_done, total| {
             calls_cb.fetch_add(1, Ordering::Relaxed);
             last_total_cb.store(total, Ordering::Relaxed);
@@ -170,7 +170,7 @@ fn playlist_preserves_membership_and_updates() {
 
     let scanner = ImageScanner::new();
     let filter = IgnoreFilter::from_patterns(&ignore_patterns());
-    let files = scanner
+    let (files, _errors) = scanner
         .scan_directory_with_progress(&root, &filter, |_, _| {})
         .expect("scan");
     let paths: Vec<String> = included_paths(&files, &filter, &root);
@@ -214,7 +214,7 @@ fn incremental_scan_detects_added_and_deleted() {
     let no_prune_filter = IgnoreFilter::from_patterns(&[]);
 
     // 1回目: 前回スナップショットを作る。
-    let first = scanner
+    let (first, _errors) = scanner
         .scan_directory_with_progress(&root, &no_prune_filter, |_, _| {})
         .expect("first scan");
     let previous: Vec<(String, i64, i64)> = first
@@ -297,7 +297,7 @@ fn scan_excludes_default_dotfolder_and_synology_thumbs_rules() {
 
     let scanner = ImageScanner::new();
     let filter = IgnoreFilter::from_rules(&default_ignore_rules());
-    let files = scanner
+    let (files, _errors) = scanner
         .scan_directory_with_progress(&root, &filter, |_, _| {})
         .expect("scan");
 
@@ -340,7 +340,7 @@ fn scan_excludes_metachar_named_file_via_escaped_pattern() {
 
     let scanner = ImageScanner::new();
     let filter = IgnoreFilter::from_rules(&[rule]);
-    let files = scanner
+    let (files, _errors) = scanner
         .scan_directory_with_progress(&root, &filter, |_, _| {})
         .expect("scan");
     let got = relative_set(&root, &included_paths(&files, &filter, &root));
@@ -384,7 +384,7 @@ fn scan_excludes_by_captured_date_even_without_date_in_filename() {
     let filter = IgnoreFilter::from_rules_with_captured_dates(&rules, captured_dates);
 
     let scanner = ImageScanner::new();
-    let files = scanner
+    let (files, _errors) = scanner
         .scan_directory_with_progress(&root, &filter, |_, _| {})
         .expect("scan");
     let got = relative_set(&root, &included_paths(&files, &filter, &root));
@@ -414,7 +414,7 @@ fn incremental_scan_treats_newly_pruned_directory_as_unknown_not_deleted() {
     let no_prune_filter = IgnoreFilter::from_patterns(&[]);
 
     // 1回目: 除外ルールが無い状態でスキャンし、@eaDir/thumb.jpg も普通に追跡される。
-    let first = scanner
+    let (first, _errors) = scanner
         .scan_directory_with_progress(&root, &no_prune_filter, |_, _| {})
         .expect("first scan");
     let previous: Vec<(String, i64, i64)> = first
@@ -484,7 +484,7 @@ fn scan_skips_pruned_directory_regardless_of_its_size() {
     let filter = IgnoreFilter::from_rules(&default_ignore_rules());
 
     let start = std::time::Instant::now();
-    let files = scanner
+    let (files, _errors) = scanner
         .scan_directory_with_progress(&root, &filter, |_, _| {})
         .expect("scan");
     let elapsed = start.elapsed();
@@ -530,7 +530,7 @@ fn incremental_scan_treats_actually_deleted_file_level_excluded_file_as_deleted_
     let no_prune_filter = IgnoreFilter::from_patterns(&[]);
 
     // 1回目: 除外ルールが無い状態でスキャンし、両方とも追跡される。
-    let first = scanner
+    let (first, _errors) = scanner
         .scan_directory_with_progress(&root, &no_prune_filter, |_, _| {})
         .expect("first scan");
     let previous: Vec<(String, i64, i64)> = first

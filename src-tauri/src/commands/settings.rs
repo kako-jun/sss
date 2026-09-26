@@ -4,10 +4,14 @@ use crate::commands::types::AppState;
 use tauri::{AppHandle, Manager, State};
 
 /// 設定を保存
+///
+/// #63: 以前は同期コマンドだったため、DBロック待ちの間メインスレッドをブロックし
+/// うる作りになっていた。他の全DBコマンド（`get_last_directory_path` 等）と揃えて
+/// 非同期にする。
 #[tauri::command]
-pub fn save_setting(
+pub async fn save_setting(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     key: String,
     value: String,
 ) -> Result<(), String> {
@@ -47,9 +51,12 @@ pub fn save_setting(
     Ok(())
 }
 
-/// 設定を取得
+/// 設定を取得（#63: 非同期化。上の `save_setting` docコメント参照）
 #[tauri::command]
-pub fn get_setting(state: State<AppState>, key: String) -> Result<Option<String>, String> {
+pub async fn get_setting(
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<Option<String>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.get_setting(&key)
         .map_err(|e| format!("Failed to get setting: {e}"))

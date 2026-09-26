@@ -18,6 +18,12 @@ use tauri::{Emitter, Manager, State};
 /// （#61: 毎スキャン走ってしまい `.sssignore.bak` を上書きし続けるバグの修正）。
 const SSSIGNORE_MIGRATED_KEY: &str = "sssignore_migrated";
 
+/// Stage3（`apply_file_metadata_changes`によるDB反映）のロック保持時間がこれを
+/// 超えたら`eprintln!`で記録する閾値（ミリ秒）。#63 PR#77レビュー nit: マジックナンバー
+/// を定数化。10万件規模での性能計測時に異常の疑いがある水準として選んだ値で、
+/// 閾値以下は毎回のログでノイズになるので出さない。
+const STAGE3_LOCK_WARNING_THRESHOLD_MS: u128 = 100;
+
 /// `scan_directory` の二重実行を防ぐRAIIガード（#61レビュー nit）。
 ///
 /// `AppState::scan_in_progress` を `compare_exchange` で `false → true` にできた
@@ -296,8 +302,14 @@ where
         migrate_sssignore_to_db(&db);
 
         // データベースから前回のファイルメタデータ（ディスク上の物理的な事実のみ。
-        // 撮影日は exif_cache に分離されているのでここには含まれない）を取得
-        let previous_files = db.get_all_file_metadata().unwrap_or_default();
+        // 撮影日は exif_cache に分離されているのでここには含まれない）を取得。
+        // #63: 今回スキャンする `directory` 配下のパスだけに限定する
+        // （`get_all_file_metadata`＝DB全件だと、別ディレクトリへ切り替えて
+        // スキャンした時点で元ディレクトリの file_metadata が「今回の生スキャンには
+        // 存在しない」と誤判定され確定削除されてしまう。関数docコメント参照）。
+        let previous_files = db
+            .get_file_metadata_under(&directory.to_string_lossy())
+            .unwrap_or_default();
 
         // 除外ルールを取得
         let rules: Vec<IgnoreRule> = db
@@ -357,23 +369,34 @@ where
     };
 
     // --- Stage 3: 短時間のDBロック（反映のみ） ---
+    // #63: ロック保持時間を計測する（10万件規模での性能計測・回帰検知のため）。
+    let stage3_lock_start = std::time::Instant::now();
     {
         let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
 
-        // 新規ファイルを追加（物理的な事実のみ。除外ルールとは無関係）
-        for file in &scan_result.files {
-            db.upsert_file_metadata(&file.path, file.modified_time, file.file_size)
-                .map_err(|e| format!("Database error: {e}"))?;
-        }
+        // file_metadata へ反映するのは新規/変更分のみ（#63）。生スキャンで見つかった
+        // 全ファイル（大半は「変更なし」）を毎回書き直すのは無駄なI/O・ロック保持時間の
+        // 伸長でしかない。確定削除分（`unknown_files` は含まない）と合わせて
+        // `apply_file_metadata_changes` で1トランザクションにまとめて反映する。
+        let changed_paths: std::collections::HashSet<&str> = scan_result
+            .new_files
+            .iter()
+            .chain(scan_result.modified_files.iter())
+            .map(|p| p.as_str())
+            .collect();
+        let upserts: Vec<(String, i64, i64)> = scan_result
+            .files
+            .iter()
+            .filter(|f| changed_paths.contains(f.path.as_str()))
+            .map(|f| (f.path.clone(), f.modified_time, f.file_size))
+            .collect();
 
-        // 削除されたファイルをマーク（exif_cache も含めて消す。「確定削除」なので
-        // #61レビュー nit: 復活の見込みが薄いキャッシュを溜め込まない。
         // ディレクトリ系除外で枝刈りされ存在不明なファイルは `unknown_files` に
-        // 分類済みでここには含まれず、file_metadata/exif_cacheとも保持される）
-        if !scan_result.deleted_files.is_empty() {
-            db.mark_deleted(&scan_result.deleted_files)
-                .map_err(|e| format!("Database error: {e}"))?;
-        }
+        // 分類済みでここには含まれず、file_metadata/exif_cacheとも保持される
+        // （#61レビュー nit: 復活の見込みが薄い確定削除のexif_cacheキャッシュだけ
+        // 合わせて消す）。
+        db.apply_file_metadata_changes(&upserts, &scan_result.deleted_files)
+            .map_err(|e| format!("Database error: {e}"))?;
 
         // スキャン履歴を記録（件数は後述のScanProgressとは別に、物理的な変化を記録する）
         let directory_path = directory.to_string_lossy().to_string();
@@ -395,9 +418,13 @@ where
                 .map_err(|e| format!("Database error: {e}"))?;
         }
     }; // ロック解放
+    let stage3_lock_ms = stage3_lock_start.elapsed().as_millis();
+    if stage3_lock_ms > STAGE3_LOCK_WARNING_THRESHOLD_MS {
+        eprintln!("[perform_scan] Stage 3 DBロック保持時間: {stage3_lock_ms}ms");
+    }
 
     // --- Stage 4: 短時間のplaylistロック（除外ルール読み直し・差分適用・復元・確定保存） ---
-    let included: Vec<String>;
+    let mut included: Vec<String>;
     {
         let mut playlist_lock = playlist_mutex.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -430,6 +457,34 @@ where
             .filter(|f| !ignore_filter.is_ignored(Path::new(&f.path), directory))
             .map(|f| f.path.clone())
             .collect();
+
+        // #63 PR#77レビュー M2(must): 今回のスキャンエラーが原因で「不明」になった
+        // ファイル（`scan_result.error_unknown_files`）は、除外ルールとは無関係な
+        // 一時的な読み取り失敗の可能性が高い。生スキャン結果（`scan_result.files`）に
+        // 現れないため上記の`included`には入らず、そのままだと下の差分計算で
+        // 「プレイリストから消えた」扱いになり、シャッフル位置・履歴を失ってしまう
+        // （ディレクトリ系除外による不明は意図した除外なので、これとは区別して
+        // プレイリストから外れて構わない）。`included`に加えることで、既にプレイリスト
+        // に居るものは`removed`に入らず、居ないものは（読めていないファイルなので）
+        // `added`にも実質影響しない状態を保つ。
+        //
+        // #63 PR#77レビュー2巡目 S-a: `error_unknown_files`は定義上`scan_result.files`
+        // （今回の生スキャンで見つかったファイル）には現れないパスの集合なので、
+        // `included`（`scan_result.files`が元）と重複することは構造的に無い。以前は
+        // それでも`Vec::contains`で毎回線形探索しており、`included`件数×
+        // `error_unknown_files`件数のO(N×E)をplaylistロック保持中に行っていた。
+        // HashSetでの判定に変え、全体をO(N+E)に抑える（フィルタなので、万一この前提が
+        // 崩れても壊れず単に重複を避けるだけ、という安全側の実装のままにする）。
+        let included_before_errors: std::collections::HashSet<&str> =
+            included.iter().map(|s| s.as_str()).collect();
+        let new_from_errors: Vec<String> = scan_result
+            .error_unknown_files
+            .iter()
+            .filter(|p| !included_before_errors.contains(p.as_str()))
+            .cloned()
+            .collect();
+        drop(included_before_errors);
+        included.extend(new_from_errors);
 
         // #62レビューS2: ディレクトリ比較は正規化キーで行う（canonicalize前後・末尾区切り
         // の有無で文字列表現が食い違っても同じディレクトリと判定できるように）。
@@ -538,6 +593,8 @@ where
         new_files: new_files_included,
         deleted_files: scan_result.deleted_count,
         duration_ms: scan_result.duration_ms,
+        error_count: scan_result.error_count,
+        error_examples: scan_result.error_examples,
     })
 }
 
