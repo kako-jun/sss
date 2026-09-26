@@ -1,5 +1,6 @@
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use std::collections::HashSet;
 
 /// プレイリスト管理
 #[derive(Debug, Clone)]
@@ -121,11 +122,17 @@ impl Playlist {
     }
 
     /// 画像リストを更新（新規画像追加、削除画像除外）
+    ///
+    /// #61レビュー M-B(must): `deleted_images` を `Vec` のまま `retain` の中で
+    /// `Vec::contains` していたため O(N×M)（N=プレイリスト全体、M=削除件数）になり、
+    /// 10万件規模・削除5万件で数秒かかる退行があった。`HashSet` に変換してから判定する
+    /// ことで `retain` 全体を O(N) に落とす。
     pub fn update_images(&mut self, new_images: Vec<String>, deleted_images: Vec<String>) {
         // 削除された画像を除外
         if !deleted_images.is_empty() {
+            let deleted_set: HashSet<&str> = deleted_images.iter().map(String::as_str).collect();
             self.shuffled_list
-                .retain(|path| !deleted_images.contains(path));
+                .retain(|path| !deleted_set.contains(path.as_str()));
         }
 
         // 新規画像を追加してシャッフル
@@ -269,5 +276,71 @@ mod tests {
         expected.remove("img1.jpg");
         expected.insert("img3.jpg".to_string());
         assert_eq!(playlist.current_paths(), expected);
+    }
+
+    /// #61レビュー M-B(must) 規模テスト: 10万件のプレイリストから5万件を削除する
+    /// `update_images` が実用的な時間で終わること。修正前の `Vec::contains` ベースの
+    /// `retain`（O(N×M)）ではリリースビルドでも約8.6秒かかっていた（レビュー実測）。
+    /// `HashSet` 化後は O(N) なので、CIでも安定して速い上限（2秒）を余裕を持って
+    /// 下回るはず。
+    #[test]
+    fn update_images_removes_50k_from_100k_quickly() {
+        const TOTAL: usize = 100_000;
+        const REMOVE: usize = 50_000;
+
+        let images: Vec<String> = (0..TOTAL).map(|i| format!("img{i}.jpg")).collect();
+        let mut playlist = Playlist::new(images);
+        assert_eq!(playlist.total_count(), TOTAL);
+
+        // 偶数番号を削除対象にする（全体に散らばらせ、実運用に近い条件にする）
+        let deleted: Vec<String> = (0..TOTAL)
+            .step_by(2)
+            .take(REMOVE)
+            .map(|i| format!("img{i}.jpg"))
+            .collect();
+
+        let start = std::time::Instant::now();
+        playlist.update_images(vec![], deleted);
+        let elapsed = start.elapsed();
+
+        assert_eq!(playlist.total_count(), TOTAL - REMOVE);
+        assert!(
+            elapsed.as_secs_f64() < 2.0,
+            "10万件から5万件削除に{:.3}秒かかった（O(N×M)への退行の疑い）",
+            elapsed.as_secs_f64()
+        );
+    }
+
+    /// #61レビュー M-B 計算量確認: `current_paths`（全件クローンしてHashSet化。
+    /// O(N)）と、新規追加のシャッフル＋extend（O(K)）も10万件規模で実用的な
+    /// 時間に収まること。
+    #[test]
+    fn current_paths_and_add_scale_to_100k_quickly() {
+        const TOTAL: usize = 100_000;
+        let images: Vec<String> = (0..TOTAL).map(|i| format!("img{i}.jpg")).collect();
+        let mut playlist = Playlist::new(images);
+
+        let start = std::time::Instant::now();
+        let paths = playlist.current_paths();
+        let current_paths_elapsed = start.elapsed();
+        assert_eq!(paths.len(), TOTAL);
+        assert!(
+            current_paths_elapsed.as_secs_f64() < 1.0,
+            "current_paths（10万件）に{:.3}秒かかった",
+            current_paths_elapsed.as_secs_f64()
+        );
+
+        let added: Vec<String> = (TOTAL..TOTAL + 10_000)
+            .map(|i| format!("img{i}.jpg"))
+            .collect();
+        let start = std::time::Instant::now();
+        playlist.update_images(added, vec![]);
+        let add_elapsed = start.elapsed();
+        assert_eq!(playlist.total_count(), TOTAL + 10_000);
+        assert!(
+            add_elapsed.as_secs_f64() < 1.0,
+            "1万件追加に{:.3}秒かかった",
+            add_elapsed.as_secs_f64()
+        );
     }
 }

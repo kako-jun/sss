@@ -21,10 +21,10 @@ export function ExcludeRulesSection() {
       });
   }, []);
 
-  const handleRemove = async (pattern: string) => {
+  const handleRemove = async (pattern: string, ruleType: IgnoreRule['ruleType']) => {
     try {
-      await removeIgnorePattern(pattern);
-      setRules((prev) => prev.filter((r) => r.pattern !== pattern));
+      await removeIgnorePattern(pattern, ruleType);
+      setRules((prev) => prev.filter((r) => !(r.pattern === pattern && r.ruleType === ruleType)));
     } catch (err) {
       console.error('Failed to remove ignore pattern:', err);
     }
@@ -32,7 +32,9 @@ export function ExcludeRulesSection() {
 
   const handleAdd = async () => {
     const trimmed = newPattern.trim();
-    if (!trimmed || rules.some((r) => r.pattern === trimmed)) return;
+    // 手動追加は常に glob として扱うため、同じ pattern+ruleType=glob の重複だけ弾く
+    // （撮影日ルールと文字列が同じでも共存できる。#61レビュー nit の複合キー化に対応）
+    if (!trimmed || rules.some((r) => r.pattern === trimmed && r.ruleType === 'glob')) return;
 
     try {
       // 手動追加は常に通常globルールとして扱う（撮影日ルールはオーバーレイの
@@ -70,7 +72,7 @@ export function ExcludeRulesSection() {
         <div className="space-y-1">
           {rules.map(({ pattern, ruleType }) => (
             <div
-              key={pattern}
+              key={`${pattern}-${ruleType}`}
               className="flex items-center justify-between gap-2 px-3 py-1.5 bg-black/40 rounded border border-white/8 group"
             >
               <div className="flex items-center gap-2 min-w-0">
@@ -82,7 +84,7 @@ export function ExcludeRulesSection() {
                 <span className="text-white/55 text-sm truncate">{pattern}</span>
               </div>
               <button
-                onClick={() => handleRemove(pattern)}
+                onClick={() => handleRemove(pattern, ruleType)}
                 className="p-1 hover:bg-white/8 rounded transition-colors shrink-0 opacity-0 group-hover:opacity-100"
                 title="解除"
               >

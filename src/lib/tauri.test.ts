@@ -142,10 +142,13 @@ describe('tauri command wrappers', () => {
     expect(invoke).toHaveBeenCalledWith('get_ignore_patterns');
   });
 
-  it('removeIgnorePattern invokes remove_ignore_pattern with pattern', async () => {
+  it('removeIgnorePattern invokes remove_ignore_pattern with pattern and ruleType (#61複合キー化)', async () => {
     invoke.mockResolvedValue(undefined);
-    await tauri.removeIgnorePattern('*.tmp');
-    expect(invoke).toHaveBeenCalledWith('remove_ignore_pattern', { pattern: '*.tmp' });
+    await tauri.removeIgnorePattern('*.tmp', 'glob');
+    expect(invoke).toHaveBeenCalledWith('remove_ignore_pattern', {
+      pattern: '*.tmp',
+      ruleType: 'glob',
+    });
   });
 
   it('addIgnorePattern invokes add_ignore_pattern with pattern', async () => {

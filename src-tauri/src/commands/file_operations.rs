@@ -198,13 +198,18 @@ pub async fn get_ignore_patterns(state: State<'_, AppState>) -> Result<Vec<Ignor
 }
 
 /// 除外ルールを削除
+///
+/// #61レビュー nit: `ignore_rules` の主キーが `(pattern, rule_type)` の複合キーに
+/// なったため、`pattern` だけでは同じ文字列のglob/dateルールのうちどちらを消すか
+/// 一意に決まらない。フロントエンドが表示している `ruleType` をそのまま渡してもらう。
 #[tauri::command]
 pub async fn remove_ignore_pattern(
     pattern: String,
+    rule_type: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.remove_ignore_rule(&pattern)
+    db.remove_ignore_rule(&pattern, RuleType::parse(&rule_type))
         .map_err(|e| format!("Failed to remove ignore rule: {e}"))
 }
 
@@ -292,10 +297,27 @@ pub async fn exclude_image(
         // 撮影日除外: exif_cache で既に「その日付」と分かっている画像は、再スキャンを
         // 待たずに即座にプレイリストから外す（#61レビュー M2）。exif_cache に無い
         // （まだ一度も表示していない）画像は次回スキャンでEXIFを読み直して判定される。
-        let matched = db
+        //
+        // #61レビュー nit: キャッシュ時の `file_mtime` と現在のファイルの実際のmtimeが
+        // 一致するものだけを対象にする。ファイルがキャッシュ後に変更（別の画像で
+        // 上書き等）されていた場合、古いキャッシュのまま即時除去すると、既に別内容に
+        // なった画像を誤って除外してしまうため（次回スキャンでEXIFが読み直され、
+        // そこで正しく再判定される分には支障ない）。
+        let candidates = db
             .get_paths_with_captured_date(&pattern)
             .unwrap_or_default();
         drop(db);
+        let matched: Vec<String> = candidates
+            .into_iter()
+            .filter(|(path, cached_mtime)| {
+                std::fs::metadata(path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .is_some_and(|d| d.as_secs() as i64 == *cached_mtime)
+            })
+            .map(|(path, _)| path)
+            .collect();
         if !matched.is_empty() {
             let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(ref mut playlist) = *playlist_lock {
@@ -341,7 +363,18 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
     // 絶対パスのまま判定すると、ドットディレクトリ配下をスキャンしたライブラリの
     // 履歴がドットフォルダ包括ルールで全消えしていた）。対応するルートが見つからない
     // 場合はフルパスをそのまま相対パス扱いする従来の判定にフォールバックする。
+    //
+    // 既知の制約（#61レビュー nit）: `scan_history` は100件超を刈り込む
+    // （`trim_scan_history`）ため、古いディレクトリのエントリが失われるとここでの
+    // ルート解決もできなくなり、そのディレクトリ由来の履歴だけ絶対パスへフォール
+    // バックする。現在アクティブなディレクトリ（`last_directory_path`）は刈り込みの
+    // 影響を受けないよう候補に必ず含めることで、少なくとも直近スキャン分は保護する。
     let mut scan_roots = db.get_distinct_scan_directories().unwrap_or_default();
+    if let Ok(Some(last_directory)) = db.get_setting("last_directory_path") {
+        if !scan_roots.contains(&last_directory) {
+            scan_roots.push(last_directory);
+        }
+    }
     scan_roots.sort_by_key(|r| std::cmp::Reverse(r.len()));
 
     // 最近表示した画像を多めに取得（除外フィルタ後に最大100件を返す。

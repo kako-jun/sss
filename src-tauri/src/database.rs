@@ -34,7 +34,7 @@ fn ignore_rules_has_composite_pk(conn: &Connection) -> Result<bool> {
 type FileMetadataRow = (String, i64, i64);
 
 /// `exif_cache` の1行（path, captured_date, file_mtime）
-type ExifCacheRow = (String, Option<String>, i64);
+pub(crate) type ExifCacheRow = (String, Option<String>, i64);
 
 pub struct Database {
     conn: Connection,
@@ -362,14 +362,19 @@ impl Database {
         Ok(())
     }
 
-    /// 指定の撮影日（`YYYY-MM-DD`）とキャッシュ済み撮影日が一致するパス一覧を返す。
-    /// 撮影日ルール追加時（`exclude_image` の `date`）に、既にわかっている画像を
-    /// 即座にプレイリストから外すために使う（#61）。
-    pub fn get_paths_with_captured_date(&self, date: &str) -> Result<Vec<String>> {
+    /// 指定の撮影日（`YYYY-MM-DD`）とキャッシュ済み撮影日が一致する `(path, file_mtime)`
+    /// 一覧を返す。撮影日ルール追加時（`exclude_image` の `date`）に、既にわかっている
+    /// 画像を即座にプレイリストから外すために使う（#61）。
+    ///
+    /// `file_mtime` も返すのは、呼び出し元が現在のファイルの実際のmtimeと突き合わせ、
+    /// キャッシュ後にファイルが変更（別の画像で上書き等）されていないことを確認して
+    /// から即時除去に使うため（#61レビュー nit: キャッシュが古いまま即時除去すると、
+    /// 既に別内容になったファイルを誤って除外するおそれがある）。
+    pub fn get_paths_with_captured_date(&self, date: &str) -> Result<Vec<(String, i64)>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT path FROM exif_cache WHERE captured_date = ?1")?;
-        let rows = stmt.query_map([date], |row| row.get::<_, String>(0))?;
+            .prepare("SELECT path, file_mtime FROM exif_cache WHERE captured_date = ?1")?;
+        let rows = stmt.query_map([date], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
         let mut result = Vec::new();
         for row in rows {
@@ -378,14 +383,19 @@ impl Database {
         Ok(result)
     }
 
-    /// 削除されたファイルをDBから物理削除する。
-    /// `exif_cache` は対象外（#61 レビュー M2: ファイルが一時的に消えても撮影日
-    /// キャッシュは失わない。再スキャン時にファイルが復活すれば mtime 一致で再利用される）。
+    /// 確定削除（生スキャンで見つからず、除外ルールにも一致しない＝ディレクトリ系除外で
+    /// 枝刈りされたのでもない）ファイルをDBから物理削除する。`exif_cache` も含めて消す
+    /// （#61レビュー nit: 復活の見込みが薄い確定削除のキャッシュを溜め込まない）。
+    ///
+    /// ディレクトリ系除外で枝刈りされ存在確認できていないだけの「不明」ファイル
+    /// （`ScanResult::unknown_files`）はここに渡さないこと。それらは file_metadata/
+    /// image_stats/exif_cache のいずれも保持し続ける（#61レビュー S-a）。
     pub fn mark_deleted(&self, paths: &[String]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         for path in paths {
             tx.execute("DELETE FROM file_metadata WHERE path = ?1", [path])?;
             tx.execute("DELETE FROM image_stats WHERE path = ?1", [path])?;
+            tx.execute("DELETE FROM exif_cache WHERE path = ?1", [path])?;
         }
         tx.commit()?;
         Ok(())
@@ -517,10 +527,15 @@ impl Database {
         Ok(())
     }
 
-    /// 除外ルールを削除
-    pub fn remove_ignore_rule(&self, pattern: &str) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM ignore_rules WHERE pattern = ?1", [pattern])?;
+    /// 除外ルールを削除（`(pattern, rule_type)` の複合キーで指定する）。
+    /// #61レビュー nit: 主キーが複合キー化されたため、`pattern` だけでは
+    /// 同じ文字列のglob/dateルールが両方消えてしまう（または狙った方が消えない）
+    /// おそれがある。必ず `rule_type` も指定して一意に絞り込む。
+    pub fn remove_ignore_rule(&self, pattern: &str, rule_type: RuleType) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM ignore_rules WHERE pattern = ?1 AND rule_type = ?2",
+            params![pattern, rule_type.as_str()],
+        )?;
         Ok(())
     }
 
@@ -755,11 +770,13 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// #61 レビュー M2: `mark_deleted` は `exif_cache` を消さない（ファイルが一時的に
-    /// 消えても撮影日キャッシュは保持し、復活時に再利用できるようにする）。
+    /// #61 レビュー nit: `mark_deleted`（確定削除）は `exif_cache` の該当行も消す
+    /// （復活の見込みが薄い確定削除のキャッシュを溜め込まない）。ディレクトリ系除外で
+    /// 枝刈りされ存在確認できていないだけの「不明」ファイルは `mark_deleted` に
+    /// 渡らないため、この削除の対象にはならない（#61レビュー S-a、`scanner.rs` 側で保証）。
     #[test]
-    fn mark_deleted_does_not_remove_exif_cache() {
-        let path = temp_db_path("mark_deleted_keeps_exif_cache");
+    fn mark_deleted_also_removes_exif_cache_for_confirmed_deletions() {
+        let path = temp_db_path("mark_deleted_removes_exif_cache");
         let db = Database::new(path.clone()).unwrap();
 
         db.upsert_file_metadata("/photos/a.jpg", 100, 200).unwrap();
@@ -776,8 +793,8 @@ mod tests {
 
         let cache = db.get_all_exif_cache().unwrap();
         assert!(
-            cache.iter().any(|(p, ..)| p == "/photos/a.jpg"),
-            "exif_cacheはmark_deletedの対象外のはず"
+            cache.iter().all(|(p, ..)| p != "/photos/a.jpg"),
+            "確定削除ではexif_cacheも消えるはず"
         );
 
         let _ = std::fs::remove_file(&path);
@@ -800,6 +817,29 @@ mod tests {
             matching.len(),
             2,
             "同じpattern文字列でもrule_typeが違えば両方残るはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #61レビュー nit: `remove_ignore_rule` は `(pattern, rule_type)` の複合キーで
+    /// 削除する。同じpattern文字列でrule_typeが違うルールは巻き添えで消えない。
+    #[test]
+    fn remove_ignore_rule_only_deletes_matching_rule_type() {
+        let path = temp_db_path("remove_rule_composite_key");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.add_ignore_rule("2020-01-01", RuleType::Glob).unwrap();
+        db.add_ignore_rule("2020-01-01", RuleType::Date).unwrap();
+
+        db.remove_ignore_rule("2020-01-01", RuleType::Date).unwrap();
+
+        let rules = db.get_ignore_rules().unwrap();
+        let matching: Vec<_> = rules.iter().filter(|(p, _)| p == "2020-01-01").collect();
+        assert_eq!(
+            matching,
+            vec![&("2020-01-01".to_string(), RuleType::Glob)],
+            "date側だけ削除され、glob側は残るはず"
         );
 
         let _ = std::fs::remove_file(&path);
@@ -832,7 +872,10 @@ mod tests {
 
         let mut matched = db.get_paths_with_captured_date("2023-05-15").unwrap();
         matched.sort();
-        assert_eq!(matched, vec!["/a.jpg".to_string(), "/c.jpg".to_string()]);
+        assert_eq!(
+            matched,
+            vec![("/a.jpg".to_string(), 1), ("/c.jpg".to_string(), 3)]
+        );
 
         let _ = std::fs::remove_file(&path);
     }

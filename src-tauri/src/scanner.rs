@@ -1,3 +1,4 @@
+use crate::ignore::IgnoreFilter;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
@@ -26,22 +27,29 @@ pub struct ScanResult {
     pub files: Vec<FileMetadata>,
     pub new_files: Vec<String>,
     pub deleted_files: Vec<String>,
+    /// 前回は追跡していたが今回のスキャン範囲外（ディレクトリ系除外で枝刈りされた
+    /// 配下）だったため、存在するかどうか不明なパス。「削除」とは区別し、
+    /// `file_metadata`/`image_stats` を消す対象にしない（#61レビュー S-a）。
+    pub unknown_files: Vec<String>,
     pub total_count: usize,
     pub new_count: usize,
     pub deleted_count: usize,
+    pub unknown_count: usize,
     pub duration_ms: u128,
 }
 
 /// 画像スキャナー。
 ///
-/// #61 レビュー M2/S1: 除外ルール（ignore）は一切適用しない。ここで集める
-/// `FileMetadata` はディスク上の**物理的な事実**（存在する全メディアファイル）を表し、
-/// `file_metadata` テーブルへの反映・新規/削除の検出はこの物理的事実だけを基準に行う。
-/// 除外ルールの適用は、この結果を受け取った呼び出し元（`commands/scan.rs`）が
-/// 「プレイリストに含めるかどうか」を決める別の段階として行う。これにより、既存の
-/// ファイルに新しい除外ルールが付いても「削除」とは区別され、`image_stats`/
-/// `file_metadata` の履歴が消えない（除外前は普通に含まれていたファイルが、
-/// ルール追加のタイミングだけで物理削除と誤判定されるバグを構造的に防ぐ）。
+/// #61 レビュー M2/S1: 撮影日ルールは一切適用しない（EXIFが必要でファイル単位でしか
+/// 判定できないため、生スキャン後の別段階で行う）。ただし #61 レビュー S-a により、
+/// ディレクトリ指定の除外ルール（末尾 `/` 等）は `WalkDir::filter_entry` で枝ごと
+/// 刈り、配下のファイルは `file_metadata` 登録・EXIF読み対象から外す（`@eaDir`・
+/// ドットフォルダ配下が10万件規模で全部stat/EXIF読みされることを防ぐ）。刈られた
+/// 配下のうち前回追跡していたファイルは「削除」ではなく「不明」として扱う
+/// （`unknown_files`）。ファイル単位のglob/日付ルールの適用は、この結果を受け取った
+/// 呼び出し元（`commands/scan.rs`）が「プレイリストに含めるかどうか」を決める
+/// 別の段階として行う。これにより、既存のファイルに新しい除外ルールが付いても
+/// 「削除」とは区別され、`image_stats`/`file_metadata` の履歴が消えない。
 pub struct ImageScanner;
 
 impl Default for ImageScanner {
@@ -56,10 +64,16 @@ impl ImageScanner {
         ImageScanner
     }
 
-    /// ディレクトリをスキャン（進捗コールバック付き）
+    /// ディレクトリをスキャン（進捗コールバック付き）。
+    ///
+    /// `walk_filter` はディレクトリ系除外ルール（末尾 `/` 等、`should_prune_dir`）の
+    /// 判定にのみ使う。日付ルールは無視される（`should_prune_dir` 自体が日付ルールを
+    /// 見ない）。ファイル単位のglob/日付ルールはここでは適用しない
+    /// （呼び出し元が別段階で行う。#61レビュー S-a）。
     pub fn scan_directory_with_progress<F>(
         &self,
         directory: &Path,
+        walk_filter: &IgnoreFilter,
         mut progress_callback: F,
     ) -> Result<Vec<FileMetadata>, String>
     where
@@ -74,10 +88,23 @@ impl ImageScanner {
             return Err(format!("Path is not a directory: {directory:?}"));
         }
 
-        // WalkDirでファイルエントリを収集
+        // WalkDirでファイルエントリを収集。filter_entry でディレクトリ系除外に
+        // 一致する枝を刈り、配下へ一切降りない（#61レビュー S-a）。
+        // depth==0（スキャンルート自身）は絶対に刈らない（ルート名がたまたま
+        // 除外パターンに一致しても、スキャン全体が空になる事故を防ぐ）。
         let entries: Vec<_> = WalkDir::new(directory)
             .follow_links(false)
             .into_iter()
+            .filter_entry(|e| {
+                if e.depth() == 0 {
+                    return true;
+                }
+                if e.file_type().is_dir() {
+                    !walk_filter.should_prune_dir(e.path(), directory)
+                } else {
+                    true
+                }
+            })
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
             .filter(|e| self.is_media_file(e.path()))
@@ -127,11 +154,18 @@ impl ImageScanner {
         Ok(files)
     }
 
-    /// ディレクトリをスキャン（差分検出あり、進捗コールバック付き）
+    /// ディレクトリをスキャン（差分検出あり、進捗コールバック付き）。
+    ///
+    /// 前回追跡していたが今回のスキャン結果に無いパスは、`walk_filter`
+    /// （日付ルールを除く）で除外判定し、一致すれば「不明」（ディレクトリ系除外で
+    /// 枝刈りされ存在確認できていない）として `deleted_files` から除外する
+    /// （#61レビュー S-a: 除外は削除ではないという原則を、枝刈りされて生スキャンにすら
+    /// 現れないケースにも一貫して適用する）。
     pub fn scan_directory_incremental_with_progress<F>(
         &self,
         directory: &Path,
         previous_files: Vec<(String, i64, i64)>,
+        walk_filter: &IgnoreFilter,
         progress_callback: F,
     ) -> Result<ScanResult, String>
     where
@@ -146,7 +180,8 @@ impl ImageScanner {
             .collect();
 
         // 現在のファイルをスキャン（進捗コールバック付き）
-        let current_files = self.scan_directory_with_progress(directory, progress_callback)?;
+        let current_files =
+            self.scan_directory_with_progress(directory, walk_filter, progress_callback)?;
 
         let mut new_files = Vec::new();
 
@@ -168,8 +203,17 @@ impl ImageScanner {
             }
         }
 
-        // 削除されたファイルを検出（previous_mapに残っているもの）
-        let deleted_files: Vec<String> = previous_map.keys().cloned().collect();
+        // previous_map に残っているもの（今回の生スキャンで見つからなかったパス）を
+        // 「確定削除」と「不明（ディレクトリ系除外で枝刈りされ未確認）」に分ける。
+        let mut deleted_files = Vec::new();
+        let mut unknown_files = Vec::new();
+        for path in previous_map.keys() {
+            if walk_filter.is_ignored(Path::new(path), directory) {
+                unknown_files.push(path.clone());
+            } else {
+                deleted_files.push(path.clone());
+            }
+        }
 
         let duration_ms = start_time.elapsed().as_millis();
 
@@ -177,9 +221,11 @@ impl ImageScanner {
             total_count: current_files.len(),
             new_count: new_files.len(),
             deleted_count: deleted_files.len(),
+            unknown_count: unknown_files.len(),
             files: current_files,
             new_files,
             deleted_files,
+            unknown_files,
             duration_ms,
         })
     }

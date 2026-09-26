@@ -122,9 +122,15 @@ export async function getIgnorePatterns(): Promise<IgnoreRule[]> {
 
 /**
  * 除外ルールを削除
+ *
+ * #61レビュー nit: ignore_rulesの主キーが (pattern, ruleType) の複合キーになったため、
+ * どちらのルールを消すか一意に決めるため ruleType も渡す。
  */
-export async function removeIgnorePattern(pattern: string): Promise<void> {
-  await invoke('remove_ignore_pattern', { pattern });
+export async function removeIgnorePattern(
+  pattern: string,
+  ruleType: 'glob' | 'date',
+): Promise<void> {
+  await invoke('remove_ignore_pattern', { pattern, ruleType });
 }
 
 /**

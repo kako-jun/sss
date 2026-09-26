@@ -127,4 +127,35 @@ describe('ExcludeRulesSection captured-date badge (#61)', () => {
     fireEvent.change(input, { target: { value: 'a{b.jpg2' } });
     expect(screen.queryByText('Invalid pattern: unclosed alternate group')).toBeNull();
   });
+
+  // #61レビュー nit: ignore_rulesの主キーが (pattern, ruleType) の複合キーになったため、
+  // 解除ボタンは pattern だけでなく ruleType も渡す。同じpattern文字列でrule_typeが
+  // 違う行が2つあっても、片方だけ消せる（key衝突で両方消えたり、両方に手が届かない
+  // という事故を防ぐ）。
+  it('removes only the row matching both pattern and ruleType when duplicated pattern strings exist', async () => {
+    const rules: IgnoreRule[] = [
+      { pattern: '2020-01-01', ruleType: 'glob' },
+      { pattern: '2020-01-01', ruleType: 'date' },
+    ];
+    getIgnorePatterns.mockResolvedValue(rules);
+    removeIgnorePattern.mockResolvedValue(undefined);
+
+    render(<ExcludeRulesSection />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('2020-01-01')).toHaveLength(2);
+    });
+
+    // 撮影日バッジが付いている方（date側）の解除ボタンを押す
+    const dateRow = screen.getByText('撮影日').closest('div')!.parentElement!;
+    fireEvent.click(dateRow.querySelector('button')!);
+
+    expect(removeIgnorePattern).toHaveBeenCalledWith('2020-01-01', 'date');
+
+    await waitFor(() => {
+      expect(screen.getAllByText('2020-01-01')).toHaveLength(1);
+    });
+    // glob側は残っている（バッジなし）
+    expect(screen.queryByText('撮影日')).toBeNull();
+  });
 });

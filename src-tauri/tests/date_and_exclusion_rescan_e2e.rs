@@ -11,6 +11,7 @@
 //!    除外され続けること（一度外れたファイルが再度紛れ込まない）。
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use sss_lib::commands::scan::perform_scan;
 use sss_lib::database::Database;
@@ -124,10 +125,12 @@ fn first_scan_excludes_never_displayed_image_by_reading_exif_directly() {
     db.add_ignore_rule("2023-05-15", RuleType::Date)
         .expect("add date rule");
 
-    let mut playlist_slot: Option<Playlist> = None;
-    perform_scan(&db, &mut playlist_slot, None, &photos_dir, |_, _| {})
+    let db_mutex = Mutex::new(db);
+    let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
+    perform_scan(&db_mutex, &playlist_mutex, None, &photos_dir, |_, _| {})
         .expect("perform_scan は成功するはず");
 
+    let playlist_slot = playlist_mutex.into_inner().unwrap();
     let playlist = playlist_slot.expect("プレイリストが初期化されているはず");
     let paths = playlist.current_paths();
 
@@ -165,16 +168,18 @@ fn excluded_file_survives_in_file_metadata_and_stays_excluded_across_rescans() {
     write_plain_jpeg(&photos_dir.join("a.jpg"));
     write_plain_jpeg(&photos_dir.join("b.jpg"));
 
-    let db = Database::new(dir.join("sss.db")).expect("db init");
+    let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
+    let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
     let b_path = photos_dir.join("b.jpg").to_string_lossy().to_string();
     let a_path = photos_dir.join("a.jpg").to_string_lossy().to_string();
 
     // 1回目のスキャン: 除外ルールは無いので両方プレイリストに含まれる
-    let mut playlist_slot: Option<Playlist> = None;
-    perform_scan(&db, &mut playlist_slot, None, &photos_dir, |_, _| {})
+    perform_scan(&db_mutex, &playlist_mutex, None, &photos_dir, |_, _| {})
         .expect("1回目のscanは成功するはず");
     assert!(
-        playlist_slot
+        playlist_mutex
+            .lock()
+            .unwrap()
             .as_ref()
             .unwrap()
             .current_paths()
@@ -183,15 +188,18 @@ fn excluded_file_survives_in_file_metadata_and_stays_excluded_across_rescans() {
     );
 
     // b.jpg を除外するルールを追加（表示履歴があった体で display_count を仕込む）
-    db.increment_display_count(&b_path).unwrap();
-    db.add_ignore_rule(&globset::escape(&b_path), RuleType::Glob)
-        .unwrap();
+    {
+        let db = db_mutex.lock().unwrap();
+        db.increment_display_count(&b_path).unwrap();
+        db.add_ignore_rule(&globset::escape(&b_path), RuleType::Glob)
+            .unwrap();
+    }
 
     // 2回目のスキャン（同じディレクトリ）: b.jpgはプレイリストから外れるが、
     // file_metadata/image_statsは残る
     perform_scan(
-        &db,
-        &mut playlist_slot,
+        &db_mutex,
+        &playlist_mutex,
         Some(photos_dir.as_path()),
         &photos_dir,
         |_, _| {},
@@ -199,35 +207,41 @@ fn excluded_file_survives_in_file_metadata_and_stays_excluded_across_rescans() {
     .expect("2回目のscanは成功するはず");
 
     assert!(
-        !playlist_slot
+        !playlist_mutex
+            .lock()
+            .unwrap()
             .as_ref()
             .unwrap()
             .current_paths()
             .contains(&b_path),
         "除外ルール追加後、b.jpgはプレイリストから外れるはず"
     );
-    let files = db.get_all_file_metadata().unwrap();
-    assert!(
-        files.iter().any(|(p, ..)| p == &b_path),
-        "除外は「削除」ではないのでfile_metadataからb.jpgが消えてはいけない"
-    );
-    let (display_count, _) = db.get_image_stats(&b_path).unwrap();
-    assert_eq!(
-        display_count, 1,
-        "除外は「削除」ではないのでimage_statsの表示回数が失われてはいけない"
-    );
+    {
+        let db = db_mutex.lock().unwrap();
+        let files = db.get_all_file_metadata().unwrap();
+        assert!(
+            files.iter().any(|(p, ..)| p == &b_path),
+            "除外は「削除」ではないのでfile_metadataからb.jpgが消えてはいけない"
+        );
+        let (display_count, _) = db.get_image_stats(&b_path).unwrap();
+        assert_eq!(
+            display_count, 1,
+            "除外は「削除」ではないのでimage_statsの表示回数が失われてはいけない"
+        );
+    }
 
     // 3回目のスキャン（変化なし）: それでも除外され続ける（再度紛れ込まない）
     perform_scan(
-        &db,
-        &mut playlist_slot,
+        &db_mutex,
+        &playlist_mutex,
         Some(photos_dir.as_path()),
         &photos_dir,
         |_, _| {},
     )
     .expect("3回目のscanは成功するはず");
 
-    let paths = playlist_slot.as_ref().unwrap().current_paths();
+    let playlist_lock = playlist_mutex.lock().unwrap();
+    let paths = playlist_lock.as_ref().unwrap().current_paths();
     assert!(
         !paths.contains(&b_path),
         "3回目のスキャンでもb.jpgは除外されたままのはず"
@@ -236,6 +250,7 @@ fn excluded_file_survives_in_file_metadata_and_stays_excluded_across_rescans() {
         paths.contains(&a_path),
         "除外対象でないa.jpgは引き続きプレイリストに残るはず"
     );
+    drop(playlist_lock);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

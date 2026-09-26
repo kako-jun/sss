@@ -123,7 +123,7 @@ fn scan_collects_exactly_media_minus_ignored() {
     let (calls_cb, last_total_cb) = (Arc::clone(&calls), Arc::clone(&last_total));
 
     let files = scanner
-        .scan_directory_with_progress(&root, move |_done, total| {
+        .scan_directory_with_progress(&root, &filter, move |_done, total| {
             calls_cb.fetch_add(1, Ordering::Relaxed);
             last_total_cb.store(total, Ordering::Relaxed);
         })
@@ -171,7 +171,7 @@ fn playlist_preserves_membership_and_updates() {
     let scanner = ImageScanner::new();
     let filter = IgnoreFilter::from_patterns(&ignore_patterns());
     let files = scanner
-        .scan_directory_with_progress(&root, |_, _| {})
+        .scan_directory_with_progress(&root, &filter, |_, _| {})
         .expect("scan");
     let paths: Vec<String> = included_paths(&files, &filter, &root);
 
@@ -208,11 +208,13 @@ fn incremental_scan_detects_added_and_deleted() {
     build_fixture(&root);
 
     // #61: 生スキャンなのでignoreとは無関係（このテストはscannerの差分検出だけを見る）。
+    // walk_filterは空（何も刈らない）にして、生の物理的な件数を検証できるようにする。
     let scanner = ImageScanner::new();
+    let no_prune_filter = IgnoreFilter::from_patterns(&[]);
 
     // 1回目: 前回スナップショットを作る。
     let first = scanner
-        .scan_directory_with_progress(&root, |_, _| {})
+        .scan_directory_with_progress(&root, &no_prune_filter, |_, _| {})
         .expect("first scan");
     let previous: Vec<(String, i64, i64)> = first
         .iter()
@@ -226,7 +228,7 @@ fn incremental_scan_detects_added_and_deleted() {
 
     // 2回目: 差分検出付きスキャン。
     let result = scanner
-        .scan_directory_incremental_with_progress(&root, previous, |_, _| {})
+        .scan_directory_incremental_with_progress(&root, previous, &no_prune_filter, |_, _| {})
         .expect("incremental scan");
 
     let added_abs = root.join("added.jpg").to_string_lossy().to_string();
@@ -295,10 +297,23 @@ fn scan_excludes_default_dotfolder_and_synology_thumbs_rules() {
     let scanner = ImageScanner::new();
     let filter = IgnoreFilter::from_rules(&default_ignore_rules());
     let files = scanner
-        .scan_directory_with_progress(&root, |_, _| {})
+        .scan_directory_with_progress(&root, &filter, |_, _| {})
         .expect("scan");
-    let got = relative_set(&root, &included_paths(&files, &filter, &root));
 
+    // #61レビュー S-a: ディレクトリ系除外はWalkDirのfilter_entryで枝刈りされるため、
+    // 生スキャンの結果自体（post-hocフィルタ前）に、既に@eaDir・.thumbnails・
+    // ドットフォルダ配下のファイルが一切現れない（stat/EXIF読み対象にすらならない）。
+    let raw_relative = relative_set(
+        &root,
+        &files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        raw_relative,
+        BTreeSet::from(["keep/normal.jpg".to_string()]),
+        "枝刈りにより生スキャンの時点で既に@eaDir等が一切現れないはず"
+    );
+
+    let got = relative_set(&root, &included_paths(&files, &filter, &root));
     assert_eq!(
         got,
         BTreeSet::from(["keep/normal.jpg".to_string()]),
@@ -325,7 +340,7 @@ fn scan_excludes_metachar_named_file_via_escaped_pattern() {
     let scanner = ImageScanner::new();
     let filter = IgnoreFilter::from_rules(&[rule]);
     let files = scanner
-        .scan_directory_with_progress(&root, |_, _| {})
+        .scan_directory_with_progress(&root, &filter, |_, _| {})
         .expect("scan");
     let got = relative_set(&root, &included_paths(&files, &filter, &root));
 
@@ -369,7 +384,7 @@ fn scan_excludes_by_captured_date_even_without_date_in_filename() {
 
     let scanner = ImageScanner::new();
     let files = scanner
-        .scan_directory_with_progress(&root, |_, _| {})
+        .scan_directory_with_progress(&root, &filter, |_, _| {})
         .expect("scan");
     let got = relative_set(&root, &included_paths(&files, &filter, &root));
 
@@ -377,6 +392,121 @@ fn scan_excludes_by_captured_date_even_without_date_in_filename() {
         got,
         BTreeSet::from(["IMG_0002.jpg".to_string(), "IMG_0003.jpg".to_string()]),
         "撮影日が一致するIMG_0001だけが除外され、ファイル名に日付が無くても正しく判定できるはず"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// #61 レビュー S-a: ディレクトリ系除外ルールが新たに追加され、前回は追跡していた
+/// ファイルがWalkDirのfilter_entryで枝刈りされて生スキャンに一切現れなくなった場合、
+/// `scanner.rs` はそれを「削除」ではなく「不明」（`unknown_files`）に分類する
+/// （`file_metadata`/`image_stats`を消す判断は呼び出し元に委ねない、scanner自身が
+/// 確定削除と不明を区別する）。
+#[test]
+fn incremental_scan_treats_newly_pruned_directory_as_unknown_not_deleted() {
+    let root = workspace("prune_unknown");
+
+    write_file(&root, "keep/normal.jpg", b"normal");
+    write_file(&root, "@eaDir/thumb.jpg", b"synology-thumb");
+
+    let scanner = ImageScanner::new();
+    let no_prune_filter = IgnoreFilter::from_patterns(&[]);
+
+    // 1回目: 除外ルールが無い状態でスキャンし、@eaDir/thumb.jpg も普通に追跡される。
+    let first = scanner
+        .scan_directory_with_progress(&root, &no_prune_filter, |_, _| {})
+        .expect("first scan");
+    let previous: Vec<(String, i64, i64)> = first
+        .iter()
+        .map(|f| (f.path.clone(), f.modified_time, f.file_size))
+        .collect();
+    assert_eq!(
+        previous.len(),
+        2,
+        "初回は@eaDir配下も含めて2件追跡されるはず"
+    );
+
+    // 2回目: @eaDir除外ルールを追加してスキャン（ファイル自体は削除されていない）。
+    let prune_filter = IgnoreFilter::from_rules(&[IgnoreRule::glob("**/@eaDir/")]);
+    let result = scanner
+        .scan_directory_incremental_with_progress(&root, previous, &prune_filter, |_, _| {})
+        .expect("incremental scan with new prune rule");
+
+    let eadir_path = root.join("@eaDir/thumb.jpg").to_string_lossy().to_string();
+
+    assert!(
+        !result.deleted_files.contains(&eadir_path),
+        "枝刈りされただけのファイルを確定削除扱いしてはいけない"
+    );
+    assert!(
+        result.unknown_files.contains(&eadir_path),
+        "枝刈りされ存在確認できないファイルはunknown_filesに分類されるはず"
+    );
+    assert_eq!(result.deleted_count, 0);
+    assert_eq!(result.unknown_count, 1);
+    // 生スキャン結果自体にも@eaDir配下は一切現れない（枝刈りの証拠）
+    assert!(files_do_not_contain(&result.files, &eadir_path));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+fn files_do_not_contain(files: &[sss_lib::scanner::FileMetadata], path: &str) -> bool {
+    files.iter().all(|f| f.path != path)
+}
+
+/// #61レビュー S-b 計測: `should_prune_dir` に一致するディレクトリは `WalkDir::filter_entry`
+/// でその枝ごと刈られ配下へ一切降りないため、枝刈りの所要時間は配下のファイル数に
+/// 依存しない（配下を stat/EXIF 判定する経路自体が存在しない）はず、という
+/// `scan_directory_with_progress` のコメント上の主張を実測で確認する。
+///
+/// 実運用は Synology の `@eaDir` 等が数万件規模になり得るが、CI/開発機の実行時間と
+/// ディスク消費を抑えるため、フィクスチャは数百〜千件規模に留める（枝刈りが効いて
+/// いれば配下の件数に関わらず一定時間で終わるはずなので、規模を落としても
+/// 「配下の件数に比例して遅くなる」退行の検出力は失われない）。
+#[test]
+fn scan_skips_pruned_directory_regardless_of_its_size() {
+    let root = workspace("prune_scale");
+
+    // 通常ファイルは少量。
+    const KEPT_COUNT: usize = 20;
+    for i in 0..KEPT_COUNT {
+        write_file(&root, &format!("keep/photo{i}.jpg"), b"normal");
+    }
+    // 除外対象ディレクトリ配下に数百〜千件規模のダミーファイルを敷く
+    // （枝刈りされれば中身は一切読まれないはず）。
+    const PRUNED_COUNT: usize = 1000;
+    for i in 0..PRUNED_COUNT {
+        write_file(&root, &format!("@eaDir/thumb{i}.jpg"), b"x");
+    }
+
+    let scanner = ImageScanner::new();
+    let filter = IgnoreFilter::from_rules(&default_ignore_rules());
+
+    let start = std::time::Instant::now();
+    let files = scanner
+        .scan_directory_with_progress(&root, &filter, |_, _| {})
+        .expect("scan");
+    let elapsed = start.elapsed();
+
+    // 枝刈りの証拠: 生スキャン結果自体に @eaDir 配下（1000件）が一切現れない。
+    let raw_relative = relative_set(
+        &root,
+        &files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        raw_relative.len(),
+        KEPT_COUNT,
+        "@eaDir配下({PRUNED_COUNT}件)が枝刈りされず生スキャン結果に数え上げられている"
+    );
+    assert!(raw_relative.iter().all(|p| p.starts_with("keep/")));
+
+    // 性能の証拠: 配下1000件を刈っても実用的な時間で終わる（レビュー実測: 数msオーダー）。
+    // ディレクトリ単位の枝刈りが壊れてファイル単位のstat/EXIF判定に退行すると、
+    // 配下の件数に比例して遅くなりこの上限を超えるはず。
+    assert!(
+        elapsed.as_secs_f64() < 2.0,
+        "@eaDir 配下{PRUNED_COUNT}件の枝刈りに{:.3}秒かかった（ディレクトリ単位の枝刈りが効いていない疑い）",
+        elapsed.as_secs_f64()
     );
 
     let _ = std::fs::remove_dir_all(&root);

@@ -313,6 +313,53 @@ impl IgnoreFilter {
         self.is_ignored(path, Path::new(""))
     }
 
+    /// このディレクトリを `WalkDir` の `filter_entry` で刈ってよいか（配下に一切
+    /// 降りない）を判定する。日付ルールは判定に使わない（EXIFはファイル単位でしか
+    /// 読めず、ディレクトリの時点では判定できないため。撮影日除外は生スキャン後の
+    /// 別段階で行う）。
+    ///
+    /// - ディレクトリ指定ルール（末尾 `/`）: このディレクトリ自身（スキャンルートからの
+    ///   相対パス）に、直下にファイルが1つあると仮定したダミーパスを付けてマッチ判定する
+    ///   （`**/{name}/**` は末尾 `/**` が「配下に何かがある」ことを要求するため、
+    ///   ディレクトリ自身の生パスでは決してマッチしない。ダミー要素を足して
+    ///   「このディレクトリ配下のファイルは除外されるか」を問う）。
+    /// - 通常glob: ディレクトリ自身の名前（例: 手動追加した bare パターン `private`）、
+    ///   および `exclude_image` の directory 除外（`{escaped_parent}/**` のような
+    ///   フルパス系パターン）を同様にダミー要素付きで判定する。
+    ///
+    /// #61 レビュー S-a: `@eaDir`・ドットフォルダ等のディレクトリ系除外は、
+    /// ここで枝ごと刈ることで配下のファイルを `file_metadata` 登録・EXIF読み対象から
+    /// 外す（生スキャンで全ファイルを見てしまうと除外目的の高速化が効かないため）。
+    pub fn should_prune_dir(&self, dir_path: &Path, scan_root: &Path) -> bool {
+        // ダミーのファイル名を1つ付けて「このディレクトリ直下にファイルがあったら
+        // 除外されるか」を問う（末尾 `/**` 系パターンは何か1つ配下が無いとマッチしないため）。
+        const PROBE: &str = "0";
+
+        if let Some(ref globset) = self.globset {
+            // 通常globの「単体パターン」（例: 手動追加した "private"）はディレクトリ
+            // 自身の名前で判定する（祖先の各コンポーネントは、そのディレクトリを
+            // filter_entry で最初に訪れた時点で既に判定済みのため、自分の名前だけでよい）。
+            if let Some(name) = dir_path.file_name().and_then(|n| n.to_str()) {
+                if globset.is_match(name) {
+                    return true;
+                }
+            }
+            // フルパス系パターン（例: exclude_imageのdirectory除外 "{escaped_parent}/**"）
+            if globset.is_match(dir_path.join(PROBE)) {
+                return true;
+            }
+        }
+
+        if let Some(ref dir_globset) = self.dir_globset {
+            let relative = dir_path.strip_prefix(scan_root).unwrap_or(dir_path);
+            if dir_globset.is_match(relative.join(PROBE)) {
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// パターンが設定されているかチェック（テスト用）
     #[cfg(test)]
     pub fn has_patterns(&self) -> bool {
@@ -545,5 +592,68 @@ mod tests {
             Path::new("/Users/x/Backup-2020-01-01/2020-01-01/photo.jpg"),
             root
         ));
+    }
+
+    /// #61 レビュー S-a: `should_prune_dir` はディレクトリ指定ルール（末尾 `/`）に
+    /// 一致するディレクトリ自身を刈ってよいと判定する。
+    #[test]
+    fn should_prune_dir_matches_trailing_slash_default_rules() {
+        let rules = vec![
+            IgnoreRule::glob("**/.thumbnails/"),
+            IgnoreRule::glob("**/@eaDir/"),
+            IgnoreRule::glob("**/.**/"),
+        ];
+        let filter = IgnoreFilter::from_rules(&rules);
+        let root = Path::new("/photos");
+
+        assert!(filter.should_prune_dir(Path::new("/photos/@eaDir"), root));
+        assert!(filter.should_prune_dir(Path::new("/photos/sub/@eaDir"), root));
+        assert!(filter.should_prune_dir(Path::new("/photos/.thumbnails"), root));
+        assert!(filter.should_prune_dir(Path::new("/photos/.git"), root));
+
+        // 通常のフォルダは刈られない
+        assert!(!filter.should_prune_dir(Path::new("/photos/normal"), root));
+        // スキャンルート自身は（たとえ一致しそうでも）呼び出し元がdepth==0で
+        // 常にfalse扱いする前提だが、should_prune_dir自体はルート＝相対パス""を
+        // 正しく処理できる（ドットフォルダルールにマッチしない）ことを確認
+        let dotted_root = Path::new("/Users/x/.photos");
+        assert!(!filter.should_prune_dir(dotted_root, dotted_root));
+    }
+
+    /// #61 レビュー S-a: `exclude_image` の directory 除外（`{escaped_parent}/**`）も
+    /// `should_prune_dir` で刈れる（フルパス系の通常globパターン）。
+    #[test]
+    fn should_prune_dir_matches_exclude_image_directory_pattern() {
+        let excluded_dir = "/photos/private_stuff";
+        let pattern = format!("{}/**", globset::escape(excluded_dir));
+        let rules = vec![IgnoreRule::glob(pattern)];
+        let filter = IgnoreFilter::from_rules(&rules);
+        let root = Path::new("/photos");
+
+        assert!(filter.should_prune_dir(Path::new(excluded_dir), root));
+        assert!(!filter.should_prune_dir(Path::new("/photos/other_stuff"), root));
+    }
+
+    /// #61 レビュー S-a: 手動追加したbareパターン（例 "private"、スラッシュ無し）も
+    /// ディレクトリ自身の名前で刈れる。
+    #[test]
+    fn should_prune_dir_matches_bare_component_pattern() {
+        let rules = vec![IgnoreRule::glob("private")];
+        let filter = IgnoreFilter::from_rules(&rules);
+        let root = Path::new("/photos");
+
+        assert!(filter.should_prune_dir(Path::new("/photos/private"), root));
+        assert!(!filter.should_prune_dir(Path::new("/photos/public"), root));
+    }
+
+    /// #61 レビュー S-a: 撮影日ルールだけの場合はディレクトリを一切刈らない
+    /// （日付はファイル単位のEXIFでしか判定できないため）。
+    #[test]
+    fn should_prune_dir_ignores_date_rules() {
+        let rules = vec![IgnoreRule::date("2023-05-15")];
+        let filter = IgnoreFilter::from_rules(&rules);
+        let root = Path::new("/photos");
+
+        assert!(!filter.should_prune_dir(Path::new("/photos/2023-05-15"), root));
     }
 }
