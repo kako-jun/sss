@@ -52,3 +52,74 @@ describe('InfoSection GitHub link (openUrl)', () => {
     consoleError.mockRestore();
   });
 });
+
+// #64: 「設定を初期化」ボタンの 確認→実行→ようこそ画面へ戻る流れ、および
+// エラー時に日本語メッセージを表示することを固定する。
+describe('InfoSection reset button (resetAllData)', () => {
+  it('does not call resetAllData when the confirmation dialog is declined', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<InfoSection />);
+    fireEvent.click(screen.getByText('設定を初期化'));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。',
+    );
+    expect(resetAllData).not.toHaveBeenCalled();
+
+    confirmSpy.mockRestore();
+  });
+
+  it('calls resetAllData and reloads the page when confirmed and successful', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const reloadSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, reload: reloadSpy },
+      writable: true,
+    });
+    resetAllData.mockResolvedValue(undefined);
+
+    render(<InfoSection />);
+    const button = screen.getByText('設定を初期化').closest('button') as HTMLButtonElement;
+    fireEvent.click(button);
+
+    // 実行中はボタンが無効化される（重複クリック防止）
+    expect(button.disabled).toBe(true);
+
+    await waitFor(() => {
+      expect(resetAllData).toHaveBeenCalledTimes(1);
+      // ようこそ画面へ戻る唯一の経路（App側の状態を作り直すためリロードする）
+      expect(reloadSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('shows a Japanese error message and re-enables the button without reloading when resetAllData fails', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const reloadSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, reload: reloadSpy },
+      writable: true,
+    });
+    // #64: scan_in_progress中の拒否も含め、バックエンドのエラーは日本語メッセージの
+    // 文字列として reject される（Tauri commandの `Result<_, String>`）。
+    resetAllData.mockRejectedValue('スキャン実行中です。完了までお待ちください。');
+
+    render(<InfoSection />);
+    fireEvent.click(screen.getByText('設定を初期化'));
+
+    // このリポには @testing-library/jest-dom が導入されていないため toBeInTheDocument() 等は
+    // 使わず、getBy*（見つからなければ throw）を waitFor 内で呼ぶだけで存在確認とする
+    // （ScanSection.test.tsx と同じ流儀）。
+    await waitFor(() => {
+      expect(screen.getByText('エラー: スキャン実行中です。完了までお待ちください。')).toBeTruthy();
+    });
+
+    expect(reloadSpy).not.toHaveBeenCalled();
+    // ボタンが再度クリックできる状態（disabled解除）に戻ること
+    const button = screen.getByText('設定を初期化').closest('button') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+
+    consoleError.mockRestore();
+  });
+});

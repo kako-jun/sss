@@ -353,7 +353,14 @@ CREATE TABLE scan_history (
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
   14. `get_display_stats`: 統計データ取得（グラフ用、全画像の表示回数）
   15. `get_default_share_directory`: ピック先デフォルトパス取得
-  16. `reset_all_data`: 全データリセット（DB削除・キャッシュ削除）
+  16. `reset_all_data`: 全データ初期化（#64）。DBファイルは削除せず、開いた接続のまま
+      `Database::reset_to_defaults`で全ユーザーデータテーブル（`app_settings`含む）を
+      1トランザクションで空にし既定除外ルールを再投入する（スキーマ・`user_version`は
+      維持）。メモリ上の`playlist`/`directory_path`もクリアし、旧スキャン対象は
+      `app.asset_protocol_scope().forbid_directory()`で明示的に取り消す（`forbid`は
+      `allow`より常に優先されるためアプリ再起動なしに即座に読み込み拒否できる。詳細は
+      `docs/architecture.md`§5⑤）。キャッシュクリア（`clear_cache_dir`）・ワーカーの
+      失敗セットクリアも行い、`scan_directory`と同じ`ScanGuard`でスキャンと排他する
   17. `get_ignore_patterns`: 除外ルール一覧を取得
   18. `remove_ignore_pattern`: 除外ルールを削除
   19. `add_ignore_pattern`: 除外ルールを手動追加
