@@ -6,6 +6,7 @@
 //! (`tests/golden_e2e.rs`) はここで公開した芯を直接叩いて golden path を機械検証する。
 
 pub mod asset_scope;
+pub mod cache_worker;
 pub mod commands;
 pub mod database;
 pub mod ignore;
@@ -14,6 +15,7 @@ pub mod playlist;
 pub mod scanner;
 
 use asset_scope::{sanitize_allow_dir, startup_allow_dirs};
+use cache_worker::CacheWorker;
 use commands::file_operations::get_picked_directory;
 use commands::AppState;
 use database::Database;
@@ -64,14 +66,15 @@ pub fn run() {
 
             let db_path = app_data_dir.join("sss.db");
 
-            // キャッシュディレクトリを削除して再作成（起動時にクリア）
+            // キャッシュディレクトリ（asset scope 許可のため #59 以降ずっと
+            // このパスに存在させ続ける必要がある）。
             let cache_dir = app_data_dir.join("cache");
-            if cache_dir.exists() {
-                if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
-                    eprintln!("Failed to remove cache directory: {e}");
-                }
-            }
-            std::fs::create_dir_all(&cache_dir).expect("failed to create cache directory");
+
+            // 起動時のキャッシュクリア（#60）。旧実装は起動時に同期 remove_dir_all して
+            // いたため、10万ファイル級のキャッシュが溜まっていると起動が遅延した。
+            // cache_worker::clear_cache_dir が rename→再作成でこれを解決する
+            // （詳細はその関数のドキュメントを参照。must5/should(4)/should(5)）。
+            cache_worker::clear_cache_dir(&app_data_dir, &cache_dir);
 
             // データベースを初期化
             let db = Database::new(db_path).expect("failed to initialize database");
@@ -126,12 +129,16 @@ pub fn run() {
                 }
             }
 
+            // 画像最適化キャッシュ用の単一ワーカースレッドを起動（#60）
+            let cache_worker = CacheWorker::spawn(cache_dir.clone());
+
             // アプリケーション状態を設定
             app.manage(AppState {
                 db: Mutex::new(db),
                 playlist: Mutex::new(None),
                 directory_path: Mutex::new(None),
                 cache_dir,
+                cache_worker,
                 _keep_awake: keep_awake,
             });
 

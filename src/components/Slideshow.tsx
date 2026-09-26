@@ -57,6 +57,14 @@ export function Slideshow({ image, isLoading, onVideoEnded }: SlideshowProps) {
           />
         ) : (
           // 画像の場合
+          // #60 レビュー2巡目 must B: crossOrigin/image-orientationの明示切替は撤去した。
+          // wry の WebKitGTK 実装が asset スキームを CORS 有効登録しておらず、
+          // crossOrigin="anonymous"を付けるとLinux本番で画像が一切表示されなくなる
+          // リスクがあるため。回転はWebView既定の動作（image-orientation: from-image、
+          // EXIF Orientationに従って自動回転）に任せる。apply_exif_rotation=falseで
+          // EXIFが回転を要求している画像は、バックエンドが「格納画素のまま・EXIF無し」の
+          // キャッシュを返す（image_processor::plan_cache_file/requires_synchronous_cache）
+          // ため、原本を返さない限りfrom-imageが誤って回転させることはない。
           <motion.img
             key={image.path}
             src={srcUrl}
