@@ -25,6 +25,21 @@ pub struct FileMetadata {
     pub file_size: i64,
 }
 
+/// `ScanError` の発生源（#63 PR#77レビュー S3）。不明判定（前回追跡していたパスが
+/// 今回エラーの影響下にあるか）を、ファイル単位は完全一致・ディレクトリ単位は祖先
+/// 一致で判定を分けるために使う。ディレクトリ単位のエラー1件に対して配下が
+/// 何万件あっても、判定コストは「1エラーあたりO(1)集合構築＋1候補パスあたり
+/// O(パスの深さ)の祖先探索」に収まる（以前は候補パス×エラー件数の
+/// `starts_with`総当たりでO(P×E)だった）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanErrorScope {
+    /// ファイル単位の `fs::metadata`/`mtime` 取得エラー。`path` はそのファイル自身。
+    File,
+    /// `WalkDir` がディレクトリ自体を読めなかった（権限拒否等）。配下は生スキャン
+    /// 結果に一切現れないため、`path` を祖先に持つ全パスが影響を受ける。
+    Directory,
+}
+
 /// 走査中に発生した1件のエラー（`WalkDir` の読み取りエラー、または個々のファイルの
 /// `fs::metadata`/`mtime` 取得エラー）。`path` はエラーの起きたファイル/ディレクトリ
 /// （`WalkDir` のエラーで取得できない場合はスキャンルート自身）。#63。
@@ -32,6 +47,7 @@ pub struct FileMetadata {
 pub struct ScanError {
     pub path: PathBuf,
     pub message: String,
+    pub scope: ScanErrorScope,
 }
 
 /// スキャン結果
@@ -51,6 +67,14 @@ pub struct ScanResult {
     /// 不明なパス。「削除」とは区別し、`file_metadata`/`image_stats` を消す対象にしない
     /// （#61レビュー S-a、#63でエラーサブツリーにも適用範囲を拡張）。
     pub unknown_files: Vec<String>,
+    /// `unknown_files` のうち、今回のスキャンエラー（`ScanError`）が原因のもの
+    /// （ディレクトリ系除外の枝刈りによるものは含まない）だけを集めた部分集合
+    /// （#63 PR#77レビュー M2）。ディレクトリ系除外による不明は「意図して対象外に
+    /// した」ものなのでプレイリストから外れてよいが、エラー由来の不明は一時的な
+    /// 読み取り失敗の可能性が高く、除外ルールとは無関係にプレイリストの所属
+    /// （シャッフル位置・履歴）を維持すべきという区別を、呼び出し元
+    /// （`commands::scan::perform_scan` Stage4）がプレイリスト反映時に使う。
+    pub error_unknown_files: Vec<String>,
     pub total_count: usize,
     pub new_count: usize,
     pub modified_count: usize,
@@ -160,6 +184,7 @@ impl ImageScanner {
                     walk_errors.push(ScanError {
                         path: path.clone(),
                         message: err.to_string(),
+                        scope: ScanErrorScope::Directory,
                     });
                 }
             }
@@ -202,16 +227,19 @@ impl ImageScanner {
                                 path: path.to_path_buf(),
                                 message: "modified time is before 1970-01-01 (UNIX epoch)"
                                     .to_string(),
+                                scope: ScanErrorScope::File,
                             }),
                         },
                         Err(e) => FileOutcome::Err(ScanError {
                             path: path.to_path_buf(),
                             message: format!("failed to read modified time: {e}"),
+                            scope: ScanErrorScope::File,
                         }),
                     },
                     Err(e) => FileOutcome::Err(ScanError {
                         path: path.to_path_buf(),
                         message: format!("failed to read metadata: {e}"),
+                        scope: ScanErrorScope::File,
                     }),
                 };
 
@@ -309,14 +337,33 @@ impl ImageScanner {
         // 確定削除として扱う（不明扱いにしてfile_metadata/image_statsを温存しない）。
         // #63: 加えて、今回エラーになったパス自身、またはその配下（エラーがディレクトリの
         // 場合）にあるファイルも「不明」として扱う。
+        //
+        // #63 PR#77レビュー S3: 以前は候補パス(P件)×エラー(E件)の`starts_with`総当たり
+        // （O(P×E)）だった。ファイル単位エラーは完全一致の`HashSet`（O(1)）、ディレクトリ
+        // 単位エラーは`Path::ancestors()`を`HashSet`で引く（O(パスの深さ)、実運用では
+        // 数十以下の定数）ことで、エラー件数に依存しない判定にする。
+        let file_error_paths: std::collections::HashSet<&Path> = scan_errors
+            .iter()
+            .filter(|e| e.scope == ScanErrorScope::File)
+            .map(|e| e.path.as_path())
+            .collect();
+        let dir_error_paths: std::collections::HashSet<&Path> = scan_errors
+            .iter()
+            .filter(|e| e.scope == ScanErrorScope::Directory)
+            .map(|e| e.path.as_path())
+            .collect();
+
         let mut deleted_files = Vec::new();
         let mut unknown_files = Vec::new();
+        let mut error_unknown_files = Vec::new();
         for path in previous_map.keys() {
             let path_ref = Path::new(path);
-            let under_error = scan_errors
-                .iter()
-                .any(|e| path_ref == e.path.as_path() || path_ref.starts_with(&e.path));
-            if under_error || walk_filter.has_pruned_ancestor_dir(path_ref, directory) {
+            let under_error = file_error_paths.contains(path_ref)
+                || path_ref.ancestors().any(|a| dir_error_paths.contains(a));
+            if under_error {
+                unknown_files.push(path.clone());
+                error_unknown_files.push(path.clone());
+            } else if walk_filter.has_pruned_ancestor_dir(path_ref, directory) {
                 unknown_files.push(path.clone());
             } else {
                 deleted_files.push(path.clone());
@@ -343,6 +390,7 @@ impl ImageScanner {
             modified_files,
             deleted_files,
             unknown_files,
+            error_unknown_files,
             duration_ms,
             error_count,
             error_examples,

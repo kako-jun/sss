@@ -420,7 +420,7 @@ where
     }
 
     // --- Stage 4: 短時間のplaylistロック（除外ルール読み直し・差分適用・復元・確定保存） ---
-    let included: Vec<String>;
+    let mut included: Vec<String>;
     {
         let mut playlist_lock = playlist_mutex.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -453,6 +453,21 @@ where
             .filter(|f| !ignore_filter.is_ignored(Path::new(&f.path), directory))
             .map(|f| f.path.clone())
             .collect();
+
+        // #63 PR#77レビュー M2(must): 今回のスキャンエラーが原因で「不明」になった
+        // ファイル（`scan_result.error_unknown_files`）は、除外ルールとは無関係な
+        // 一時的な読み取り失敗の可能性が高い。生スキャン結果（`scan_result.files`）に
+        // 現れないため上記の`included`には入らず、そのままだと下の差分計算で
+        // 「プレイリストから消えた」扱いになり、シャッフル位置・履歴を失ってしまう
+        // （ディレクトリ系除外による不明は意図した除外なので、これとは区別して
+        // プレイリストから外れて構わない）。`included`に加えることで、既にプレイリスト
+        // に居るものは`removed`に入らず、居ないものは（読めていないファイルなので）
+        // `added`にも実質影響しない状態を保つ。
+        for path in &scan_result.error_unknown_files {
+            if !included.contains(path) {
+                included.push(path.clone());
+            }
+        }
 
         // #62レビューS2: ディレクトリ比較は正規化キーで行う（canonicalize前後・末尾区切り
         // の有無で文字列表現が食い違っても同じディレクトリと判定できるように）。

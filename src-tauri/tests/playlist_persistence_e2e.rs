@@ -528,19 +528,29 @@ fn settings_read_write_do_not_deadlock_or_corrupt_during_concurrent_scan() {
     ));
 
     // スキャンと並行して、別スレッドから設定の保存/取得を繰り返す。
+    // #63 PR#77レビュー S6: 以前は書いた値を読み捨てるだけで「壊れていないこと」を
+    // 何も検証していなかった。save直後に同じロック内でget_settingし、必ず直前に
+    // 書いた値が読めることを毎回assertする（他スレッドが割り込む余地がないことを
+    // 意味のある形で固定する）。
     let settings_db_mutex = Arc::clone(&db_mutex);
     let settings_thread = thread::spawn(move || {
         for i in 0..200 {
+            let value = format!("v{i}");
             let db = settings_db_mutex.lock().unwrap();
-            db.save_setting("concurrent_test_key", &format!("v{i}"))
+            db.save_setting("concurrent_test_key", &value)
                 .expect("save_settingは同時実行下でも失敗しないはず");
-            let _ = db.get_setting("concurrent_test_key");
+            let read_back = db.get_setting("concurrent_test_key").unwrap();
+            assert_eq!(
+                read_back,
+                Some(value),
+                "save直後・同じロック内でのget_settingは必ず直前に書いた値と一致するはず"
+            );
         }
     });
 
     let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
     let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
-    perform_scan(
+    let progress = perform_scan(
         &db_mutex,
         &playlist_mutex,
         &directory_path_mutex,
@@ -553,6 +563,16 @@ fn settings_read_write_do_not_deadlock_or_corrupt_during_concurrent_scan() {
     settings_thread
         .join()
         .expect("設定スレッドはpanicせず完了するはず");
+
+    // #63 PR#77レビュー S6: 「スキャン結果も正しい」を実際に検証する
+    // （以前はperform_scanの戻り値を一切見ていなかった）。
+    assert_eq!(
+        progress.total_files, TOTAL,
+        "設定の同時アクセスがあってもtotal_filesは正しいはず"
+    );
+    assert_eq!(progress.new_files, TOTAL, "初回スキャンは全件新規のはず");
+    assert_eq!(progress.deleted_files, 0);
+    assert_eq!(progress.error_count, 0);
 
     // 最後に書いた値がそのまま読める(競合で壊れていない)ことを確認する。
     {
@@ -572,5 +592,238 @@ fn settings_read_write_do_not_deadlock_or_corrupt_during_concurrent_scan() {
         "設定の同時アクセスがあってもスキャン結果自体は正しいはず"
     );
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #63 PR#77レビュー S6: 入れ子ディレクトリ（A→A/sub→A、A/sub→A のいずれの順でも）
+/// をまたいでスキャンしても、共有されるファイル（A/sub配下）の`file_metadata`/
+/// `image_stats`が消えず、二重管理（同じパスが複数行になる等）も起きないことを
+/// 検証する。`get_file_metadata_under`の区切り文字境界の正しさ（M1/S1の範囲クエリ
+/// 修正）の直接的な統合テストでもある。
+#[test]
+fn nested_directory_scans_preserve_shared_file_stats_without_duplication() {
+    let dir = workspace("nested_dir_scan");
+    let root = dir.join("A");
+    let sub = root.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+
+    write_jpeg(&root.join("top.jpg"));
+    write_jpeg(&sub.join("child.jpg"));
+
+    let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
+
+    // 1. A全体をスキャンし、A/sub/child.jpgの表示回数を1にする。
+    let playlist_mutex_1: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex_1: Mutex<Option<PathBuf>> = Mutex::new(None);
+    let progress = perform_scan(
+        &db_mutex,
+        &playlist_mutex_1,
+        &directory_path_mutex_1,
+        None,
+        &root,
+        |_, _| {},
+    )
+    .expect("Aの初回scanは成功するはず");
+    assert_eq!(progress.total_files, 2);
+    assert_eq!(progress.new_files, 2);
+    let child_path = sub.join("child.jpg").to_string_lossy().to_string();
+    {
+        let db = db_mutex.lock().unwrap();
+        db.increment_display_count(&child_path).unwrap();
+    }
+
+    // 2. A/subだけをスキャン（親Aとは別のディレクトリを選び直した想定）。
+    //    get_file_metadata_underがA/sub配下だけを正しく返せば、child.jpgは
+    //    「既存・変更なし」と判定され新規/削除どちらにもならない。
+    let playlist_mutex_2: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex_2: Mutex<Option<PathBuf>> = Mutex::new(None);
+    let progress = perform_scan(
+        &db_mutex,
+        &playlist_mutex_2,
+        &directory_path_mutex_2,
+        None,
+        &sub,
+        |_, _| {},
+    )
+    .expect("A/subのscanは成功するはず");
+    assert_eq!(progress.total_files, 1, "A/sub配下はchild.jpgの1件だけ");
+    assert_eq!(
+        progress.new_files, 0,
+        "既にfile_metadataにある(mtime不変)ので新規扱いにならないはず"
+    );
+    assert_eq!(progress.deleted_files, 0);
+
+    // 3. 再度Aをスキャン。top.jpg/child.jpgとも「既存」のまま、二重管理も起きない。
+    let playlist_mutex_3: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex_3: Mutex<Option<PathBuf>> = Mutex::new(None);
+    let progress = perform_scan(
+        &db_mutex,
+        &playlist_mutex_3,
+        &directory_path_mutex_3,
+        None,
+        &root,
+        |_, _| {},
+    )
+    .expect("Aへの再scanは成功するはず");
+    assert_eq!(progress.total_files, 2);
+    assert_eq!(
+        progress.new_files, 0,
+        "A/subスキャンを挟んでもtop.jpg/child.jpgは既存のまま(新規扱いにならない)はず"
+    );
+    assert_eq!(progress.deleted_files, 0);
+
+    let db = db_mutex.lock().unwrap();
+    let all = db.get_all_file_metadata().unwrap();
+    assert_eq!(
+        all.len(),
+        2,
+        "同じパスが複数行になる二重管理は起きていないはず（file_metadataは2行ちょうど）"
+    );
+    let (count, _) = db.get_image_stats(&child_path).unwrap();
+    assert_eq!(
+        count, 1,
+        "A/subスキャンやAへの再scanを挟んでもchild.jpgの表示統計は消えないはず"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// この環境で `chmod 0o000` が実際に読み取りを拒否するかどうかを直接試して判定する
+/// （root権限だと拒否が効かないため、`libc`のFFIを増やさず実際の効果で判定する。
+/// `src/scanner.rs`のユニットテストにある同名ヘルパーと同じ考え方だが、tests/以下は
+/// 別クレートなので個別に持つ）。
+#[cfg(unix)]
+fn chmod_000_actually_denies_read() -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let probe_dir = std::env::temp_dir().join(format!(
+        "sss_e2e_root_probe_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&probe_dir).unwrap();
+    std::fs::write(probe_dir.join("x"), b"x").unwrap();
+    std::fs::set_permissions(&probe_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let denied = std::fs::read_dir(&probe_dir).is_err();
+    std::fs::set_permissions(&probe_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = std::fs::remove_dir_all(&probe_dir);
+    denied
+}
+
+/// #63 PR#77レビュー M2(must) 直接の回帰テスト: スキャンエラー（ディレクトリの
+/// 権限拒否）で生スキャン結果に一切現れなくなったサブツリーがあっても、
+/// `perform_scan`レベルでプレイリストの件数・シャッフル位置(next_index)・履歴が
+/// 保たれる（誤ってプレイリストから除去されない）こと。
+///
+/// 修正前は、エラー由来の「不明」ファイルも通常の「含めるべき集合」に入らないため
+/// Stage4の差分計算で`removed`に入り、`update_images`でプレイリストから除去されて
+/// next_index・履歴がずれてしまっていた。
+#[test]
+#[cfg(unix)]
+fn scan_error_subtree_does_not_disturb_playlist_position_or_history() {
+    use std::os::unix::fs::PermissionsExt;
+
+    if !chmod_000_actually_denies_read() {
+        eprintln!("root権限で実行されているためスキップ（chmodによる権限拒否が効かない）");
+        return;
+    }
+
+    let dir = workspace("scan_error_subtree_playlist");
+    let root = dir.join("photos");
+    let locked_dir = root.join("locked");
+    std::fs::create_dir_all(&locked_dir).unwrap();
+    write_jpeg(&locked_dir.join("a.jpg"));
+    write_jpeg(&locked_dir.join("b.jpg"));
+    write_jpeg(&root.join("top1.jpg"));
+    write_jpeg(&root.join("top2.jpg"));
+
+    let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
+    let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+    // 1. 初回スキャン（全ファイル読める状態）。
+    let progress = perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        None,
+        &root,
+        |_, _| {},
+    )
+    .expect("初回scanは成功するはず");
+    assert_eq!(progress.total_files, 4);
+    assert_eq!(progress.error_count, 0);
+
+    // 2巡ぶん進めて next_index/history に意味のある状態を作る。
+    let (next_index_before, history_len_before, history_position_before, total_before) = {
+        let mut playlist_lock = playlist_mutex.lock().unwrap();
+        let playlist = playlist_lock.as_mut().unwrap();
+        let db = db_mutex.lock().unwrap();
+        advance_and_persist(&db, &root.to_string_lossy(), playlist);
+        advance_and_persist(&db, &root.to_string_lossy(), playlist);
+        (
+            playlist.next_index(),
+            playlist.history().len(),
+            playlist.history_position(),
+            playlist.total_count(),
+        )
+    };
+    assert_eq!(next_index_before, 2, "2回advanceしたのでnext_index=2のはず");
+
+    // 2. lockedディレクトリの読み取り権限を奪い、同じディレクトリを再スキャンする
+    //    （current_directory=Some(root)。実アプリの「同じフォルダを再スキャン」と同条件）。
+    std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let progress = perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        Some(&root),
+        &root,
+        |_, _| {},
+    );
+    // 後片付け（remove_dir_allの前に権限を戻す）は結果に関わらず必ず行う。
+    std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let progress = progress.expect("エラーサブツリーがあってもscan自体は成功するはず");
+
+    assert!(
+        progress.error_count >= 1,
+        "lockedディレクトリの読み取りエラーが1件以上あるはず"
+    );
+
+    let playlist_lock = playlist_mutex.lock().unwrap();
+    let playlist = playlist_lock.as_ref().unwrap();
+
+    assert_eq!(
+        playlist.total_count(),
+        total_before,
+        "エラーサブツリー(locked配下2件)がプレイリストから除去されてはいけない"
+    );
+    assert_eq!(
+        playlist.next_index(),
+        next_index_before,
+        "エラーによってnext_indexがずれてはいけない"
+    );
+    assert_eq!(
+        playlist.history().len(),
+        history_len_before,
+        "エラーによって履歴が変わってはいけない"
+    );
+    assert_eq!(
+        playlist.history_position(),
+        history_position_before,
+        "エラーによって履歴位置が変わってはいけない"
+    );
+
+    let current_paths = playlist.current_paths();
+    let a_str = locked_dir.join("a.jpg").to_string_lossy().to_string();
+    let b_str = locked_dir.join("b.jpg").to_string_lossy().to_string();
+    assert!(
+        current_paths.contains(&a_str) && current_paths.contains(&b_str),
+        "locked配下の2件はプレイリストの所属を維持したままのはず: {current_paths:?}"
+    );
+
+    drop(playlist_lock);
     let _ = std::fs::remove_dir_all(&dir);
 }
