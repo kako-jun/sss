@@ -284,6 +284,73 @@ pub fn requires_synchronous_cache(image_path: &Path, apply_rotation: bool) -> bo
         || (!apply_rotation && orientation_requires_rotation(image_path))
 }
 
+/// 撮影日時を優先順位付きで取得する（#61問題3）。
+///
+/// `DateTime`（ファイル更新日時相当。カメラが最後に書き換えた日時で、実際の撮影日と
+/// ずれることがある）よりも `DateTimeOriginal`（シャッターを切った日時）を優先し、
+/// それも無ければ `DateTimeDigitized`（デジタル化日時）、最後に `DateTime` の順で
+/// フォールバックする。
+fn read_preferred_date_time(exif: &exif::Exif) -> Option<String> {
+    for tag in [
+        exif::Tag::DateTimeOriginal,
+        exif::Tag::DateTimeDigitized,
+        exif::Tag::DateTime,
+    ] {
+        if let Some(field) = exif.get_field(tag, exif::In::PRIMARY) {
+            let value = field.display_value().to_string();
+            // kamadak-exif は空欄/不正な DateTime 系フィールドを display_value() で
+            // 文字列 "unknown" として返す（`tiff::DateTime::from_ascii` が
+            // `Error::BlankValue` を返すケース）。このタグは実質未設定ということなので
+            // 値として採用せず、次の優先タグへフォールバックする（#61レビュー nit）。
+            // `extract_date_only` が日付として妥当かどうかの判定を兼ねる。
+            if extract_date_only(&value).is_some() {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+/// EXIFの日付文字列から日付部分だけを `"YYYY-MM-DD"` に変換する。撮影日除外ルール（#61）で使う。
+///
+/// `display_value()` の実際の出力は kamadak-exif の `tiff::DateTime` の `Display` 実装により
+/// `"YYYY-MM-DD HH:MM:SS"`（ハイフン区切り）だが、EXIF仕様上のワイヤフォーマット自体は
+/// `"YYYY:MM:DD HH:MM:SS"`（コロン区切り）であり将来の実装差やテストフィクスチャでの
+/// 直接指定にも対応できるよう、区切り文字はコロン/ハイフンいずれでも受け付ける
+/// （4文字目・7文字目が数字でなければ区切りとみなす）。
+///
+/// 単なる長さチェックだけでなく、区切り文字の位置・各桁が数字であること・年が0でない
+/// こと・月日が妥当範囲であることまで検証する（#61レビュー nit: kamadak-exifが
+/// 空欄/不正値を返す "unknown" や "0000:00:00" のようなプレースホルダを誤って
+/// 有効な日付として扱わない）。
+pub fn extract_date_only(date_time: &str) -> Option<String> {
+    let trimmed = date_time.trim().trim_matches('"');
+    let date_part = trimmed.split(' ').next()?;
+    let bytes = date_part.as_bytes();
+    if bytes.len() != 10 {
+        return None;
+    }
+    let is_separator = |b: u8| !b.is_ascii_digit();
+    if !is_separator(bytes[4]) || !is_separator(bytes[7]) {
+        return None;
+    }
+
+    let digit = |i: usize| -> Option<u32> {
+        let b = *bytes.get(i)?;
+        b.is_ascii_digit().then(|| u32::from(b - b'0'))
+    };
+
+    let y = digit(0)? * 1000 + digit(1)? * 100 + digit(2)? * 10 + digit(3)?;
+    let m = digit(5)? * 10 + digit(6)?;
+    let d = digit(8)? * 10 + digit(9)?;
+
+    if y == 0 || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+
+    Some(format!("{y:04}-{m:02}-{d:02}"))
+}
+
 /// EXIF情報を取得
 pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
     let file = File::open(image_path).map_err(|e| format!("Failed to open file: {e}"))?;
@@ -301,10 +368,8 @@ pub fn get_exif_info(image_path: &Path) -> Result<ExifInfo, String> {
                 height: None,
             };
 
-            // 撮影日時
-            if let Some(field) = exif.get_field(exif::Tag::DateTime, exif::In::PRIMARY) {
-                info.date_time = Some(field.display_value().to_string());
-            }
+            // 撮影日時（DateTimeOriginal → DateTimeDigitized → DateTime の優先順）
+            info.date_time = read_preferred_date_time(&exif);
 
             // GPS座標の取得
             // 緯度
@@ -406,6 +471,32 @@ pub fn is_video_file(path: &Path) -> bool {
 mod tests {
     use super::*;
     use exif::Rational;
+
+    /// #61レビュー nit: `extract_date_only` は単なる長さチェックでなく、区切り文字・
+    /// 数字・妥当範囲まで検証し、EXIFの「不明日付」プレースホルダ（"0000:00:00"）を
+    /// 有効な日付として誤採用しない。
+    #[test]
+    fn extract_date_only_validates_format_and_rejects_unknown_placeholder() {
+        // kamadak-exif の実際の display_value() 出力（ハイフン区切り）
+        assert_eq!(
+            extract_date_only("2023-05-15 10:30:00"),
+            Some("2023-05-15".to_string())
+        );
+        // EXIFワイヤフォーマット（コロン区切り）も受け付ける
+        assert_eq!(
+            extract_date_only("2023:05:15 10:30:00"),
+            Some("2023-05-15".to_string())
+        );
+        // kamadak-exif が空欄/不正値に返す文字列プレースホルダ
+        assert_eq!(extract_date_only("unknown"), None);
+        // 数字だけの「不明日付」（年0）
+        assert_eq!(extract_date_only("0000:00:00 00:00:00"), None);
+        assert_eq!(extract_date_only("0000-00-00 00:00:00"), None);
+        // 範囲外の月日
+        assert_eq!(extract_date_only("2023:13:45 10:30:00"), None);
+        // 空文字列
+        assert_eq!(extract_date_only(""), None);
+    }
 
     #[test]
     fn needs_4k_resize_boundary() {

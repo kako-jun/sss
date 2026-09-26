@@ -15,7 +15,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 }));
 
 import * as tauri from './tauri';
-import type { ImageInfo, ScanProgress, Stats, RecentImage } from '../types';
+import type { ImageInfo, ScanProgress, Stats, RecentImage, IgnoreRule } from '../types';
 
 beforeEach(() => {
   invoke.mockReset();
@@ -132,10 +132,23 @@ describe('tauri command wrappers', () => {
     ]);
   });
 
-  it('removeIgnorePattern invokes remove_ignore_pattern with pattern', async () => {
+  it('getIgnorePatterns returns rules with pattern + ruleType (glob/date)', async () => {
+    const rules: IgnoreRule[] = [
+      { pattern: '**/.thumbnails/', ruleType: 'glob' },
+      { pattern: '2023-05-15', ruleType: 'date' },
+    ];
+    invoke.mockResolvedValue(rules);
+    expect(await tauri.getIgnorePatterns()).toEqual(rules);
+    expect(invoke).toHaveBeenCalledWith('get_ignore_patterns');
+  });
+
+  it('removeIgnorePattern invokes remove_ignore_pattern with pattern and ruleType (#61複合キー化)', async () => {
     invoke.mockResolvedValue(undefined);
-    await tauri.removeIgnorePattern('*.tmp');
-    expect(invoke).toHaveBeenCalledWith('remove_ignore_pattern', { pattern: '*.tmp' });
+    await tauri.removeIgnorePattern('*.tmp', 'glob');
+    expect(invoke).toHaveBeenCalledWith('remove_ignore_pattern', {
+      pattern: '*.tmp',
+      ruleType: 'glob',
+    });
   });
 
   it('addIgnorePattern invokes add_ignore_pattern with pattern', async () => {

@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { ImageInfo, RecentImage, ScanProgress, Stats } from '../types';
+import type { IgnoreRule, ImageInfo, RecentImage, ScanProgress, Stats } from '../types';
 
 /**
  * デフォルトのピック先ディレクトリパスを取得
@@ -114,17 +114,23 @@ export async function getDisplayStats(): Promise<Array<[string, number]>> {
 }
 
 /**
- * 除外ルール一覧を取得
+ * 除外ルール一覧を取得（通常glob / 撮影日ルールを区別する rule_type 込み）
  */
-export async function getIgnorePatterns(): Promise<string[]> {
-  return await invoke<string[]>('get_ignore_patterns');
+export async function getIgnorePatterns(): Promise<IgnoreRule[]> {
+  return await invoke<IgnoreRule[]>('get_ignore_patterns');
 }
 
 /**
  * 除外ルールを削除
+ *
+ * #61レビュー nit: ignore_rulesの主キーが (pattern, ruleType) の複合キーになったため、
+ * どちらのルールを消すか一意に決めるため ruleType も渡す。
  */
-export async function removeIgnorePattern(pattern: string): Promise<void> {
-  await invoke('remove_ignore_pattern', { pattern });
+export async function removeIgnorePattern(
+  pattern: string,
+  ruleType: 'glob' | 'date',
+): Promise<void> {
+  await invoke('remove_ignore_pattern', { pattern, ruleType });
 }
 
 /**

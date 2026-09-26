@@ -1,7 +1,9 @@
 use crate::asset_scope::{resolve_and_sanitize_share_directory, resolve_share_directory};
 use crate::commands::types::AppState;
-use crate::ignore::IgnoreFilter;
-use crate::image_processor::get_exif_info;
+use crate::ignore::{glob_check_pattern, IgnoreFilter, IgnoreRule, RuleType};
+use crate::image_processor::{extract_date_only, get_exif_info};
+use globset::Glob;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -13,6 +15,15 @@ pub struct RecentImage {
     pub path: String,
     pub display_count: i32,
     pub last_displayed: String,
+}
+
+/// 除外ルール1件（フロントエンド向けDTO）。#61: 撮影日ルールと通常globを
+/// UI側で区別・表示できるよう `rule_type` を含める。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IgnoreRuleDto {
+    pub pattern: String,
+    pub rule_type: String,
 }
 
 /// ホームディレクトリ配下の Pictures フォルダを取得する（OS別に環境変数を切り替え）。
@@ -172,28 +183,52 @@ pub async fn pick_image(
 
 /// 除外ルール一覧を取得
 #[tauri::command]
-pub async fn get_ignore_patterns(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+pub async fn get_ignore_patterns(state: State<'_, AppState>) -> Result<Vec<IgnoreRuleDto>, String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.get_ignore_rules()
-        .map_err(|e| format!("Failed to get ignore rules: {e}"))
+    let rules = db
+        .get_ignore_rules()
+        .map_err(|e| format!("Failed to get ignore rules: {e}"))?;
+    Ok(rules
+        .into_iter()
+        .map(|(pattern, rule_type)| IgnoreRuleDto {
+            pattern,
+            rule_type: rule_type.as_str().to_string(),
+        })
+        .collect())
 }
 
 /// 除外ルールを削除
+///
+/// #61レビュー nit: `ignore_rules` の主キーが `(pattern, rule_type)` の複合キーに
+/// なったため、`pattern` だけでは同じ文字列のglob/dateルールのうちどちらを消すか
+/// 一意に決まらない。フロントエンドが表示している `ruleType` をそのまま渡してもらう。
 #[tauri::command]
 pub async fn remove_ignore_pattern(
     pattern: String,
+    rule_type: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.remove_ignore_rule(&pattern)
+    db.remove_ignore_rule(&pattern, RuleType::parse(&rule_type))
         .map_err(|e| format!("Failed to remove ignore rule: {e}"))
 }
 
-/// 除外ルールを手動追加
+/// 除外ルールを手動追加（常に glob ルールとして追加する。撮影日ルールは `exclude_image`
+/// の "date" 経由でのみ作られる）。
+///
+/// #61 問題4: 不正なglob（例: `a{b.jpg` のような閉じていない `{`）は `eprintln!` で
+/// 握りつぶさず `Err` を返し、UI にも失敗を伝える。末尾 `/` のディレクトリ指定
+/// パターンは、実際に使う正規化後の形（`glob_check_pattern`）で検証する。
 #[tauri::command]
 pub async fn add_ignore_pattern(pattern: String, state: State<'_, AppState>) -> Result<(), String> {
+    let trimmed = pattern.trim();
+    if trimmed.is_empty() {
+        return Err("Pattern must not be empty".to_string());
+    }
+    Glob::new(&glob_check_pattern(trimmed)).map_err(|e| format!("Invalid pattern: {e}"))?;
+
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.add_ignore_rule(&pattern)
+    db.add_ignore_rule(trimmed, RuleType::Glob)
         .map_err(|e| format!("Failed to add ignore rule: {e}"))
 }
 
@@ -210,31 +245,33 @@ pub async fn exclude_image(
         return Err("Image file does not exist".to_string());
     }
 
-    let pattern = match exclude_type.as_str() {
+    let (pattern, rule_type) = match exclude_type.as_str() {
         "date" => {
-            // EXIFから日付を取得
+            // EXIFから日付を取得（DateTimeOriginal優先。#61問題3）
             match get_exif_info(path) {
-                Ok(exif) => {
-                    if let Some(date_time) = exif.date_time {
-                        // "YYYY:MM:DD HH:MM:SS" から "YYYY-MM-DD" を抽出
-                        let date_part = date_time.split(' ').next().unwrap_or("");
-                        let date = date_part.replace(':', "-");
-                        format!("*{date}*")
-                    } else {
-                        return Err("No EXIF date found".to_string());
-                    }
-                }
+                Ok(exif) => match exif.date_time.as_deref().and_then(extract_date_only) {
+                    Some(date) => (date, RuleType::Date),
+                    None => return Err("No EXIF date found".to_string()),
+                },
                 Err(_) => return Err("Failed to read EXIF data".to_string()),
             }
         }
         "file" => {
-            // ファイル名パターン
-            path.to_string_lossy().to_string()
+            // ファイル名パターン。globのメタ文字（`[`,`]`,`{`,`}`,`*`,`?`）を含むファイル名でも
+            // 自分自身にマッチするよう escape する（#61問題4: `photo[1].jpg` 等）
+            (globset::escape(&path.to_string_lossy()), RuleType::Glob)
         }
         "directory" => {
-            // ディレクトリパターン
+            // ディレクトリパターン。`/**` でサブフォルダも含めて再帰的に除外する。
+            // 旧実装の `/*` はglobsetの既定（literal_separator無効）では実際には
+            // サブフォルダもマッチしていたが、そのことはコード上自明でなく意図が
+            // 伝わらないため `/**` という明示的な表現に変える（#61レビュー: 動作を
+            // 変えるのではなく意味を明確化する修正）
             if let Some(parent) = path.parent() {
-                format!("{}/*", parent.to_string_lossy())
+                (
+                    format!("{}/**", globset::escape(&parent.to_string_lossy())),
+                    RuleType::Glob,
+                )
             } else {
                 return Err("Failed to get parent directory".to_string());
             }
@@ -244,20 +281,55 @@ pub async fn exclude_image(
 
     // DB に除外ルールを追加
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.add_ignore_rule(&pattern)
+    db.add_ignore_rule(&pattern, rule_type)
         .map_err(|e| format!("Failed to add ignore rule: {e}"))?;
-    drop(db);
 
-    // プレイリストから該当画像を削除（ファイル除外の場合のみ即座に削除）
     if exclude_type == "file" {
+        // ファイル除外は即座にプレイリストから削除
+        drop(db);
         let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(ref mut playlist) = *playlist_lock {
             playlist.update_images(vec![], vec![image_path.clone()]);
         }
         drop(playlist_lock);
         Ok(format!("除外パターン追加: {pattern}"))
+    } else if exclude_type == "date" {
+        // 撮影日除外: exif_cache で既に「その日付」と分かっている画像は、再スキャンを
+        // 待たずに即座にプレイリストから外す（#61レビュー M2）。exif_cache に無い
+        // （まだ一度も表示していない）画像は次回スキャンでEXIFを読み直して判定される。
+        //
+        // #61レビュー nit: キャッシュ時の `file_mtime` と現在のファイルの実際のmtimeが
+        // 一致するものだけを対象にする。ファイルがキャッシュ後に変更（別の画像で
+        // 上書き等）されていた場合、古いキャッシュのまま即時除去すると、既に別内容に
+        // なった画像を誤って除外してしまうため（次回スキャンでEXIFが読み直され、
+        // そこで正しく再判定される分には支障ない）。
+        let candidates = db
+            .get_paths_with_captured_date(&pattern)
+            .unwrap_or_default();
+        drop(db);
+        let matched: Vec<String> = candidates
+            .into_iter()
+            .filter(|(path, cached_mtime)| {
+                std::fs::metadata(path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .is_some_and(|d| d.as_secs() as i64 == *cached_mtime)
+            })
+            .map(|(path, _)| path)
+            .collect();
+        if !matched.is_empty() {
+            let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(ref mut playlist) = *playlist_lock {
+                playlist.update_images(vec![], matched);
+            }
+        }
+        Ok(format!(
+            "除外パターン追加: {pattern} (変更を反映するには再スキャンしてください)"
+        ))
     } else {
-        // 日付・ディレクトリ除外は再スキャンが必要
+        // ディレクトリ除外は再スキャンが必要
+        drop(db);
         Ok(format!(
             "除外パターン追加: {pattern} (変更を反映するには再スキャンしてください)"
         ))
@@ -269,11 +341,41 @@ pub async fn exclude_image(
 pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentImage>, String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
 
-    // 除外パターンを取得してフィルタを構築
-    let patterns = db
+    // 除外パターンを取得してフィルタを構築。撮影日ルールは exif_cache の値を使う
+    // （#61レビュー S4: 表示済みでキャッシュ済みの撮影日を無視していた漏れを修正）。
+    let rules: Vec<IgnoreRule> = db
         .get_ignore_rules()
-        .map_err(|e| format!("Failed to get ignore rules: {e}"))?;
-    let ignore_filter = IgnoreFilter::from_patterns(&patterns);
+        .map_err(|e| format!("Failed to get ignore rules: {e}"))?
+        .into_iter()
+        .map(|(pattern, rule_type)| IgnoreRule { pattern, rule_type })
+        .collect();
+    let captured_dates: HashMap<String, String> = db
+        .get_all_exif_cache()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(path, date, _)| date.map(|d| (path, d)))
+        .collect();
+    let ignore_filter = IgnoreFilter::from_rules_with_captured_dates(&rules, captured_dates);
+
+    // 過去にスキャンした全ディレクトリ（長い＝より具体的なパスを優先してマッチさせる）。
+    // 「最近表示した画像」は複数のスキャンルートにまたがりうるため、各画像パスに
+    // 対応するスキャンルートを見つけ、そこからの相対パスで判定する（#61レビュー S3:
+    // 絶対パスのまま判定すると、ドットディレクトリ配下をスキャンしたライブラリの
+    // 履歴がドットフォルダ包括ルールで全消えしていた）。対応するルートが見つからない
+    // 場合はフルパスをそのまま相対パス扱いする従来の判定にフォールバックする。
+    //
+    // 既知の制約（#61レビュー nit）: `scan_history` は100件超を刈り込む
+    // （`trim_scan_history`）ため、古いディレクトリのエントリが失われるとここでの
+    // ルート解決もできなくなり、そのディレクトリ由来の履歴だけ絶対パスへフォール
+    // バックする。現在アクティブなディレクトリ（`last_directory_path`）は刈り込みの
+    // 影響を受けないよう候補に必ず含めることで、少なくとも直近スキャン分は保護する。
+    let mut scan_roots = db.get_distinct_scan_directories().unwrap_or_default();
+    if let Ok(Some(last_directory)) = db.get_setting("last_directory_path") {
+        if !scan_roots.contains(&last_directory) {
+            scan_roots.push(last_directory);
+        }
+    }
+    scan_roots.sort_by_key(|r| std::cmp::Reverse(r.len()));
 
     // 最近表示した画像を多めに取得（除外フィルタ後に最大100件を返す。
     // 除外率が高い場合は100件未満になりうる）
@@ -285,7 +387,17 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
     // 除外パターンにマッチしないものだけ返す（最大100件）
     let filtered: Vec<RecentImage> = all_recent
         .into_iter()
-        .filter(|(path, _, _)| !ignore_filter.is_ignored(Path::new(path)))
+        .filter(|(path, _, _)| {
+            let p = Path::new(path);
+            let root = scan_roots
+                .iter()
+                .find(|r| p.starts_with(Path::new(r.as_str())));
+            let ignored = match root {
+                Some(r) => ignore_filter.is_ignored(p, Path::new(r.as_str())),
+                None => ignore_filter.is_ignored_anywhere(p),
+            };
+            !ignored
+        })
         .take(100)
         .map(|(path, display_count, last_displayed)| RecentImage {
             path,

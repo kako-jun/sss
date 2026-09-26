@@ -3,6 +3,7 @@ use crate::database::Database;
 use crate::playlist::Playlist;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
 /// アプリケーション状態
@@ -15,6 +16,9 @@ pub struct AppState {
     pub cache_worker: CacheWorker,
     /// スクリーンセーバー抑制ハンドル。初期化に失敗した環境（D-Bus 無し等）では `None`
     pub _keep_awake: Option<keepawake::AwakeHandle>,
+    /// `scan_directory` の二重実行防止フラグ（#61レビュー nit）。
+    /// `commands::scan::ScanGuard` が `compare_exchange` で操作する。
+    pub scan_in_progress: AtomicBool,
 }
 
 /// スキャン進捗情報

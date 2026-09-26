@@ -140,6 +140,7 @@ pub fn run() {
                 cache_dir,
                 cache_worker,
                 _keep_awake: keep_awake,
+                scan_in_progress: std::sync::atomic::AtomicBool::new(false),
             });
 
             Ok(())

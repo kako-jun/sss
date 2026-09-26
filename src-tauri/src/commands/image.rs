@@ -1,7 +1,7 @@
 use crate::cache_worker::CACHE_WAIT_TIMEOUT;
 use crate::commands::types::AppState;
 use crate::image_processor::{
-    get_display_dimensions, get_exif_info, is_video_file, plan_cache_file,
+    extract_date_only, get_display_dimensions, get_exif_info, is_video_file, plan_cache_file,
     requires_synchronous_cache, ImageInfo,
 };
 use std::path::Path;
@@ -204,9 +204,32 @@ async fn get_image_info_internal(
         None
     };
 
-    // データベースから統計情報を取得
+    // データベースから統計情報を取得。ついでに撮影日を exif_cache へ保存する（#61）。
+    // スキャン時に全件EXIFを読むと10万件規模で重いため、表示時（ここ）に取得した
+    // 撮影日を exif_cache に書き戻し、次回スキャン以降の撮影日除外ルール判定で
+    // 使えるようにする「遅延取得」方式を採る（詳細は docs/architecture.md 参照）。
+    // EXIFに撮影日が無い画像も captured_date=None で記録し、スキャン時の無駄な
+    // 再取得（「日付なし」判定の繰り返し）を防ぐ。file_mtime はファイルが変わったら
+    // 再取得が必要と判断するための基準として現在のmtimeを使う。
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let (display_count, last_displayed) = db.get_image_stats(image_path).unwrap_or((0, None));
+    if !is_video {
+        let date = exif
+            .as_ref()
+            .and_then(|e| e.date_time.as_deref())
+            .and_then(extract_date_only);
+        if let Ok(metadata) = std::fs::metadata(path) {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
+                    let _ = db.upsert_exif_cache(
+                        image_path,
+                        date.as_deref(),
+                        duration.as_secs() as i64,
+                    );
+                }
+            }
+        }
+    }
     drop(db);
 
     Ok(Some(ImageInfo {
