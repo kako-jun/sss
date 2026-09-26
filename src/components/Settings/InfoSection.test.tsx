@@ -58,6 +58,9 @@ describe('InfoSection GitHub link (openUrl)', () => {
 // プロセス自体を再起動するため、フロント側は resetAllData() を呼ぶだけで以降は
 // 何もしない（window.location.reload() 等は呼ばない。プロセスごと終了して
 // ようこそ画面から再スタートする）。
+// #79レビュー nit: 確認ダイアログ・実行中メッセージには「完了後アプリが再起動する」
+// ことを明記する。実行中メッセージ（ボタン下の補足欄）はボタン表示（「初期化中...」）
+// と文言を分け、同じ文字列が2箇所に重複表示されないようにする。
 describe('InfoSection reset button (resetAllData)', () => {
   it('does not call resetAllData when the confirmation dialog is declined', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
@@ -66,7 +69,7 @@ describe('InfoSection reset button (resetAllData)', () => {
     fireEvent.click(screen.getByText('設定を初期化'));
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。',
+      '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。完了後アプリが再起動します。',
     );
     expect(resetAllData).not.toHaveBeenCalled();
 
@@ -86,6 +89,9 @@ describe('InfoSection reset button (resetAllData)', () => {
 
     // 実行中はボタンが無効化される（重複クリック防止）
     expect(button.disabled).toBe(true);
+    // ボタン表示（「初期化中...」）とは別に、再起動する旨のメッセージを表示する
+    // （#79レビュー nit: 同じ文字列の重複表示を避ける）。
+    expect(screen.getByText('初期化しています。完了後アプリが再起動します。')).toBeTruthy();
 
     await waitFor(() => {
       expect(resetAllData).toHaveBeenCalledTimes(1);

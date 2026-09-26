@@ -202,20 +202,26 @@ sss は、10万枚規模の写真・動画コレクションを **完全平等�
 
 ### ⑤ 全データ初期化（`reset_all_data`、#64）
 
-設定画面の「設定を初期化」（`InfoSection.tsx`）から呼ばれる。旧実装は DB ファイル自体を `remove_file` していたが、実行中の Tauri プロセスが同じ接続を保持し続けたまま別プロセスがファイルを掴んでいる環境（Windows 等）ではファイル削除に失敗しうる不安定さがあったため、**DB ファイルは削除せず接続を開いたまま中身だけ空にする**方式に変更した。
+設定画面の「設定を初期化」（`InfoSection.tsx`）から呼ばれる。旧実装は DB ファイル自体を `remove_file` していたが、実行中の Tauri プロセスが同じ接続を保持し続けたまま別プロセスがファイルを掴んでいる環境（Windows 等）ではファイル削除に失敗しうる不安定さがあったため、**DB ファイルは削除せず接続を開いたまま中身だけ空にする**方式に変更した。ピック済みの画像ファイル（ピック先フォルダの実体）は対象外で、削除しない（DB上のメタデータのみ初期化する設計。詳細は `docs/user-guide.md`）。
+
+DBリセット・メモリ状態クリア・キャッシュクリアの中核ロジックは `commands::system::reset_core`（Tauri非依存の`pub fn`）に切り出してあり、`reset_all_data`コマンド本体と`tests/reset_all_data_e2e.rs`の両方が同じ実装を呼ぶ（#79レビューshould4: テストがロジック本体の変更に自動的に追従するように、手でロジックを再現しない）。
 
 1. **スキャンとの排他**: `scan_directory` と同じ `ScanGuard`（`AppState::scan_in_progress`）を取得する。スキャン中に呼ばれた場合、および初期化中にスキャンが開始されようとした場合のどちらも「スキャン実行中です。完了までお待ちください。」で拒否する。
-2. **DBリセット**: `Database::reset_to_defaults` が全ユーザーデータテーブルを1トランザクションで空にし、既定除外ルールを再投入する（`PRAGMA user_version`・スキーマは維持。§3 `database.rs` 参照）。`app_settings` も対象に含むため、`last_directory_path`/`apply_exif_rotation`/`share_directory_path`/`display_interval` 等のユーザー設定もすべて既定値へ戻る。
-3. **メモリ状態のクリア**: `AppState.playlist` を `None` に、`AppState.directory_path` を `None` にする。この直後にプロセスごと再起動する（下記4番）ため厳密には不要だが、再起動が実際にプロセスを終了させるまでのごく短い間に他のコマンドが呼ばれても古い状態を見せないための保険。
-4. **キャッシュクリア**: `clear_cache_dir`（起動時クリアと共通、§6(d)）でキャッシュディレクトリの中身を退避→再作成する。rename自体は同期的に完了するため、直後にプロセスを再起動しても取りこぼさない。
-5. **失敗セットのクリア**: `CacheWorker::clear_failed` で変換失敗の記録も消す。
-6. **プロセスの再起動**: `app.restart()` を呼ぶ。
+2. **DBロックを取得し、`app.restart()`まで保持し続ける**（#79レビュー nit）: `state.db.lock()`のガードを`reset_core`の呼び出しと`app.restart()`の両方に跨いで保持する。全DBコマンドは`#[tauri::command] async fn`でtokioのワーカースレッド上で実行されるため、このロックを握ったまま`app.restart()`がスレッドをブロックし続けても、他のasyncタスクはロック獲得待ちでpendingになるだけでtokio自体は他のワーカースレッドで動き続ける（互いに相手のロックを待つ循環が無いためデッドロックにはならない）。ロックを早期に解放していた旧実装では、reset直後・プロセス実終了前のごく短い間に処理中だった`get_next_image`等（表示回数の加算・`exif_cache`の書き戻し）が古いパスの行をリセット後のDBへ書き戻せてしまう余地があった。
+3. **`reset_core`本体**:
+   1. `Database::reset_to_defaults` が全ユーザーデータテーブル（`database.rs`の`USER_TABLES`定数。#79レビューshould3で配列化し、`sqlite_master`の実テーブル一覧との一致をテストで検証する）を1トランザクションで空にし、`sqlite_sequence`（`scan_history.id`のAUTOINCREMENT採番カウンタ）もクリアしてから既定除外ルールを再投入する（`PRAGMA user_version`・スキーマは維持。§3 `database.rs` 参照）。`app_settings` も対象に含むため、`last_directory_path`/`apply_exif_rotation`/`share_directory_path`/`display_interval` 等のユーザー設定もすべて既定値へ戻る。
+   2. **メモリ状態のクリア**: `AppState.playlist` を `None` に、`AppState.directory_path` を `None` にする。
+   3. **キャッシュクリア**: `clear_cache_dir`（起動時クリアと共通、§6(d)）でキャッシュディレクトリの中身を退避→再作成する。`cache_dir`は`AppState::cache_dir`（起動時に一度だけ解決され、以後変わらないフィールド）をそのまま使い、ここでは追加のfallibleなパス解決を一切行わない（#79レビューshould1: 旧実装はDBリセットの**後**に`app.path().app_data_dir()`を呼んでおり、それが失敗するとDBは空なのにアプリは再起動しない不整合な状態になりえた。フィールドアクセスは失敗し得ないため、この問題は構造的に起きなくなった）。rename自体は同期的に完了するため、直後にプロセスを再起動しても取りこぼさない。
+   4. **失敗セットのクリア**: `CacheWorker::clear_failed` で変換失敗の記録も消す。
+4. **プロセスの再起動**: `app.restart()` を呼ぶ（2番で取得したDBロックを持ち越したまま）。
 
-**4→6の設計に落ち着くまでの経緯**: 当初は上記1〜3のみ行い、`AppState.directory_path` に残しておいた旧スキャン対象へ `app.asset_protocol_scope().forbid_directory(dir, true)` を呼んで asset scope から明示的に取り消し、フロントは軽量な `window.location.reload()` だけで済ませる設計だった（`forbidden_patterns` は `allowed_patterns` より常に優先判定されるため、机上では取り消しが機能するはずだった）。しかしテストで実測したところ、**一度 `forbid_directory` したディレクトリは、その後同じディレクトリへ `allow_directory` を呼んでも `is_allowed` が `false` のまま戻らない**（forbidden が恒久的に優先され続け、取り消す API が無い）ことが判明した（`src-tauri/tests/reset_all_data_e2e.rs` のコメント参照）。これは「初期化→同じフォルダを選び直す」というごく普通の操作をしただけで、そのフォルダの画像が二度と表示できなくなる実装バグだったため撤回した。
+**4番の設計に落ち着くまでの経緯**: 当初は上記3のみ行い、`AppState.directory_path` に残しておいた旧スキャン対象へ `app.asset_protocol_scope().forbid_directory(dir, true)` を呼んで asset scope から明示的に取り消し、フロントは軽量な `window.location.reload()` だけで済ませる設計だった（`forbidden_patterns` は `allowed_patterns` より常に優先判定されるため、机上では取り消しが機能するはずだった）。しかしテストで実測したところ、**一度 `forbid_directory` したディレクトリは、その後同じディレクトリへ `allow_directory` を呼んでも `is_allowed` が `false` のまま戻らない**（forbidden が恒久的に優先され続け、取り消す API が無い）ことが判明した（`src-tauri/tests/reset_all_data_e2e.rs` のコメント参照）。これは「初期化→同じフォルダを選び直す」というごく普通の操作をしただけで、そのフォルダの画像が二度と表示できなくなる実装バグだったため撤回した。
 
-代わりに `app.restart()`（`AppHandle::restart`、戻り値は `!`＝絶対に戻らない。tauri 2.10.3 `app.rs`で確認済み）でプロセス自体を再起動する方式にした。asset scope・`AppState` のメモリ状態はどちらも新規プロセスとして最初から構築されるため、この問題は原理的に起きない。`app.restart()` はメインスレッド上での呼び出しなら新プロセスを spawn してから `exit(0)`、そうでなければ `RunEvent::ExitRequested`/`Exit` をトリガーしてこの呼び出し自体はスレッドをブロックし続ける（イベントループが実際の終了処理を担う）。`tauri dev` 実行時はコンパイル済みのdevバイナリを直接再execするだけで `npm run tauri dev` のオーケストレーション（vite dev serverの起動）自体は再実行しないため、既に立っている dev server へ再接続するだけで通常のリリースビルドと同様に動作する。
+代わりに `app.restart()`（`AppHandle::restart`、戻り値は `!`＝絶対に戻らない。tauri 2.10.3 `app.rs`で確認済み）でプロセス自体を再起動する方式にした。asset scope・`AppState` のメモリ状態はどちらも新規プロセスとして最初から構築されるため、この問題は原理的に起きない。`app.restart()` はメインスレッド上での呼び出しなら新プロセスを spawn してから `exit(0)`、そうでなければ `RunEvent::ExitRequested`/`Exit` をトリガーしてこの呼び出し自体はスレッドをブロックし続ける（イベントループが実際の終了処理を担う）。
 
-フロント（`InfoSection.tsx`）は確認ダイアログ→`resetAllData()` の順に進むだけで、成功時に追加で行う処理は無い（`window.location.reload()` は呼ばない）。バックエンドが成功時にプロセスごと再起動するため、この `invoke` 呼び出しは通常戻ってこない。`resetAllData()` が reject した場合のみ日本語のエラーメッセージ（Tauri commandの `Result<_, String>` をそのまま表示）を出し、ボタンを再度有効化する。
+**`tauri dev` 実行時の挙動について（#79レビューshould2、未検証）**: `tauri-cli` の dev は、アプリプロセスの終了時に `beforeDevCommand`（vite dev server）ごと kill する可能性が高い。もしそうなら、dev環境で本コマンドを呼ぶと dev server ごと停止し、再起動後のウィンドウが白画面のまま戻ってこない事故になりうる。この挙動はまだ実機確認していない。**実機での動作確認は `tauri dev` ではなく `tauri build`（`--debug` も可）が生成する、単体で完結した実行ファイルに対して行うこと。**
+
+フロント（`InfoSection.tsx`）は確認ダイアログ（「完了後アプリが再起動します」と明記）→`resetAllData()` の順に進むだけで、成功時に追加で行う処理は無い（`window.location.reload()` は呼ばない）。バックエンドが成功時にプロセスごと再起動するため、この `invoke` 呼び出しは通常戻ってこない。`resetAllData()` が reject した場合のみ日本語のエラーメッセージ（Tauri commandの `Result<_, String>` をそのまま表示）を出し、ボタンを再度有効化する。
 
 ## 6. 主要な設計判断
 

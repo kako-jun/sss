@@ -1,13 +1,15 @@
-//! #64 回帰テスト: `reset_all_data` の中核ロジック（DBを開いたままの全ユーザーデータ
-//! テーブルのリセット＋メモリ上のplaylist/directory_pathのクリア）を実行した後、
-//! DBファイル・接続を作り直さずに新しいディレクトリを問題なく再スキャンできることを
-//! 確認する。
+//! #64 回帰テスト: `commands::system::reset_core`（DBを開いたままの全ユーザーデータ
+//! テーブルのリセット＋メモリ上のplaylist/directory_pathのクリア＋キャッシュクリア）
+//! を実行した後、DBファイル・接続を作り直さずに新しいディレクトリを問題なく
+//! 再スキャンできることを確認する。
 //!
-//! `reset_all_data` コマンド自体は `AppHandle`（Wry固定のruntimeジェネリクス）を
-//! 取るため、`perform_scan`/`perform_restore` と同じ理由で `tauri::test::mock_app()`
-//! の `MockRuntime` では直接呼び出せない（各e2eテストのコメント参照）。ここでは
-//! Tauri非依存の中核部分（`Database::reset_to_defaults` と `Mutex` のクリア）を
-//! 直接組み立てて呼び、実際の `perform_scan` で再スキャンできることまで確認する。
+//! `reset_core`は`reset_all_data`コマンド本体（`src/commands/system.rs`）とここの
+//! 両方から同じ実装を呼ぶ（#79レビューshould4: テストがロジック本体の変更に
+//! 自動的に追従するように、旧実装のように手でロジックを再現しない）。
+//! `reset_all_data`コマンド自体は`AppHandle`（Wry固定のruntimeジェネリクス）を
+//! 取るため、`perform_scan`/`perform_restore`と同じ理由で`tauri::test::mock_app()`
+//! の`MockRuntime`では直接呼び出せない（各e2eテストのコメント参照）ことに変わりは
+//! ないが、`reset_core`自体はTauri非依存のため直接呼べる。
 //! （`Database::reset_to_defaults`単体の詳細な網羅は`src/database.rs`のユニットテスト、
 //! スキャン中の排他は`src/commands/scan.rs`の`ScanGuard`ユニットテストが担う）
 //!
@@ -24,7 +26,9 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use sss_lib::cache_worker::CacheWorker;
 use sss_lib::commands::scan::perform_scan;
+use sss_lib::commands::system::reset_core;
 use sss_lib::database::Database;
 use sss_lib::playlist::Playlist;
 
@@ -50,6 +54,8 @@ fn reset_clears_state_and_allows_scanning_a_new_directory_afterward() {
     let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
     let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
     let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
+    let cache_dir = dir.join("cache");
+    let cache_worker = CacheWorker::spawn(cache_dir.clone());
 
     perform_scan(
         &db_mutex,
@@ -66,13 +72,19 @@ fn reset_clears_state_and_allows_scanning_a_new_directory_afterward() {
     assert!(directory_path_mutex.lock().unwrap().is_some());
     assert_eq!(db_mutex.lock().unwrap().get_total_image_count().unwrap(), 3);
 
-    // --- ここから `commands::system::reset_all_data` の中核部分を再現する ---
-    // 1. DBを開いたまま（接続を作り直さず）全ユーザーデータテーブルをリセット
-    db_mutex.lock().unwrap().reset_to_defaults().unwrap();
-    // 2. メモリ上のplaylist/directory_pathをクリア
-    *playlist_mutex.lock().unwrap() = None;
-    *directory_path_mutex.lock().unwrap() = None;
-    // --- ここまで ---
+    // `commands::system::reset_core`（`reset_all_data`コマンドと共通の中核ロジック）
+    // をそのまま呼ぶ（#79レビューshould4）。
+    {
+        let db_guard = db_mutex.lock().unwrap();
+        reset_core(
+            &db_guard,
+            &playlist_mutex,
+            &directory_path_mutex,
+            &cache_worker,
+            &cache_dir,
+        )
+        .unwrap();
+    }
 
     {
         let db = db_mutex.lock().unwrap();
@@ -156,6 +168,8 @@ fn reset_clears_state_and_allows_rescanning_the_same_directory_afterward() {
     let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
     let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
     let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
+    let cache_dir = dir.join("cache");
+    let cache_worker = CacheWorker::spawn(cache_dir.clone());
 
     perform_scan(
         &db_mutex,
@@ -168,11 +182,19 @@ fn reset_clears_state_and_allows_rescanning_the_same_directory_afterward() {
     .unwrap();
     assert_eq!(db_mutex.lock().unwrap().get_total_image_count().unwrap(), 4);
 
-    // --- reset_all_data の中核部分を再現 ---
-    db_mutex.lock().unwrap().reset_to_defaults().unwrap();
-    *playlist_mutex.lock().unwrap() = None;
-    *directory_path_mutex.lock().unwrap() = None;
-    // --- ここまで ---
+    // `commands::system::reset_core`（`reset_all_data`コマンドと共通の中核ロジック）
+    // をそのまま呼ぶ（#79レビューshould4）。
+    {
+        let db_guard = db_mutex.lock().unwrap();
+        reset_core(
+            &db_guard,
+            &playlist_mutex,
+            &directory_path_mutex,
+            &cache_worker,
+            &cache_dir,
+        )
+        .unwrap();
+    }
 
     assert_eq!(
         db_mutex.lock().unwrap().get_total_image_count().unwrap(),

@@ -103,6 +103,21 @@ const DEFAULT_IGNORE_RULES: [&str; 6] = [
     "**/.**/",
 ];
 
+/// `reset_to_defaults` がDELETEする対象テーブル（#79レビューshould3で配列化した。
+/// 新しいユーザーデータテーブルを追加したら必ずここに追記すること。追記漏れは
+/// `reset_to_defaults_user_tables_matches_all_tables_in_sqlite_master`（テスト）が
+/// `sqlite_master` の実テーブル一覧と突き合わせて検知する）。
+const USER_TABLES: [&str; 8] = [
+    "file_metadata",
+    "image_stats",
+    "playlist_list",
+    "playlist_position",
+    "ignore_rules",
+    "exif_cache",
+    "scan_history",
+    "app_settings",
+];
+
 /// `DEFAULT_IGNORE_RULES` を `ignore_rules` に挿入する（`INSERT OR IGNORE` なので
 /// 既存行があっても冪等）。`conn` は `Connection`/`Transaction` のどちらでも可。
 fn insert_default_ignore_rules(conn: &Connection) -> Result<()> {
@@ -314,16 +329,18 @@ impl Database {
     ///   名の通り、ユーザー設定も含めて工場出荷状態に戻すのが仕様の意図（Issue #64）で、
     ///   ここだけ除外すると再起動後に「初期化したのに前の間隔設定が残る」ことになる。
     /// - 途中で失敗したら丸ごとロールバックされ、中途半端な空テーブルにはならない。
+    /// - 対象テーブルは `USER_TABLES` にまとめてある（#79レビューshould3）。加えて
+    ///   `scan_history.id`（`AUTOINCREMENT`）の採番カウンタが記録された内部テーブル
+    ///   `sqlite_sequence` も明示的にクリアする。`sqlite_sequence` 自体は SQLite の
+    ///   内部テーブル（`sqlite_` 接頭辞）のため `USER_TABLES` には含めないが、
+    ///   クリアし忘れると初期化後も `scan_history.id` が古い最大値の続きから
+    ///   採番されてしまう。
     pub fn reset_to_defaults(&self) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM file_metadata", [])?;
-        tx.execute("DELETE FROM image_stats", [])?;
-        tx.execute("DELETE FROM playlist_list", [])?;
-        tx.execute("DELETE FROM playlist_position", [])?;
-        tx.execute("DELETE FROM ignore_rules", [])?;
-        tx.execute("DELETE FROM exif_cache", [])?;
-        tx.execute("DELETE FROM scan_history", [])?;
-        tx.execute("DELETE FROM app_settings", [])?;
+        for table in USER_TABLES {
+            tx.execute(&format!("DELETE FROM {table}"), [])?;
+        }
+        tx.execute("DELETE FROM sqlite_sequence", [])?;
         insert_default_ignore_rules(&tx)?;
         tx.commit()?;
         Ok(())
@@ -2213,6 +2230,39 @@ mod tests {
             db.get_ignore_rules().unwrap().len(),
             7,
             "ロールバックによりignore_rulesの削除・既定再投入も取り消され、元の7件のままのはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #79レビューshould3: `USER_TABLES`（`reset_to_defaults`がDELETEする対象）が、
+    /// 実際のスキーマ（`sqlite_master`の`type='table'`一覧から、SQLite内部テーブル
+    /// `sqlite_%`接頭辞を除いたもの）と過不足なく一致すること。新しいテーブルを
+    /// 追加したのに`USER_TABLES`への追記を忘れると、そのテーブルだけ
+    /// `reset_to_defaults`で空にならず初期化が中途半端になる事故を機械的に検知する。
+    #[test]
+    fn reset_to_defaults_user_tables_matches_all_tables_in_sqlite_master() {
+        let path = temp_db_path("user_tables_matches_schema");
+        let db = Database::new(path.clone()).unwrap();
+
+        let mut actual_tables: Vec<String> = db
+            .conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        actual_tables.retain(|name| !name.starts_with("sqlite_"));
+        actual_tables.sort();
+
+        let mut expected_tables: Vec<String> = USER_TABLES.iter().map(|s| s.to_string()).collect();
+        expected_tables.sort();
+
+        assert_eq!(
+            actual_tables, expected_tables,
+            "USER_TABLESとsqlite_masterの実テーブル一覧（sqlite_%接頭辞を除く）は\
+             過不足なく一致するはず"
         );
 
         let _ = std::fs::remove_file(&path);

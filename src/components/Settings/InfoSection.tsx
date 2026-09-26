@@ -18,14 +18,14 @@ export function InfoSection() {
   const handleResetSettings = async () => {
     if (
       !confirm(
-        '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。',
+        '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。完了後アプリが再起動します。',
       )
     ) {
       return;
     }
 
     setIsResetting(true);
-    setResetMessage('初期化中...');
+    setResetMessage('初期化しています。完了後アプリが再起動します。');
 
     try {
       // バックエンド（reset_all_data）は初期化が成功すると最後にアプリのプロセス

@@ -353,18 +353,28 @@ CREATE TABLE scan_history (
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
   14. `get_display_stats`: 統計データ取得（グラフ用、全画像の表示回数）
   15. `get_default_share_directory`: ピック先デフォルトパス取得
-  16. `reset_all_data`: 全データ初期化（#64）。DBファイルは削除せず、開いた接続のまま
-      `Database::reset_to_defaults`で全ユーザーデータテーブル（`app_settings`含む）を
-      1トランザクションで空にし既定除外ルールを再投入する（スキーマ・`user_version`は
-      維持）。メモリ上の`playlist`/`directory_path`もクリアし、キャッシュクリア
-      （`clear_cache_dir`）・ワーカーの失敗セットクリアも行った後、`app.restart()`で
-      プロセス自体を再起動する。当初はasset scopeを`forbid_directory()`で明示的に
-      取り消しフロントが`window.location.reload()`するだけの設計だったが、実測で
-      「`forbid_directory`したディレクトリはその後`allow_directory`しても許可が
-      復活しない（取り消すAPIが無い）」ことが判明し、初期化後に同じフォルダを
-      選び直すと画像が二度と表示できなくなる実装バグだったため撤回した。プロセス
-      再起動なら asset scope・メモリ状態が新規プロセスとして確実に作り直される
-      （詳細は`docs/architecture.md`§5⑤）。`scan_directory`と同じ`ScanGuard`で
+  16. `reset_all_data`: 全データ初期化（#64）。中核ロジックは`commands::system::
+reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
+      `tests/reset_all_data_e2e.rs`の両方から呼ぶ、#79レビューshould4）に切り出し。
+      DBファイルは削除せず、開いた接続のまま`Database::reset_to_defaults`（対象は
+      `USER_TABLES`定数、#79レビューshould3。`sqlite_sequence`もクリア）で全ユーザー
+      データテーブル（`app_settings`含む）を1トランザクションで空にし既定除外ルールを
+      再投入する（スキーマ・`user_version`は維持）。ピック済み画像ファイル自体は
+      対象外（削除しない）。メモリ上の`playlist`/`directory_path`もクリアし、
+      キャッシュクリア（`clear_cache_dir`、`cache_dir`は`AppState::cache_dir`を
+      そのまま使いDBリセット後に追加のfallibleなパス解決をしない。#79レビュー
+      should1）・ワーカーの失敗セットクリアも行った後、`app.restart()`でプロセス
+      自体を再起動する。DBロックは`state.db.lock()`から`app.restart()`まで保持し
+      続け、in-flightの`get_next_image`等の書き戻しを遮断する（#79レビュー nit。
+      全DBコマンドがasyncなためデッドロックしない）。当初はasset scopeを
+      `forbid_directory()`で明示的に取り消しフロントが`window.location.reload()`
+      するだけの設計だったが、実測で「`forbid_directory`したディレクトリはその後
+      `allow_directory`しても許可が復活しない（取り消すAPIが無い）」ことが判明し、
+      初期化後に同じフォルダを選び直すと画像が二度と表示できなくなる実装バグだった
+      ため撤回した。プロセス再起動なら asset scope・メモリ状態が新規プロセスとして
+      確実に作り直される（詳細は`docs/architecture.md`§5⑤）。`tauri dev`実行時の
+      挙動は未検証（`beforeDevCommand`ごとkillされ得る）で、実機確認は`tauri build`
+      （`--debug`可）の成果物で行う。`scan_directory`と同じ`ScanGuard`で
       スキャンと排他する
   17. `get_ignore_patterns`: 除外ルール一覧を取得
   18. `remove_ignore_pattern`: 除外ルールを削除
