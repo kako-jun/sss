@@ -26,17 +26,34 @@ pub async fn reset_all_data(app: AppHandle) -> Result<(), String> {
     // キャッシュの中身を削除する（ディレクトリ自体は残す）。
     // #60: cache_dir は起動時に asset scope へ許可済みで、実行中の CacheWorker も
     // このパスへ書き続けるため、ディレクトリ自体を消すと以後のキャッシュ書込が失敗する。
-    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let result = if path.is_dir() {
-                std::fs::remove_dir_all(&path)
-            } else {
-                std::fs::remove_file(&path)
-            };
-            if let Err(e) = result {
-                eprintln!("Failed to remove cache entry {}: {e}", path.display());
+    //
+    // アプリ稼働中に呼ばれるため、中身を1件ずつ削除するとワーカーの新規書込と競合しうる
+    // （レビュー must5 と同じ理由。起動時クリアと同様、rename→再作成でレースを避ける）。
+    if cache_dir.exists() {
+        let trash_dir = app_data_dir.join(format!(
+            "cache-trash-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        ));
+        match std::fs::rename(&cache_dir, &trash_dir) {
+            Ok(()) => {
+                std::thread::spawn(move || {
+                    if let Err(e) = std::fs::remove_dir_all(&trash_dir) {
+                        eprintln!(
+                            "Failed to remove stale cache trash {}: {e}",
+                            trash_dir.display()
+                        );
+                    }
+                });
             }
+            Err(e) => {
+                eprintln!("Failed to move cache directory to trash for reset: {e}");
+            }
+        }
+        if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+            eprintln!("Failed to recreate cache directory after reset: {e}");
         }
     }
 

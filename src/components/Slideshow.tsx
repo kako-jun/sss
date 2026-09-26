@@ -61,6 +61,16 @@ export function Slideshow({ image, isLoading, onVideoEnded }: SlideshowProps) {
             key={image.path}
             src={srcUrl}
             alt={image.path}
+            // #60 レビュー方針転換: 回転はバックエンドで焼き込まず、フロントの
+            // image-orientation CSS で行う（apply_exif_rotation設定に連動して
+            // from-image/noneを切替）。ただし asset プロトコルはWebViewから見て
+            // 別オリジンであり、crossOrigin無しのクロスオリジン画像は
+            // image-orientation自体が無視される（Edgeで実測確認済み）。
+            // tauri 2.10.3 の asset protocol ハンドラ（src/protocol/asset.rs）は
+            // Access-Control-Allow-Origin にwindow_originをそのまま返す
+            // （ワイルドカードではなく実オリジンを反映）ため、crossOrigin="anonymous"
+            // （認証情報なしのCORSリクエスト）でCORSチェックを通過できる。
+            crossOrigin="anonymous"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -68,12 +78,13 @@ export function Slideshow({ image, isLoading, onVideoEnded }: SlideshowProps) {
             className="w-full h-full object-contain"
             style={{
               willChange: 'opacity',
-              // WebView既定の image-orientation: from-image を無効化する。
-              // 回転はバックエンドが一元管理する（apply_exif_rotation設定に従って
-              // キャッシュ生成時にのみ画素を回転し、その際EXIFは再エンコードで失われる）。
-              // これが無いと、設定OFF時でも原本のEXIF Orientationに従ってWebViewが
-              // 勝手に回転してしまい、設定の意味（OFF=回転しない）と矛盾する（#60）。
-              imageOrientation: 'none',
+              // apply_exif_rotation設定に連動: ONならWebView既定の
+              // from-image（EXIF Orientationに従って自動回転）に任せ、
+              // OFFならnoneで原本の生ピクセルのまま表示する。
+              // なお4K超/TIFF等で結局バックエンドがキャッシュを焼く場合は
+              // そのキャッシュがapply_rotationに従って既に回転済み・EXIF無しで
+              // 書き出されるため、from-imageを当てても二重回転はしない。
+              imageOrientation: image.applyRotation ? 'from-image' : 'none',
             }}
             draggable={false}
             onError={(e) => {

@@ -32,6 +32,10 @@ pub struct ImageInfo {
     pub exif: Option<ExifInfo>,
     pub display_count: i32,
     pub last_displayed: Option<String>,
+    /// apply_exif_rotation 設定のスナップショット。回転はフロントの `image-orientation`
+    /// CSS で行うため（#60 レビュー方針転換）、フロントがこの値を見て
+    /// `from-image`（true）/`none`（false）を切り替える必要がある。
+    pub apply_rotation: bool,
 }
 
 /// 画像を読み込み、apply_rotation=true かつ EXIF Orientation が存在する場合は回転・反転を適用する。
@@ -166,8 +170,19 @@ pub fn get_display_dimensions(
 ///
 /// キャッシュが必要になる条件（いずれか）:
 /// - WebView が直接表示できない形式（TIFF等）
-/// - apply_rotation=true かつ EXIF Orientation が回転/反転を要求している
 /// - 表示サイズが 4K を超える
+///
+/// EXIF回転**だけ**が理由でキャッシュを作ることはしない（#60 レビュー方針転換）。
+/// 回転はフロントの `image-orientation` CSS（apply_rotation設定に連動して
+/// `from-image`/`none` を切替）で行い、原本をそのまま asset プロトコル経由で表示する。
+/// ただし上記の理由で結局キャッシュが必要になった画像（4K超・TIFF等）は、
+/// キャッシュ生成時に apply_rotation の値に従って画素を回転しEXIFなしで書き出す
+/// （`optimize_image_for_4k` 参照。生成物にはEXIFが残らないため `from-image` を
+/// 当てても二重回転しない）。
+///
+/// 4K超の判定はヘッダ上の生の幅高さ（回転前）で行う。WebView は原本をそのまま
+/// デコードしてから CSS で回転を表示上適用するだけで、デコード時のメモリコストは
+/// 回転の有無に関係ないため。
 ///
 /// アニメーション可能な形式（GIF/WebP）は上記条件に関わらず常に対象外
 /// （静止フレーム化によるアニメ潰れを避けるため）。
@@ -182,19 +197,10 @@ pub fn plan_cache_file(
 
     let unsupported_by_webview = is_webview_unsupported_format(image_path);
 
-    let orientation = if apply_rotation {
-        read_exif_orientation(image_path)
-    } else {
-        None
-    };
-    let rotation_needed = orientation
-        .map(|o| o != image::metadata::Orientation::NoTransforms)
-        .unwrap_or(false);
-
-    let (width, height) = get_display_dimensions(image_path, apply_rotation).unwrap_or((0, 0));
+    let (width, height) = get_image_dimensions(image_path).unwrap_or((0, 0));
     let oversized = needs_4k_resize(width, height);
 
-    if !(unsupported_by_webview || rotation_needed || oversized) {
+    if !(unsupported_by_webview || oversized) {
         return None;
     }
 
@@ -203,9 +209,26 @@ pub fn plan_cache_file(
     } else {
         "jpg"
     };
+    // キャッシュキーには apply_rotation に加えて原本の mtime・サイズも含める
+    // （原本が置き換わった場合に古いキャッシュを誤って使い回さないため）。
+    let (mtime, size) = std::fs::metadata(image_path)
+        .ok()
+        .map(|m| {
+            let mtime = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            (mtime, m.len())
+        })
+        .unwrap_or((0, 0));
     let hash = format!(
         "{:x}",
-        md5::compute(format!("{}:{apply_rotation}", image_path.to_string_lossy()))
+        md5::compute(format!(
+            "{}:{apply_rotation}:{mtime}:{size}",
+            image_path.to_string_lossy()
+        ))
     );
     Some(cache_dir.join(format!("{hash}.{ext}")))
 }
@@ -458,55 +481,131 @@ mod tests {
         (path, decoded_base)
     }
 
-    /// Orientation 1〜8 それぞれについて、EXIF から読み取った値が
-    /// image crate の公式ドキュメント通りの変換（かつ #60 で直した5/7の組み合わせ）と
-    /// 一致すること、および90/270度系で幅高さが入れ替わることを画素検証する。
+    /// 4色に塗った象限のうちどれか（サンプル点の分類に使う）。
+    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+    enum Quadrant {
+        Red,
+        Green,
+        Blue,
+        Yellow,
+    }
+
+    /// stored 座標 (sx,sy) が `base_test_image()`（W=16,H=32）のどの象限かを返す。
+    fn stored_quadrant(sx: u32, sy: u32) -> Quadrant {
+        match (sx < 8, sy < 16) {
+            (true, true) => Quadrant::Red,
+            (false, true) => Quadrant::Green,
+            (true, false) => Quadrant::Blue,
+            (false, false) => Quadrant::Yellow,
+        }
+    }
+
+    /// EXIF Orientation の定義（ExifTool/impulseadventure が示す標準的な幾何変換）から
+    /// 独立に導出した「表示座標(dx,dy) → 元画像の格納座標(sx,sy)」の逆写像。
+    ///
+    /// image crate の `rotate90()`/`fliph()` 等を呼んで期待値を作ると、実装のバグを
+    /// 実装自身でなぞって検証してしまう（#60 レビュー指摘）。ここでは EXIF 仕様が
+    /// 定義する幾何操作（水平反転・180度回転・垂直反転・転置・90度回転・反転置・
+    /// 270度回転）の数式を直接書き下し、image crate の実装を経由せずに期待値を得る。
+    ///
+    /// 導出（W=元画像幅, H=元画像高さ。転置系は表示サイズが H×W になる）:
+    /// - 1 無変換:            (sx,sy) = (dx, dy)
+    /// - 2 水平反転:          (sx,sy) = (W-1-dx, dy)
+    /// - 3 180度回転:         (sx,sy) = (W-1-dx, H-1-dy)
+    /// - 4 垂直反転:          (sx,sy) = (dx, H-1-dy)
+    /// - 5 転置(主対角線反転): (sx,sy) = (dy, dx)                　※水平反転+270度回転と等価
+    /// - 6 90度時計回り回転:   (sx,sy) = (dy, H-1-dx)
+    /// - 7 反転置(反対角線反転):(sx,sy) = (W-1-dy, H-1-dx)         ※水平反転+90度回転と等価
+    /// - 8 270度時計回り回転:  (sx,sy) = (W-1-dy, dx)
+    fn stored_coord_for_display(orientation: u8, w: u32, h: u32, dx: u32, dy: u32) -> (u32, u32) {
+        match orientation {
+            1 => (dx, dy),
+            2 => (w - 1 - dx, dy),
+            3 => (w - 1 - dx, h - 1 - dy),
+            4 => (dx, h - 1 - dy),
+            5 => (dy, dx),
+            6 => (dy, h - 1 - dx),
+            7 => (w - 1 - dy, h - 1 - dx),
+            8 => (w - 1 - dy, dx),
+            _ => unreachable!("orientation must be 1..=8"),
+        }
+    }
+
+    /// 実測ピクセルが期待象限の色に十分近いか（JPEG非可逆圧縮の誤差を許容）。
+    fn color_matches_quadrant(actual: image::Rgb<u8>, expected: Quadrant, tol: i32) -> bool {
+        let [er, eg, eb] = match expected {
+            Quadrant::Red => [255u8, 0, 0],
+            Quadrant::Green => [0, 255, 0],
+            Quadrant::Blue => [0, 0, 255],
+            Quadrant::Yellow => [255, 255, 0],
+        };
+        let [ar, ag, ab] = actual.0;
+        (ar as i32 - er as i32).abs() <= tol
+            && (ag as i32 - eg as i32).abs() <= tol
+            && (ab as i32 - eb as i32).abs() <= tol
+    }
+
+    /// Orientation 1〜8 それぞれについて、EXIF 仕様の幾何定義から独立に導出した
+    /// 期待象限位置（`stored_coord_for_display`）と実際の変換結果を象限サンプル点で
+    /// 比較する（#60 レビュー must8: image crate の rotate/flip 関数を呼んで期待値を
+    /// 作らない）。90/270度系で幅高さが入れ替わることも併せて検証する。
     #[test]
-    fn orientation_1_to_8_apply_documented_exif_transform() {
+    fn orientation_1_to_8_matches_exif_geometric_definition() {
+        const W: u32 = 16;
+        const H: u32 = 32;
+
         let dir =
             std::env::temp_dir().join(format!("sss_orientation_fixture_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
         for orientation in 1u8..=8 {
-            let (path, base) = write_test_jpeg(&dir, &format!("o{orientation}.jpg"), orientation);
+            let (path, _base) = write_test_jpeg(&dir, &format!("o{orientation}.jpg"), orientation);
 
             let img = load_and_orient(&path, true).expect("decode + orient should succeed");
-            let (w, h) = img.dimensions();
+            let (disp_w, disp_h) = img.dimensions();
 
             let (expected_w, expected_h) = if matches!(orientation, 5..=8) {
-                (32, 16)
+                (H, W)
             } else {
-                (16, 32)
+                (W, H)
             };
             assert_eq!(
-                (w, h),
+                (disp_w, disp_h),
                 (expected_w, expected_h),
-                "orientation {orientation}: 回転後の幅高さが期待値と不一致"
-            );
-
-            let expected = match orientation {
-                1 => base,
-                2 => base.fliph(),
-                3 => base.rotate180(),
-                4 => base.flipv(),
-                // #60: 旧実装は5でflipv、7でrotate90+filphという誤りだった
-                5 => base.rotate90().fliph(),
-                6 => base.rotate90(),
-                7 => base.rotate270().fliph(),
-                8 => base.rotate270(),
-                _ => unreachable!(),
-            };
-
-            assert_eq!(
-                img.to_rgb8().into_raw(),
-                expected.to_rgb8().into_raw(),
-                "orientation {orientation}: 画素が期待される変換と不一致"
+                "orientation {orientation}: 表示サイズが期待値と不一致"
             );
 
             // get_display_dimensions もヘッダのみで同じ幅高さ入替を報告するはず
             let display_dims = get_display_dimensions(&path, true).expect("display dims");
             assert_eq!(display_dims, (expected_w, expected_h));
+
+            let rgb = img.to_rgb8();
+
+            // 各表示象限のサンプル点（境界から十分離し、JPEG圧縮の滲みを避ける）
+            let quarter_w = disp_w / 4;
+            let quarter_h = disp_h / 4;
+            let sample_points = [
+                ("top-left", quarter_w, quarter_h),
+                ("top-right", disp_w - 1 - quarter_w, quarter_h),
+                ("bottom-left", quarter_w, disp_h - 1 - quarter_h),
+                (
+                    "bottom-right",
+                    disp_w - 1 - quarter_w,
+                    disp_h - 1 - quarter_h,
+                ),
+            ];
+
+            for (label, dx, dy) in sample_points {
+                let (sx, sy) = stored_coord_for_display(orientation, W, H, dx, dy);
+                let expected_quadrant = stored_quadrant(sx, sy);
+                let actual = *rgb.get_pixel(dx, dy);
+                assert!(
+                    color_matches_quadrant(actual, expected_quadrant, 20),
+                    "orientation {orientation} の {label} (dx={dx},dy={dy}): \
+                     期待 {expected_quadrant:?} だが実測 {actual:?}"
+                );
+            }
         }
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -576,10 +675,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 回転のみが理由でキャッシュ対象になるケース（4K未満・WebView対応形式）。
-    /// #60 のデシジョンテーブルの「回転要否=要, 4K超=否, アニメ=否」セル。
+    /// #60 レビュー方針転換: 回転は常にフロントの CSS（`image-orientation`）で行うため、
+    /// EXIF回転が必要というだけではキャッシュを作らない（4K超でも TIFF等でもない限り）。
+    /// apply_rotation の true/false どちらでも結果は変わらない。
     #[test]
-    fn plan_cache_file_some_when_rotation_needed_only() {
+    fn plan_cache_file_ignores_rotation_need_regardless_of_apply_rotation_setting() {
         let dir = std::env::temp_dir().join(format!(
             "sss_plan_cache_rotation_only_{}",
             std::process::id()
@@ -587,34 +687,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
-        // Orientation 6 は90度回転が必要（16x32 が回転後32x16、いずれも4K未満）
+        // Orientation 6 は90度回転が必要（16x32 が回転後32x16、いずれも4K未満・JPEG形式）
         let (path, _) = write_test_jpeg(&dir, "o6.jpg", 6);
-        let plan = plan_cache_file(&path, true, &dir.join("cache"));
-        assert!(plan.is_some(), "回転のみが理由でもキャッシュ対象になるはず");
         assert_eq!(
-            plan.unwrap().extension().and_then(|e| e.to_str()),
-            Some("jpg")
+            plan_cache_file(&path, true, &dir.join("cache")),
+            None,
+            "回転のみが理由ではキャッシュ対象にならないはず（apply_rotation=true）"
+        );
+        assert_eq!(
+            plan_cache_file(&path, false, &dir.join("cache")),
+            None,
+            "回転のみが理由ではキャッシュ対象にならないはず（apply_rotation=false）"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// apply_rotation=false は回転要否の判定自体を無効化する。
-    /// #60 のデシジョンテーブルの「回転要否=要だが apply_rotation=false」セル
-    /// （EXIF は回転を求めているが設定でOFF → キャッシュ不要）。
+    /// キャッシュキーには apply_rotation・mtime・サイズを含める（nit: 原本が
+    /// 置き換わった場合に古いキャッシュを誤って使い回さないため）。
+    /// 4K超で結局キャッシュ対象になるケースを使い、apply_rotation違いで
+    /// 別のキャッシュファイルになることを確認する。
     #[test]
-    fn plan_cache_file_none_when_apply_rotation_false_ignores_orientation() {
-        let dir = std::env::temp_dir().join(format!(
-            "sss_plan_cache_rotation_off_{}",
-            std::process::id()
-        ));
+    fn plan_cache_file_key_varies_with_apply_rotation() {
+        let dir = std::env::temp_dir().join(format!("sss_plan_cache_key_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
-        // Orientation 6 は本来回転が必要だが、apply_rotation=false なので無視される。
-        // 4K未満・JPEG形式（WebView対応）なので他に理由もない → None。
-        let (path, _) = write_test_jpeg(&dir, "o6.jpg", 6);
-        assert_eq!(plan_cache_file(&path, false, &dir.join("cache")), None);
+        let oversized = image::DynamicImage::ImageRgb8(image::RgbImage::new(MAX_WIDTH_4K + 1, 4));
+        let path = dir.join("big.jpg");
+        std::fs::write(&path, encode(&oversized, ImageFormat::Jpeg)).unwrap();
+
+        let plan_true = plan_cache_file(&path, true, &dir.join("cache")).expect("4K超なので Some");
+        let plan_false =
+            plan_cache_file(&path, false, &dir.join("cache")).expect("4K超なので Some");
+        assert_ne!(
+            plan_true, plan_false,
+            "apply_rotation違いは別キャッシュファイルになるはず"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

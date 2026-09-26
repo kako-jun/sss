@@ -25,6 +25,7 @@ function makeImage(overrides: Partial<ImageInfo> = {}): ImageInfo {
     exif: null,
     displayCount: 0,
     lastDisplayed: null,
+    applyRotation: true,
     ...overrides,
   };
 }

@@ -51,9 +51,10 @@
   - 画像: JPG, PNG, GIF, BMP, WEBP など
   - 動画: MP4, WebM, OGV, M4V（旧フォーマットはffmpeg同梱後に対応予定 #45）
 - **表示モード**: 4K最適化 (3840x2160)
-- **画像処理**: EXIF回転が必要/4K超/WebView非対応形式(TIFF等)のいずれかに該当する画像だけをキャッシュ対象にし、自動リサイズ(Lanczos3フィルタ)・JPEG品質90%明示(透過を持つ場合はPNG)でキャッシュフォルダに保存。アニメGIF/WebPは静止フレーム化を避けるため常にキャッシュ対象外
+- **EXIF回転**: 原則バックエンドで焼き込まず、フロントの`image-orientation` CSSで行う（`apply_exif_rotation`設定に連動してfrom-image/noneを切替）。asset プロトコルは別オリジンのため`crossOrigin="anonymous"`も併せて指定（無いと`image-orientation`自体が無視される）
+- **画像処理**: 4K超/WebView非対応形式(TIFF等)のいずれかに該当する画像だけをキャッシュ対象にし（回転だけが理由ではキャッシュしない）、自動リサイズ(Lanczos3フィルタ)・JPEG品質90%明示(透過を持つ場合はPNG)でキャッシュフォルダに保存。この時だけ設定に従い回転を画素へ焼き込みEXIFなしで書き出す（from-imageでも二重回転しない）。アニメGIF/WebPは静止フレーム化を避けるため常にキャッシュ対象外
 - **画像ロード**: Tauriの`convertFileSrc()`でプロトコル経由読み込み（クロスプラットフォーム対応）
-- **先読みキャッシュ**: 5枚先まで先読み。生成は単一ワーカースレッド+キューで直列処理（弱いCPU対応、連打してもスレッド数・メモリが有界）。キャッシュは合計サイズ上限(既定2GB)超で古いものから自動削除、書込は一時ファイル→renameでアトミック
+- **先読みキャッシュ**: 5枚先まで先読み。生成は単一ワーカースレッド+キューで直列処理（弱いCPU対応、連打してもスレッド数・メモリが有界）。TIFF等WebView非対応形式は変換完了を待ってからパスを返す。キャッシュは合計サイズ上限(既定2GB)超で古いものから自動削除（直近提供分は除外）、書込は一時ファイル→renameでアトミック、失敗した画像は再要求を抑止
 - **動画処理**: ウィンドウにフィット表示（object-fit: contain）、再生終了で自動次送り
 
 ### 3. .sssignoreフィルタリング
@@ -239,10 +240,10 @@ CREATE TABLE scan_history (
 
 ### src-tauri/src/image_processor.rs
 
-- 画像の最適化（4Kリサイズ、EXIF回転は`DynamicImage::apply_orientation`委譲、JPEG品質90%明示/透過はPNG）
-- キャッシュ要否判定（`plan_cache_file`）
+- 画像の最適化（4K超/TIFF等でキャッシュが必要になった場合のみ実施。EXIF回転は`DynamicImage::apply_orientation`委譲、JPEG品質90%明示/透過はPNG）
+- キャッシュ要否判定（`plan_cache_file`: 4K超/WebView非対応形式のみ。回転だけでは対象にしない）
 - EXIF情報抽出
-- 画像サイズ取得（ヘッダのみ、回転時は幅高さ入替）
+- 画像サイズ取得（ヘッダのみ、`ImageInfo`表示用に回転時は幅高さ入替）
 
 ### src-tauri/src/cache_worker.rs
 

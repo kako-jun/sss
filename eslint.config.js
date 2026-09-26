@@ -34,6 +34,7 @@ export default [
         HTMLAnchorElement: 'readonly',
         HTMLButtonElement: 'readonly',
         HTMLImageElement: 'readonly',
+        HTMLVideoElement: 'readonly',
         HTMLDivElement: 'readonly',
         confirm: 'readonly',
         React: 'readonly',

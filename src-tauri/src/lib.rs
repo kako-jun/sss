@@ -66,38 +66,48 @@ pub fn run() {
 
             let db_path = app_data_dir.join("sss.db");
 
-            // キャッシュディレクトリ（存在しなければ作成。asset scope 許可のため
-            // ディレクトリ自体は #59 以降ずっと存在させ続ける）
+            // キャッシュディレクトリ（asset scope 許可のため #59 以降ずっと
+            // このパスに存在させ続ける必要がある）。
             let cache_dir = app_data_dir.join("cache");
-            std::fs::create_dir_all(&cache_dir).expect("failed to create cache directory");
 
-            // 起動時のキャッシュ中身クリアはバックグラウンドで行う（#60）。
+            // 起動時のキャッシュクリア（#60）。
             // 旧実装は起動時に同期 remove_dir_all していたため、10万ファイル級のキャッシュが
-            // 溜まっていると起動が遅延した。ディレクトリ自体は asset scope 許可対象なので
-            // 削除せず、中身のファイル/サブディレクトリだけ削除する。
-            {
-                let cache_dir_to_clear = cache_dir.clone();
-                std::thread::spawn(move || {
-                    let entries = match std::fs::read_dir(&cache_dir_to_clear) {
-                        Ok(entries) => entries,
-                        Err(e) => {
-                            eprintln!("Failed to read cache directory for startup clear: {e}");
-                            return;
-                        }
-                    };
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        let result = if path.is_dir() {
-                            std::fs::remove_dir_all(&path)
-                        } else {
-                            std::fs::remove_file(&path)
-                        };
-                        if let Err(e) = result {
-                            eprintln!("Failed to remove cache entry {}: {e}", path.display());
-                        }
+            // 溜まっていると起動が遅延した。かといって中身を1件ずつバックグラウンド削除すると、
+            // このすぐ後で起動する CacheWorker が新しいキャッシュを書き込む先と競合しうる
+            // （レビュー must5: 削除中のディレクトリへ新規ファイルが書かれ、削除ループに
+            // 巻き込まれる／逆に削除ループが新規ファイルを見落として消し損なう等）。
+            //
+            // そこで cache_dir 自体を退避ディレクトリへ rename し、その場に空の cache_dir を
+            // 即座に作り直す。rename はディレクトリエントリの付け替えだけで中身のコピーを
+            // 伴わないため、キャッシュが巨大でも一瞬で終わる。以後 CacheWorker が触るのは
+            // 常に新しい空の cache_dir であり、退避先（trash）はバックグラウンドスレッドが
+            // 時間をかけて削除してよい。cache_dir というパス自体は途切れず存在し続けるので、
+            // asset scope の許可も維持される。
+            if cache_dir.exists() {
+                let trash_dir = app_data_dir.join(format!(
+                    "cache-trash-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis())
+                        .unwrap_or(0)
+                ));
+                match std::fs::rename(&cache_dir, &trash_dir) {
+                    Ok(()) => {
+                        std::thread::spawn(move || {
+                            if let Err(e) = std::fs::remove_dir_all(&trash_dir) {
+                                eprintln!(
+                                    "Failed to remove stale cache trash {}: {e}",
+                                    trash_dir.display()
+                                );
+                            }
+                        });
                     }
-                });
+                    Err(e) => {
+                        eprintln!("Failed to move cache directory to trash for startup clear: {e}");
+                    }
+                }
             }
+            std::fs::create_dir_all(&cache_dir).expect("failed to create cache directory");
 
             // データベースを初期化
             let db = Database::new(db_path).expect("failed to initialize database");

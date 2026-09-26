@@ -1,6 +1,8 @@
+use crate::cache_worker::CACHE_WAIT_TIMEOUT;
 use crate::commands::types::AppState;
 use crate::image_processor::{
-    get_display_dimensions, get_exif_info, is_video_file, plan_cache_file, ImageInfo,
+    get_display_dimensions, get_exif_info, is_video_file, is_webview_unsupported_format,
+    plan_cache_file, ImageInfo,
 };
 use std::path::Path;
 use tauri::State;
@@ -103,8 +105,16 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
 
 /// 画像情報を取得（内部ヘルパー関数）
 ///
-/// キャッシュが必要かつ未生成の場合は、単一ワーカースレッドへ「現在画像」として
-/// 優先度付きで要求を積み、まだ存在しない間は原本のパスを返す（すぐに表示するため）。
+/// キャッシュが必要（4K超・WebView非対応形式）かつ未生成の場合、通常は単一ワーカーへ
+/// 「現在画像」として優先度付きで要求を積み、まだ存在しない間は原本のパスを返す
+/// （すぐに表示するため）。ただし WebView が直接表示できない形式（TIFF等）は原本を
+/// 返しても表示できないため、ワーカーの完了を待ってからキャッシュパスを返す
+/// （#60 レビュー must2。失敗/タイムアウト時はファイル不在と同様に `Ok(None)` を返し
+/// スキップさせる。自動で次へ進める仕組み自体は #65）。
+///
+/// 回転（EXIF Orientation）は原則フロントの `image-orientation` CSS で行う
+/// （#60 レビュー方針転換）。ここではキャッシュ生成が必要になった場合にだけ
+/// `apply_rotation` に従って画素へ焼き込む（`plan_cache_file`/`optimize_image_for_4k`）。
 fn get_image_info_internal(
     image_path: &str,
     state: &State<AppState>,
@@ -122,7 +132,8 @@ fn get_image_info_internal(
     // ファイルサイズ
     let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
-    // 画像サイズ（動画の場合は0x0）。ヘッダのみ読み、回転時は幅高さを入れ替える。
+    // 画像サイズ（動画の場合は0x0）。ヘッダのみ読み、apply_rotation=true なら
+    // 表示上の幅高さ（90/270度系は入替）を返す。実際の回転はフロントのCSSが行う。
     let (width, height) = if !is_video {
         get_display_dimensions(path, apply_rotation).unwrap_or((0, 0))
     } else {
@@ -130,14 +141,33 @@ fn get_image_info_internal(
     };
 
     // キャッシュ対象の判定は image_processor::plan_cache_file に一元化
-    // （WebView非対応形式・回転が必要・4K超のいずれか。アニメGIF/WebPは対象外）
+    // （WebView非対応形式・4K超のいずれか。回転だけが理由ではキャッシュしない。
+    // アニメGIF/WebPは対象外）
     let optimized_path = if is_video {
         None
     } else if let Some(cache_file) = plan_cache_file(path, apply_rotation, &state.cache_dir) {
         if cache_file.exists() {
+            state.cache_worker.mark_served(cache_file.clone());
             Some(cache_file.to_string_lossy().to_string())
+        } else if is_webview_unsupported_format(path) {
+            // TIFF等は原本をそのまま返してもWebViewで表示できないため、
+            // 変換完了を待ってからキャッシュパスを返す。
+            let ready = state.cache_worker.request_current_and_wait(
+                path.to_path_buf(),
+                cache_file.clone(),
+                apply_rotation,
+                CACHE_WAIT_TIMEOUT,
+            );
+            if ready && cache_file.exists() {
+                state.cache_worker.mark_served(cache_file.clone());
+                Some(cache_file.to_string_lossy().to_string())
+            } else {
+                // 失敗/タイムアウト: 表示不能な原本を返すよりスキップ扱いにする。
+                return Ok(None);
+            }
         } else {
-            // キャッシュがない場合は、単一ワーカーへ優先要求してから元画像を返す
+            // 4K超のみが理由の場合は非同期。単一ワーカーへ優先要求してから元画像を返す
+            // （原本もWebViewで表示できる形式なので、生成完了までは原本で表示できる）。
             state
                 .cache_worker
                 .request_current(path.to_path_buf(), cache_file, apply_rotation);
@@ -169,6 +199,7 @@ fn get_image_info_internal(
         exif,
         display_count,
         last_displayed,
+        apply_rotation,
     }))
 }
 

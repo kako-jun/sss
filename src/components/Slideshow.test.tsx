@@ -22,34 +22,47 @@ function makeImage(overrides: Partial<ImageInfo> = {}): ImageInfo {
     exif: null,
     displayCount: 0,
     lastDisplayed: null,
+    applyRotation: true,
     ...overrides,
   };
 }
 
-// #60: WebView既定の image-orientation: from-image を無効化しないと、
-// apply_exif_rotation設定をOFFにしていても原本のEXIF Orientationに従って
-// WebViewが勝手に回転してしまい、設定の意味と矛盾する。回転はバックエンドが
-// キャッシュ生成時に一元管理するので、フロント側は常に imageOrientation: 'none'
-// でWebViewの自動回転を止めておく必要がある（このピン留めが無いと再発に気づけない）。
-describe('Slideshow imageOrientation (#60)', () => {
-  it('sets imageOrientation: none on the <img> for a static image', () => {
-    const { container } = render(<Slideshow image={makeImage()} />);
+// #60レビュー方針転換: 回転はバックエンドでキャッシュに焼き込まず、フロントの
+// image-orientation CSS で行う。apply_exif_rotation設定（ImageInfo.applyRotation）に
+// 連動して from-image（ON）/none（OFF）を切り替える必要がある。
+// asset プロトコルはWebViewから見て別オリジンのため、crossOrigin無しでは
+// image-orientationがそもそも無視される（Edgeで実測確認済み）ので、
+// crossOrigin="anonymous" も併せてピン留めする。
+describe('Slideshow imageOrientation / crossOrigin (#60)', () => {
+  it('sets imageOrientation: from-image and crossOrigin when applyRotation is true', () => {
+    const { container } = render(<Slideshow image={makeImage({ applyRotation: true })} />);
 
-    const img = container.querySelector('img[alt="/photos/a.jpg"]');
+    const img = container.querySelector('img[alt="/photos/a.jpg"]') as HTMLImageElement;
     expect(img).not.toBeNull();
-    expect((img as HTMLImageElement).style.imageOrientation).toBe('none');
+    expect(img.style.imageOrientation).toBe('from-image');
+    expect(img.crossOrigin).toBe('anonymous');
   });
 
-  it('does not (need to) set imageOrientation on the <video> element', () => {
+  it('sets imageOrientation: none when applyRotation is false (still with crossOrigin)', () => {
+    const { container } = render(<Slideshow image={makeImage({ applyRotation: false })} />);
+
+    const img = container.querySelector('img[alt="/photos/a.jpg"]') as HTMLImageElement;
+    expect(img).not.toBeNull();
+    expect(img.style.imageOrientation).toBe('none');
+    expect(img.crossOrigin).toBe('anonymous');
+  });
+
+  it('does not set imageOrientation/crossOrigin on the <video> element', () => {
     // 動画にはEXIF Orientationという概念自体が無いため、video要素側は対象外
     // （念のため、誤って影響が漏れていないことをピン留めする）。
     const { container } = render(
       <Slideshow image={makeImage({ isVideo: true, path: '/videos/a.mp4' })} />,
     );
 
-    const video = container.querySelector('video');
+    const video = container.querySelector('video') as HTMLVideoElement;
     expect(video).not.toBeNull();
-    expect((video as HTMLElement).style.imageOrientation).toBe('');
+    expect(video.style.imageOrientation).toBe('');
+    expect(video.crossOrigin).toBeNull();
   });
 
   it('renders nothing image-related when image is null (loading placeholder only)', () => {
