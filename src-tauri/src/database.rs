@@ -1165,4 +1165,70 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
     }
+
+    /// #62 空・未設定(壊れたJSON): `shuffled_list`/`history` 列の中身がディスク破損や
+    /// 途中クラッシュ等で壊れたJSON文字列になっていても、`load_playlist_state` は
+    /// エラーにせず空リストへフォールバックする（`directory_path` は健全なままなら
+    /// 復元対象ありとして返す）。
+    #[test]
+    fn load_playlist_state_with_corrupted_json_falls_back_to_empty_lists_not_error() {
+        let path = temp_db_path("playlist_state_corrupted_json");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.save_playlist_full(
+            "/photos",
+            &["a.jpg".to_string()],
+            0,
+            &["a.jpg".to_string()],
+            0,
+        )
+        .unwrap();
+        // 保存後にJSON列だけを直接壊れた文字列へ書き換える（部分書き込み破損を模す）。
+        db.conn
+            .execute(
+                "UPDATE playlist_state SET shuffled_list = ?1, history = ?2 WHERE id = 1",
+                params!["not-valid-json{{{", "also-not-valid[["],
+            )
+            .unwrap();
+
+        let (dir, list, idx, hist, hist_pos) = db
+            .load_playlist_state()
+            .expect("壊れたJSONでもエラーにはならないはず")
+            .expect("directory_pathは健全なので復元対象ありのはず");
+
+        assert_eq!(dir, "/photos");
+        assert_eq!(
+            list,
+            Vec::<String>::new(),
+            "壊れたJSONのshuffled_listは空リストにフォールバックするはず"
+        );
+        assert_eq!(
+            hist,
+            Vec::<String>::new(),
+            "壊れたJSONのhistoryは空リストにフォールバックするはず"
+        );
+        assert_eq!(idx, 0);
+        assert_eq!(hist_pos, 0);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #62 失敗系/空・未設定: `save_playlist_full` を一度も呼んでいない状態で
+    /// `save_playlist_position`（軽量更新）だけを呼んでも、対象行が無いだけで
+    /// エラーにはならない（0行更新）。呼んだ後も復元対象は増えない。
+    #[test]
+    fn save_playlist_position_without_prior_full_save_is_noop_not_error() {
+        let path = temp_db_path("playlist_position_before_full_save");
+        let db = Database::new(path.clone()).unwrap();
+
+        let result = db.save_playlist_position(3, &["a.jpg".to_string()], 0);
+        assert!(result.is_ok(), "対象行が無くてもエラーにはならないはず");
+
+        assert!(
+            db.load_playlist_state().unwrap().is_none(),
+            "save_playlist_fullを呼んでいないので依然として復元対象は無いはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
 }

@@ -219,3 +219,121 @@ fn rescanning_a_modified_file_does_not_duplicate_it_in_the_playlist() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #62 空・未設定(directory_path不一致): 保存済みのプレイリスト状態が別ディレクトリの
+/// ものだった場合、それを引き継がず今回のディレクトリで新規シャッフルする。
+#[test]
+fn scan_directory_mismatch_discards_saved_state_and_shuffles_fresh() {
+    let dir = workspace("dir_mismatch");
+    let photos_dir_a = dir.join("photos_a");
+    let photos_dir_b = dir.join("photos_b");
+    std::fs::create_dir_all(&photos_dir_a).unwrap();
+    std::fs::create_dir_all(&photos_dir_b).unwrap();
+
+    const TOTAL_A: usize = 6;
+    for i in 0..TOTAL_A {
+        write_jpeg(&photos_dir_a.join(format!("img{i}.jpg")));
+    }
+    const TOTAL_B: usize = 4;
+    for i in 0..TOTAL_B {
+        write_jpeg(&photos_dir_b.join(format!("pic{i}.jpg")));
+    }
+
+    let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
+
+    // フォルダAをスキャンして少し進め、DBに保存する(directory_path = photos_a)。
+    let playlist_mutex_1: Mutex<Option<Playlist>> = Mutex::new(None);
+    perform_scan(&db_mutex, &playlist_mutex_1, None, &photos_dir_a, |_, _| {})
+        .expect("フォルダAの初回scanは成功するはず");
+    {
+        let db = db_mutex.lock().unwrap();
+        let mut playlist_lock = playlist_mutex_1.lock().unwrap();
+        let playlist = playlist_lock.as_mut().unwrap();
+        for _ in 0..3 {
+            advance_and_persist(&db, &photos_dir_a.to_string_lossy(), playlist);
+        }
+    }
+
+    // 「再起動してフォルダBを選び直した」想定(current_directory=None、メモリ上の
+    // プレイリストも新しいMutexで空)。
+    let playlist_mutex_2: Mutex<Option<Playlist>> = Mutex::new(None);
+    perform_scan(&db_mutex, &playlist_mutex_2, None, &photos_dir_b, |_, _| {})
+        .expect("フォルダBへのscanは成功するはず");
+
+    let playlist_lock = playlist_mutex_2.lock().unwrap();
+    let playlist = playlist_lock.as_ref().unwrap();
+    assert_eq!(
+        playlist.total_count(),
+        TOTAL_B,
+        "保存されていたフォルダAの状態を引き継がず、フォルダBの件数で新規作成されるはず"
+    );
+    assert!(
+        playlist.current().is_none(),
+        "新規作成されたプレイリストはまだ何も表示していない(before_start)はず"
+    );
+    let paths = playlist.current_paths();
+    for i in 0..TOTAL_B {
+        let expected = photos_dir_b
+            .join(format!("pic{i}.jpg"))
+            .to_string_lossy()
+            .to_string();
+        assert!(
+            paths.contains(&expected),
+            "フォルダBの画像が含まれているはず"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #62 事故パターン: 保存済みのプレイリストが指していた画像が、再起動までの間に
+/// フォルダごと全部物理削除されていた場合、復元処理はクラッシュせず、
+/// 差分適用の結果として空のプレイリストになる。
+#[test]
+fn restart_with_all_saved_files_physically_deleted_yields_empty_playlist_without_crash() {
+    let dir = workspace("all_deleted");
+    let photos_dir = dir.join("photos");
+    std::fs::create_dir_all(&photos_dir).unwrap();
+
+    const TOTAL: usize = 5;
+    for i in 0..TOTAL {
+        write_jpeg(&photos_dir.join(format!("img{i}.jpg")));
+    }
+
+    let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
+    let directory_str = photos_dir.to_string_lossy().to_string();
+
+    let playlist_mutex_1: Mutex<Option<Playlist>> = Mutex::new(None);
+    perform_scan(&db_mutex, &playlist_mutex_1, None, &photos_dir, |_, _| {})
+        .expect("初回scanは成功するはず");
+    {
+        let db = db_mutex.lock().unwrap();
+        let mut playlist_lock = playlist_mutex_1.lock().unwrap();
+        let playlist = playlist_lock.as_mut().unwrap();
+        assert_eq!(playlist.total_count(), TOTAL);
+        for _ in 0..2 {
+            advance_and_persist(&db, &directory_str, playlist);
+        }
+    }
+
+    // フォルダの中身を全部消す(外部ツール等での一括削除を模す)。
+    for i in 0..TOTAL {
+        std::fs::remove_file(photos_dir.join(format!("img{i}.jpg"))).unwrap();
+    }
+
+    // 再起動相当: メモリ上のプレイリストは無い。同じフォルダを再スキャンする。
+    let playlist_mutex_2: Mutex<Option<Playlist>> = Mutex::new(None);
+    perform_scan(&db_mutex, &playlist_mutex_2, None, &photos_dir, |_, _| {})
+        .expect("全件削除後の再scanでもクラッシュせず成功するはず");
+
+    let playlist_lock = playlist_mutex_2.lock().unwrap();
+    let playlist = playlist_lock.as_ref().unwrap();
+    assert!(
+        playlist.is_empty(),
+        "保存されていた画像が全て物理的に消えていれば、復元後のプレイリストも空になるはず"
+    );
+    assert_eq!(playlist.total_count(), 0);
+    assert!(playlist.current().is_none());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
