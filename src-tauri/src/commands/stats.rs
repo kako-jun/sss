@@ -16,10 +16,23 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
             .unwrap_or(0) as i32
     };
 
+    // #63 PR#77レビューS2: displayed_imagesもtotal_images（現在のディレクトリの
+    // 「含める集合」）と母数を揃えるため、現在のディレクトリ配下だけを数える。
+    // 以前はDB全件を数えており、#63でディレクトリを跨いでも表示統計が消えなくなった
+    // 結果、過去にスキャンした他ディレクトリの表示回数まで合算されてtotal_imagesと
+    // 矛盾する数字になりうる状態だった。
+    let directory = state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    let displayed_images = db
-        .get_displayed_image_count()
-        .map_err(|e| format!("Database error: {e}"))?;
+    let displayed_images = match &directory {
+        Some(dir) => db
+            .get_displayed_image_count_under(&dir.to_string_lossy())
+            .map_err(|e| format!("Database error: {e}"))?,
+        None => 0,
+    };
 
     Ok(Stats {
         total_images,
@@ -46,9 +59,21 @@ pub async fn get_playlist_info(
 }
 
 /// 統計データを取得（グラフ用）
+///
+/// #63 PR#77レビューS2: `get_stats`の`displayed_images`と同じ理由で、現在の
+/// ディレクトリ配下だけに限定する。未スキャン時は空配列。
 #[tauri::command]
 pub async fn get_display_stats(state: State<'_, AppState>) -> Result<Vec<(String, i32)>, String> {
+    let directory = state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.get_all_display_counts()
-        .map_err(|e| format!("Failed to get display stats: {e}"))
+    match &directory {
+        Some(dir) => db
+            .get_all_display_counts_under(&dir.to_string_lossy())
+            .map_err(|e| format!("Failed to get display stats: {e}")),
+        None => Ok(Vec::new()),
+    }
 }

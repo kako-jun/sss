@@ -785,11 +785,21 @@ impl Database {
         Ok(count)
     }
 
-    /// 表示済み画像数を取得
-    pub fn get_displayed_image_count(&self) -> Result<i32> {
+    /// `directory` 配下の表示済み画像数を取得（#63 PR#77レビューS2）。
+    ///
+    /// `get_stats` の `total_images`（プレイリスト＝現在のディレクトリの「含める集合」の
+    /// 件数）と母数を揃えるため、`image_stats` も同じディレクトリ配下だけを数える。
+    /// 以前はDB全件（`file_metadata`同様、過去にスキャンした他ディレクトリの表示回数も
+    /// #63でディレクトリを跨いでも消えなくなった）を数えており、`total_images`と
+    /// `displayed_images`の分母が食い違っていた。境界判定は`get_file_metadata_under`と
+    /// 同じ範囲クエリ（区切り文字境界・BINARY照合で大文字小文字も区別）を使う。
+    pub fn get_displayed_image_count_under(&self, directory: &str) -> Result<i32> {
+        let dir_trimmed = directory.trim_end_matches(['/', '\\']);
+        let (lower, upper) = directory_scope_bounds(dir_trimmed, std::path::MAIN_SEPARATOR);
         let count: i32 = self.conn.query_row(
-            "SELECT COUNT(*) FROM image_stats WHERE display_count > 0",
-            [],
+            "SELECT COUNT(*) FROM image_stats
+             WHERE display_count > 0 AND (path = ?1 OR (path >= ?2 AND path < ?3))",
+            params![dir_trimmed, lower, upper],
             |row| row.get(0),
         )?;
         Ok(count)
@@ -911,13 +921,22 @@ impl Database {
         Ok(())
     }
 
-    /// 全画像の表示回数を取得（グラフ用、パスでソート）
-    pub fn get_all_display_counts(&self) -> Result<Vec<(String, i32)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT path, display_count FROM image_stats ORDER BY path ASC")?;
+    /// `directory` 配下の全画像の表示回数を取得（グラフ用、パスでソート。
+    /// #63 PR#77レビューS2: `get_displayed_image_count_under`と同じ理由でディレクトリ
+    /// 配下に限定する。以前はDB全件を返しており、GraphSectionに他ディレクトリの
+    /// 画像まで混ざって表示されうる状態だった）。
+    pub fn get_all_display_counts_under(&self, directory: &str) -> Result<Vec<(String, i32)>> {
+        let dir_trimmed = directory.trim_end_matches(['/', '\\']);
+        let (lower, upper) = directory_scope_bounds(dir_trimmed, std::path::MAIN_SEPARATOR);
+        let mut stmt = self.conn.prepare(
+            "SELECT path, display_count FROM image_stats
+             WHERE path = ?1 OR (path >= ?2 AND path < ?3)
+             ORDER BY path ASC",
+        )?;
 
-        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let rows = stmt.query_map(params![dir_trimmed, lower, upper], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -1786,8 +1805,10 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// `get_total_image_count`（file_metadata件数）と `get_displayed_image_count`
-    /// （display_count>0のimage_stats件数）は独立に数える。
+    /// `get_total_image_count`（file_metadata件数）と `get_displayed_image_count_under`
+    /// （指定ディレクトリ配下・display_count>0のimage_stats件数）は独立に数える。
+    /// #63 PR#77レビューS2でディレクトリ限定に変更したので、スコープ外(`/other`)の
+    /// 表示済み画像が数に混ざらないことも合わせて確認する。
     #[test]
     fn total_and_displayed_image_counts_are_independent() {
         let path = temp_db_path("image_counts");
@@ -1797,6 +1818,7 @@ mod tests {
         db.upsert_file_metadata("/p/b.jpg", 200, 20).unwrap();
         db.upsert_file_metadata("/p/c.jpg", 300, 30).unwrap();
         db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/other/z.jpg").unwrap();
 
         assert_eq!(
             db.get_total_image_count().unwrap(),
@@ -1804,9 +1826,9 @@ mod tests {
             "file_metadataの全件数"
         );
         assert_eq!(
-            db.get_displayed_image_count().unwrap(),
+            db.get_displayed_image_count_under("/p").unwrap(),
             1,
-            "display_count>0のimage_statsだけ数えるはず"
+            "/p配下でdisplay_count>0のimage_statsだけ数えるはず(/otherは含まない)"
         );
 
         let _ = std::fs::remove_file(&path);
@@ -1929,17 +1951,20 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// `get_all_display_counts` はパス昇順で全件（display_count=0の行も含む）返す。
+    /// `get_all_display_counts_under` は指定ディレクトリ配下だけをパス昇順で返す
+    /// （display_count=0の行も含む）。#63 PR#77レビューS2: スコープ外(`/other`)は
+    /// 混ざらないことも確認する。
     #[test]
-    fn get_all_display_counts_returns_all_rows_sorted_by_path() {
+    fn get_all_display_counts_under_returns_scoped_rows_sorted_by_path() {
         let path = temp_db_path("all_display_counts");
         let db = Database::new(path.clone()).unwrap();
 
         db.increment_display_count("/p/b.jpg").unwrap();
         db.increment_display_count("/p/a.jpg").unwrap();
         db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/other/z.jpg").unwrap();
 
-        let counts = db.get_all_display_counts().unwrap();
+        let counts = db.get_all_display_counts_under("/p").unwrap();
         assert_eq!(
             counts,
             vec![("/p/a.jpg".to_string(), 2), ("/p/b.jpg".to_string(), 1)],
