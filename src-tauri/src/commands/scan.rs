@@ -467,11 +467,24 @@ where
         // プレイリストから外れて構わない）。`included`に加えることで、既にプレイリスト
         // に居るものは`removed`に入らず、居ないものは（読めていないファイルなので）
         // `added`にも実質影響しない状態を保つ。
-        for path in &scan_result.error_unknown_files {
-            if !included.contains(path) {
-                included.push(path.clone());
-            }
-        }
+        //
+        // #63 PR#77レビュー2巡目 S-a: `error_unknown_files`は定義上`scan_result.files`
+        // （今回の生スキャンで見つかったファイル）には現れないパスの集合なので、
+        // `included`（`scan_result.files`が元）と重複することは構造的に無い。以前は
+        // それでも`Vec::contains`で毎回線形探索しており、`included`件数×
+        // `error_unknown_files`件数のO(N×E)をplaylistロック保持中に行っていた。
+        // HashSetでの判定に変え、全体をO(N+E)に抑える（フィルタなので、万一この前提が
+        // 崩れても壊れず単に重複を避けるだけ、という安全側の実装のままにする）。
+        let included_before_errors: std::collections::HashSet<&str> =
+            included.iter().map(|s| s.as_str()).collect();
+        let new_from_errors: Vec<String> = scan_result
+            .error_unknown_files
+            .iter()
+            .filter(|p| !included_before_errors.contains(p.as_str()))
+            .cloned()
+            .collect();
+        drop(included_before_errors);
+        included.extend(new_from_errors);
 
         // #62レビューS2: ディレクトリ比較は正規化キーで行う（canonicalize前後・末尾区切り
         // の有無で文字列表現が食い違っても同じディレクトリと判定できるように）。

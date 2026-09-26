@@ -827,3 +827,137 @@ fn scan_error_subtree_does_not_disturb_playlist_position_or_history() {
     drop(playlist_lock);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #63 PR#77レビュー2巡目 S-b 直接の回帰テスト: 一時的なスキャンエラー（chmod 000）で
+/// 「不明」扱いになったファイルが、後で本当に確定削除されるケースを正しく扱えること。
+///
+/// エラー由来の「不明」はプレイリスト所属・`file_metadata`/`image_stats`を無期限に
+/// 保護し続けるわけではない。権限を戻して（エラーが解消して）から実際にファイルを
+/// 削除して再スキャンすると、次回はエラー無しで生スキャンが完了し、
+/// 前回追跡していたが今回見つからないパスとして正しく「確定削除」判定され、
+/// `file_metadata`/`image_stats`から消え、プレイリストからも除去されることを検証する。
+#[test]
+#[cfg(unix)]
+fn file_that_was_error_unknown_is_deleted_once_error_clears_and_file_is_actually_gone() {
+    use std::os::unix::fs::PermissionsExt;
+
+    if !chmod_000_actually_denies_read() {
+        eprintln!("root権限で実行されているためスキップ（chmodによる権限拒否が効かない）");
+        return;
+    }
+
+    let dir = workspace("error_unknown_then_really_deleted");
+    let root = dir.join("photos");
+    let locked_dir = root.join("locked");
+    std::fs::create_dir_all(&locked_dir).unwrap();
+    write_jpeg(&locked_dir.join("a.jpg"));
+    write_jpeg(&locked_dir.join("b.jpg"));
+    write_jpeg(&root.join("top.jpg"));
+
+    let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
+    let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+    let a_str = locked_dir.join("a.jpg").to_string_lossy().to_string();
+    let b_str = locked_dir.join("b.jpg").to_string_lossy().to_string();
+    let top_str = root.join("top.jpg").to_string_lossy().to_string();
+
+    // 1. 初回スキャン（全ファイル読める状態）。
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        None,
+        &root,
+        |_, _| {},
+    )
+    .expect("初回scanは成功するはず");
+
+    // 2. lockedの権限を奪って再スキャン（エラー発生、a/bは「不明」としてプレイリスト・
+    //    file_metadataとも維持される。#63 M2の挙動）。
+    std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let progress = perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        Some(&root),
+        &root,
+        |_, _| {},
+    );
+    // 後片付け含め、この時点で必ず権限を戻す（次のステップの前提でもある）。
+    std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let progress = progress.expect("エラーサブツリーがあってもscan自体は成功するはず");
+    assert!(progress.error_count >= 1, "1回目の再scanはエラーが出るはず");
+    {
+        let db = db_mutex.lock().unwrap();
+        assert_eq!(
+            db.get_file_metadata_under(&root.to_string_lossy())
+                .unwrap()
+                .len(),
+            3,
+            "エラー直後はa/bともfile_metadataに残っているはず"
+        );
+    }
+
+    // 3. 権限を戻した後、今度は本当にlocked配下を削除する
+    //    （「エラーが解消してからファイルを消した」を再現する）。
+    std::fs::remove_dir_all(&locked_dir).unwrap();
+
+    // 4. 再スキャン。今回はエラー無しで生スキャンが完了し、a/bは「前回追跡していたが
+    //    今回見つからない」＝確定削除と判定されるはず。
+    let progress = perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        Some(&root),
+        &root,
+        |_, _| {},
+    )
+    .expect("エラー解消後のscanは成功するはず");
+
+    assert_eq!(progress.error_count, 0, "今回はエラーが無いはず");
+    assert_eq!(
+        progress.deleted_files, 2,
+        "本当に消えたa/bの2件が確定削除と判定されるはず"
+    );
+
+    let db = db_mutex.lock().unwrap();
+    let remaining = db.get_file_metadata_under(&root.to_string_lossy()).unwrap();
+    let remaining_paths: Vec<&str> = remaining.iter().map(|(p, ..)| p.as_str()).collect();
+    assert_eq!(
+        remaining_paths,
+        vec![top_str.as_str()],
+        "確定削除されたa/bはfile_metadataから消え、top.jpgだけが残るはず"
+    );
+
+    let (a_count, a_last) = db.get_image_stats(&a_str).unwrap();
+    assert_eq!(
+        (a_count, a_last),
+        (0, None),
+        "確定削除されたaのimage_statsも消えている（未登録扱いの既定値）はず"
+    );
+    let (b_count, b_last) = db.get_image_stats(&b_str).unwrap();
+    assert_eq!(
+        (b_count, b_last),
+        (0, None),
+        "確定削除されたbのimage_statsも消えている（未登録扱いの既定値）はず"
+    );
+    drop(db);
+
+    let playlist_lock = playlist_mutex.lock().unwrap();
+    let playlist = playlist_lock.as_ref().unwrap();
+    assert_eq!(
+        playlist.total_count(),
+        1,
+        "確定削除されたa/bはプレイリストからも除去され、top.jpgの1件だけになるはず"
+    );
+    let current_paths = playlist.current_paths();
+    assert!(
+        !current_paths.contains(&a_str) && !current_paths.contains(&b_str),
+        "確定削除されたa/bはプレイリストに残っていてはいけない: {current_paths:?}"
+    );
+    assert!(current_paths.contains(&top_str));
+    drop(playlist_lock);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
