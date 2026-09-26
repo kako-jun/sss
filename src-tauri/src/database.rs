@@ -2148,4 +2148,73 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
     }
+
+    /// #64 冪等性の直接確認: `reset_to_defaults` を連続2回呼んでも、2回目もエラーに
+    /// ならず結果（既定6件のみ）が変わらないこと。1回目の呼び出しだけでは
+    /// 「たまたま初回が正しかった」ことしか示せないため、同じ状態に対する
+    /// 2回目の呼び出しが同じ結果を返すことまで確認する。
+    #[test]
+    fn reset_to_defaults_is_idempotent_when_called_twice_in_a_row() {
+        let path = temp_db_path("reset_idempotent_twice");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.reset_to_defaults().expect("1回目は成功するはず");
+        assert_eq!(db.get_ignore_rules().unwrap().len(), 6);
+
+        db.reset_to_defaults()
+            .expect("2回目も成功するはず（INSERT OR IGNOREで重複挿入エラーにならない）");
+        assert_eq!(
+            db.get_ignore_rules().unwrap().len(),
+            6,
+            "2回連続で呼んでも既定6件のまま増減しないはず"
+        );
+        assert_eq!(table_counts(&db)[4], 6);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #64 失敗系: トランザクション途中のDELETEが失敗したら、それより前に同じ
+    /// トランザクション内で実行済みのDELETE（file_metadata/ignore_rules等）も
+    /// まとめてロールバックされ、部分的に空になったテーブルが残らないこと。
+    /// `reset_to_defaults` が最後にDELETEする`app_settings`を事前に破壊して
+    /// 意図的に失敗させ、それより先に実行される他テーブルのDELETEが
+    /// 有効化されていないことを確認する。
+    #[test]
+    fn reset_to_defaults_rolls_back_completely_when_a_later_delete_fails() {
+        let path = temp_db_path("reset_rollback");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/a.jpg", 100, 1000).unwrap();
+        db.add_ignore_rule("/p/custom.jpg", RuleType::Glob).unwrap();
+        assert_eq!(
+            db.get_ignore_rules().unwrap().len(),
+            7,
+            "既定6件+追加1件のはず"
+        );
+
+        // reset_to_defaults内で最後にDELETEされるapp_settingsを壊し、
+        // トランザクションの途中で確実に失敗させる。
+        db.conn.execute("DROP TABLE app_settings", []).unwrap();
+
+        let result = db.reset_to_defaults();
+        assert!(
+            result.is_err(),
+            "app_settingsが無くなっていればエラーになるはず"
+        );
+
+        // ロールバックにより、app_settings以外の（先に実行された）DELETEも
+        // 巻き戻っているはず
+        assert_eq!(
+            db.get_total_image_count().unwrap(),
+            1,
+            "ロールバックによりfile_metadataの削除も取り消され、元のデータが残るはず"
+        );
+        assert_eq!(
+            db.get_ignore_rules().unwrap().len(),
+            7,
+            "ロールバックによりignore_rulesの削除・既定再投入も取り消され、元の7件のままのはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
 }
