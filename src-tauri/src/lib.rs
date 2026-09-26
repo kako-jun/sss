@@ -6,6 +6,7 @@
 //! (`tests/golden_e2e.rs`) はここで公開した芯を直接叩いて golden path を機械検証する。
 
 pub mod asset_scope;
+pub mod cache_worker;
 pub mod commands;
 pub mod database;
 pub mod ignore;
@@ -14,6 +15,7 @@ pub mod playlist;
 pub mod scanner;
 
 use asset_scope::{sanitize_allow_dir, startup_allow_dirs};
+use cache_worker::CacheWorker;
 use commands::file_operations::get_picked_directory;
 use commands::AppState;
 use database::Database;
@@ -64,14 +66,38 @@ pub fn run() {
 
             let db_path = app_data_dir.join("sss.db");
 
-            // キャッシュディレクトリを削除して再作成（起動時にクリア）
+            // キャッシュディレクトリ（存在しなければ作成。asset scope 許可のため
+            // ディレクトリ自体は #59 以降ずっと存在させ続ける）
             let cache_dir = app_data_dir.join("cache");
-            if cache_dir.exists() {
-                if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
-                    eprintln!("Failed to remove cache directory: {e}");
-                }
-            }
             std::fs::create_dir_all(&cache_dir).expect("failed to create cache directory");
+
+            // 起動時のキャッシュ中身クリアはバックグラウンドで行う（#60）。
+            // 旧実装は起動時に同期 remove_dir_all していたため、10万ファイル級のキャッシュが
+            // 溜まっていると起動が遅延した。ディレクトリ自体は asset scope 許可対象なので
+            // 削除せず、中身のファイル/サブディレクトリだけ削除する。
+            {
+                let cache_dir_to_clear = cache_dir.clone();
+                std::thread::spawn(move || {
+                    let entries = match std::fs::read_dir(&cache_dir_to_clear) {
+                        Ok(entries) => entries,
+                        Err(e) => {
+                            eprintln!("Failed to read cache directory for startup clear: {e}");
+                            return;
+                        }
+                    };
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let result = if path.is_dir() {
+                            std::fs::remove_dir_all(&path)
+                        } else {
+                            std::fs::remove_file(&path)
+                        };
+                        if let Err(e) = result {
+                            eprintln!("Failed to remove cache entry {}: {e}", path.display());
+                        }
+                    }
+                });
+            }
 
             // データベースを初期化
             let db = Database::new(db_path).expect("failed to initialize database");
@@ -126,12 +152,16 @@ pub fn run() {
                 }
             }
 
+            // 画像最適化キャッシュ用の単一ワーカースレッドを起動（#60）
+            let cache_worker = CacheWorker::spawn(cache_dir.clone());
+
             // アプリケーション状態を設定
             app.manage(AppState {
                 db: Mutex::new(db),
                 playlist: Mutex::new(None),
                 directory_path: Mutex::new(None),
                 cache_dir,
+                cache_worker,
                 _keep_awake: keep_awake,
             });
 

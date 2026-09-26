@@ -23,10 +23,21 @@ pub async fn reset_all_data(app: AppHandle) -> Result<(), String> {
         std::fs::remove_file(&db_path).map_err(|e| format!("Failed to delete database: {e}"))?;
     }
 
-    // キャッシュディレクトリを削除
-    if cache_dir.exists() {
-        std::fs::remove_dir_all(&cache_dir)
-            .map_err(|e| format!("Failed to delete cache directory: {e}"))?;
+    // キャッシュの中身を削除する（ディレクトリ自体は残す）。
+    // #60: cache_dir は起動時に asset scope へ許可済みで、実行中の CacheWorker も
+    // このパスへ書き続けるため、ディレクトリ自体を消すと以後のキャッシュ書込が失敗する。
+    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let result = if path.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+            if let Err(e) = result {
+                eprintln!("Failed to remove cache entry {}: {e}", path.display());
+            }
+        }
     }
 
     Ok(())

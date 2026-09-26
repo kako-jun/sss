@@ -1,10 +1,8 @@
 use crate::commands::types::AppState;
 use crate::image_processor::{
-    get_exif_info, get_image_dimensions, is_video_file, optimize_image_for_4k, ImageInfo,
-    MAX_HEIGHT_4K, MAX_WIDTH_4K,
+    get_display_dimensions, get_exif_info, is_video_file, plan_cache_file, ImageInfo,
 };
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tauri::State;
 
 /// 次の画像を取得（カウント+1）
@@ -32,7 +30,6 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
 
             drop(playlist_lock);
 
-            // 5枚先まで先読みキャッシュ（バックグラウンドで直列処理）
             // apply_exif_rotation 設定を取得（デフォルト true）
             let apply_rotation = {
                 let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
@@ -43,18 +40,19 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
                     .unwrap_or(true)
             };
 
-            let cache_dir = state.cache_dir.clone();
-            prefetch_and_cache_multiple(prefetch_paths, cache_dir, apply_rotation);
+            // 画像情報を取得（内部で存在確認・現在画像のキャッシュ要求まで行う）
+            let info = get_image_info_internal(&path_str, &state, apply_rotation)?;
 
-            // 表示回数を増やす（新しい画像の場合のみ）
-            if should_count {
+            // 表示回数の加算はファイル存在確認後（#60 問題9: 消失ファイルを無駄カウントしない）
+            if info.is_some() && should_count {
                 let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = db.increment_display_count(&path_str);
-                drop(db);
             }
 
-            // 画像情報を取得
-            get_image_info_internal(&path_str, &state, apply_rotation)
+            // 5枚先まで先読みキュー投入（単一ワーカーが直列処理・重複排除・世代管理する）
+            enqueue_prefetch(&state, prefetch_paths, apply_rotation);
+
+            Ok(info)
         } else {
             Ok(None)
         }
@@ -104,6 +102,9 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
 }
 
 /// 画像情報を取得（内部ヘルパー関数）
+///
+/// キャッシュが必要かつ未生成の場合は、単一ワーカースレッドへ「現在画像」として
+/// 優先度付きで要求を積み、まだ存在しない間は原本のパスを返す（すぐに表示するため）。
 fn get_image_info_internal(
     image_path: &str,
     state: &State<AppState>,
@@ -121,49 +122,25 @@ fn get_image_info_internal(
     // ファイルサイズ
     let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
-    // 画像サイズ（動画の場合は0x0）
+    // 画像サイズ（動画の場合は0x0）。ヘッダのみ読み、回転時は幅高さを入れ替える。
     let (width, height) = if !is_video {
-        get_image_dimensions(path).unwrap_or((0, 0))
+        get_display_dimensions(path, apply_rotation).unwrap_or((0, 0))
     } else {
         (0, 0)
     };
 
-    // キャッシュ対象の判定：
-    //   - 4K超の場合は常にキャッシュ
-    //   - 4K未満でも apply_rotation=true の場合はキャッシュ経由で回転を適用
-    let needs_cache =
-        !is_video && (width > MAX_WIDTH_4K || height > MAX_HEIGHT_4K || apply_rotation);
-
-    let optimized_path = if needs_cache {
-        // キャッシュファイル名を生成（元のファイル名のハッシュを使用）
-        let hash = format!(
-            "{:x}",
-            md5::compute(format!("{image_path}:{apply_rotation}"))
-        );
-        let cache_file = state.cache_dir.join(format!("{hash}.jpg"));
-
-        // キャッシュが存在する場合は使用
+    // キャッシュ対象の判定は image_processor::plan_cache_file に一元化
+    // （WebView非対応形式・回転が必要・4K超のいずれか。アニメGIF/WebPは対象外）
+    let optimized_path = if is_video {
+        None
+    } else if let Some(cache_file) = plan_cache_file(path, apply_rotation, &state.cache_dir) {
         if cache_file.exists() {
             Some(cache_file.to_string_lossy().to_string())
         } else {
-            // キャッシュがない場合は、バックグラウンドで作成して元画像を返す
-            let cache_file_clone = cache_file.clone();
-            let path_clone = path.to_path_buf();
-
-            std::thread::spawn(
-                move || match optimize_image_for_4k(&path_clone, apply_rotation) {
-                    Ok(optimized_data) => {
-                        if let Err(e) = fs::write(&cache_file_clone, optimized_data) {
-                            eprintln!("Failed to write optimized image: {e}");
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to optimize image: {e}");
-                    }
-                },
-            );
-
-            // 元画像を返す（すぐに表示）
+            // キャッシュがない場合は、単一ワーカーへ優先要求してから元画像を返す
+            state
+                .cache_worker
+                .request_current(path.to_path_buf(), cache_file, apply_rotation);
             None
         }
     } else {
@@ -195,51 +172,20 @@ fn get_image_info_internal(
     }))
 }
 
-/// 複数の画像を先読みしてキャッシュ作成（バックグラウンドで直列処理）
-fn prefetch_and_cache_multiple(image_paths: Vec<String>, cache_dir: PathBuf, apply_rotation: bool) {
-    use std::thread;
-
-    thread::spawn(move || {
-        for image_path in image_paths {
-            let path = Path::new(&image_path);
-
-            if !path.exists() {
-                continue;
+/// 先読み対象パスをキャッシュ要否判定した上でワーカーへまとめて投入する。
+fn enqueue_prefetch(state: &State<AppState>, prefetch_paths: Vec<String>, apply_rotation: bool) {
+    let items: Vec<_> = prefetch_paths
+        .into_iter()
+        .filter_map(|p| {
+            let path = Path::new(&p);
+            if !path.exists() || is_video_file(path) {
+                return None;
             }
+            plan_cache_file(path, apply_rotation, &state.cache_dir)
+                .map(|cache_file| (path.to_path_buf(), cache_file))
+        })
+        .collect();
 
-            // 動画ファイルは画像処理をスキップ
-            if is_video_file(path) {
-                continue;
-            }
-
-            // 画像サイズを取得
-            let (width, height) = match get_image_dimensions(path) {
-                Ok(dims) => dims,
-                Err(_) => continue,
-            };
-
-            // 4Kを超える場合、または回転が必要な場合はキャッシュ作成
-            if width > MAX_WIDTH_4K || height > MAX_HEIGHT_4K || apply_rotation {
-                let hash = format!(
-                    "{:x}",
-                    md5::compute(format!("{image_path}:{apply_rotation}"))
-                );
-                let cache_file = cache_dir.join(format!("{hash}.jpg"));
-
-                // キャッシュが既に存在する場合はスキップ
-                if !cache_file.exists() {
-                    match optimize_image_for_4k(path, apply_rotation) {
-                        Ok(optimized_data) => {
-                            if let Err(e) = fs::write(&cache_file, optimized_data) {
-                                eprintln!("Failed to write prefetched cache: {e}");
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to optimize for prefetch: {e}");
-                        }
-                    }
-                }
-            }
-        }
-    });
+    // 空でも呼ぶ: 古い世代の先読み要求（is_current でないもの）をここで破棄させるため
+    state.cache_worker.request_prefetch(items, apply_rotation);
 }

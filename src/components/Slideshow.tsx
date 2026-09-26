@@ -68,6 +68,12 @@ export function Slideshow({ image, isLoading, onVideoEnded }: SlideshowProps) {
             className="w-full h-full object-contain"
             style={{
               willChange: 'opacity',
+              // WebView既定の image-orientation: from-image を無効化する。
+              // 回転はバックエンドが一元管理する（apply_exif_rotation設定に従って
+              // キャッシュ生成時にのみ画素を回転し、その際EXIFは再エンコードで失われる）。
+              // これが無いと、設定OFF時でも原本のEXIF Orientationに従ってWebViewが
+              // 勝手に回転してしまい、設定の意味（OFF=回転しない）と矛盾する（#60）。
+              imageOrientation: 'none',
             }}
             draggable={false}
             onError={(e) => {

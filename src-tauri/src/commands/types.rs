@@ -1,3 +1,4 @@
+use crate::cache_worker::CacheWorker;
 use crate::database::Database;
 use crate::playlist::Playlist;
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,8 @@ pub struct AppState {
     pub playlist: Mutex<Option<Playlist>>,
     pub directory_path: Mutex<Option<PathBuf>>,
     pub cache_dir: PathBuf,
+    /// 画像最適化キャッシュを作る単一ワーカースレッド（#60）。表示・先読み要求はここに積む。
+    pub cache_worker: CacheWorker,
     /// スクリーンセーバー抑制ハンドル。初期化に失敗した環境（D-Bus 無し等）では `None`
     pub _keep_awake: Option<keepawake::AwakeHandle>,
 }
