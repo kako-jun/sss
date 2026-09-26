@@ -785,26 +785,6 @@ impl Database {
         Ok(count)
     }
 
-    /// `directory` 配下の表示済み画像数を取得（#63 PR#77レビューS2）。
-    ///
-    /// `get_stats` の `total_images`（プレイリスト＝現在のディレクトリの「含める集合」の
-    /// 件数）と母数を揃えるため、`image_stats` も同じディレクトリ配下だけを数える。
-    /// 以前はDB全件（`file_metadata`同様、過去にスキャンした他ディレクトリの表示回数も
-    /// #63でディレクトリを跨いでも消えなくなった）を数えており、`total_images`と
-    /// `displayed_images`の分母が食い違っていた。境界判定は`get_file_metadata_under`と
-    /// 同じ範囲クエリ（区切り文字境界・BINARY照合で大文字小文字も区別）を使う。
-    pub fn get_displayed_image_count_under(&self, directory: &str) -> Result<i32> {
-        let dir_trimmed = directory.trim_end_matches(['/', '\\']);
-        let (lower, upper) = directory_scope_bounds(dir_trimmed, std::path::MAIN_SEPARATOR);
-        let count: i32 = self.conn.query_row(
-            "SELECT COUNT(*) FROM image_stats
-             WHERE display_count > 0 AND (path = ?1 OR (path >= ?2 AND path < ?3))",
-            params![dir_trimmed, lower, upper],
-            |row| row.get(0),
-        )?;
-        Ok(count)
-    }
-
     /// 設定を保存
     pub fn save_setting(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
@@ -921,10 +901,14 @@ impl Database {
         Ok(())
     }
 
-    /// `directory` 配下の全画像の表示回数を取得（グラフ用、パスでソート。
-    /// #63 PR#77レビューS2: `get_displayed_image_count_under`と同じ理由でディレクトリ
-    /// 配下に限定する。以前はDB全件を返しており、GraphSectionに他ディレクトリの
-    /// 画像まで混ざって表示されうる状態だった）。
+    /// `directory` 配下の全画像の表示回数を取得（グラフ用、パスでソート）。
+    ///
+    /// #63 PR#77レビューS2: `get_stats`の`total_images`と母数を揃えるためディレクトリ
+    /// 配下に限定する（以前はDB全件を返しており、GraphSectionに他ディレクトリの画像
+    /// まで混ざって表示されうる状態だった）。`commands::stats::get_stats`はこの結果を
+    /// さらにプレイリストのメンバーシップで絞り込んで`displayed_images`を数える
+    /// （PR#77レビュー2巡目 nit: ディレクトリ配下限定だけでは、表示後に除外ルールが
+    /// 付いたファイルの`display_count`がまだ数に残ってしまうため）。
     pub fn get_all_display_counts_under(&self, directory: &str) -> Result<Vec<(String, i32)>> {
         let dir_trimmed = directory.trim_end_matches(['/', '\\']);
         let (lower, upper) = directory_scope_bounds(dir_trimmed, std::path::MAIN_SEPARATOR);
@@ -1805,10 +1789,12 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// `get_total_image_count`（file_metadata件数）と `get_displayed_image_count_under`
-    /// （指定ディレクトリ配下・display_count>0のimage_stats件数）は独立に数える。
-    /// #63 PR#77レビューS2でディレクトリ限定に変更したので、スコープ外(`/other`)の
-    /// 表示済み画像が数に混ざらないことも合わせて確認する。
+    /// `get_total_image_count`（file_metadata件数）と、`get_all_display_counts_under`
+    /// （指定ディレクトリ配下のimage_stats全件）から`display_count>0`だけを数えた件数は
+    /// 独立に数える。#63 PR#77レビューS2でディレクトリ限定に変更したので、スコープ外
+    /// (`/other`)の表示済み画像が数に混ざらないことも合わせて確認する
+    /// （`commands::stats::get_stats`は、この結果をさらにプレイリストのメンバーシップで
+    /// 絞り込む。そちらは`tests/get_stats_membership.rs`で検証する）。
     #[test]
     fn total_and_displayed_image_counts_are_independent() {
         let path = temp_db_path("image_counts");
@@ -1825,9 +1811,14 @@ mod tests {
             3,
             "file_metadataの全件数"
         );
+        let displayed_under_p = db
+            .get_all_display_counts_under("/p")
+            .unwrap()
+            .into_iter()
+            .filter(|(_, count)| *count > 0)
+            .count();
         assert_eq!(
-            db.get_displayed_image_count_under("/p").unwrap(),
-            1,
+            displayed_under_p, 1,
             "/p配下でdisplay_count>0のimage_statsだけ数えるはず(/otherは含まない)"
         );
 

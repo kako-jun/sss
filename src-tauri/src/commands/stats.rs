@@ -8,19 +8,20 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
     // 揃える。以前は `file_metadata` の全件数（`get_total_image_count`）を使っており、
     // 除外ルールで対象外になったファイルまで数に含まれ、ExcludeRulesSection での
     // 除外操作の結果とGraphSectionの表示が食い違っていた。未スキャン時は0。
-    let total_images = {
+    let (total_images, member_paths) = {
         let playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
-        playlist_lock
-            .as_ref()
-            .map(|playlist| playlist.total_count())
-            .unwrap_or(0) as i32
+        match playlist_lock.as_ref() {
+            Some(playlist) => (playlist.total_count() as i32, playlist.current_paths()),
+            None => (0, std::collections::HashSet::new()),
+        }
     };
 
-    // #63 PR#77レビューS2: displayed_imagesもtotal_images（現在のディレクトリの
-    // 「含める集合」）と母数を揃えるため、現在のディレクトリ配下だけを数える。
-    // 以前はDB全件を数えており、#63でディレクトリを跨いでも表示統計が消えなくなった
-    // 結果、過去にスキャンした他ディレクトリの表示回数まで合算されてtotal_imagesと
-    // 矛盾する数字になりうる状態だった。
+    // #63 PR#77レビュー2巡目 nit: displayed_imagesは「現在のディレクトリ配下」だけでなく
+    // 「現在のプレイリスト（除外ルール適用後の含める集合）のメンバー」だけを数える。
+    // ディレクトリ配下限定だけ（前回のS2修正）だと、表示した後に除外ルールが付いた
+    // ファイル（`image_stats`には`display_count > 0`が残るが、プレイリストのメンバー
+    // ではなくなっている）がまだ数に含まれてしまい、`displayed_images`が
+    // `total_images`（プレイリストの総数）を超えてしまう矛盾したケースがあった。
     let directory = state
         .directory_path
         .lock()
@@ -28,9 +29,15 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
         .clone();
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let displayed_images = match &directory {
-        Some(dir) => db
-            .get_displayed_image_count_under(&dir.to_string_lossy())
-            .map_err(|e| format!("Database error: {e}"))?,
+        Some(dir) => {
+            let counts = db
+                .get_all_display_counts_under(&dir.to_string_lossy())
+                .map_err(|e| format!("Database error: {e}"))?;
+            counts
+                .iter()
+                .filter(|(path, count)| *count > 0 && member_paths.contains(path))
+                .count() as i32
+        }
         None => 0,
     };
 
