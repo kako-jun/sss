@@ -405,7 +405,7 @@ where
         .map(|f| f.path.clone())
         .collect();
 
-    // --- Stage 5: 短時間のplaylistロック（差分適用のみ） ---
+    // --- Stage 5: 短時間のplaylistロック（差分適用・復元・確定保存） ---
     {
         let mut playlist_lock = playlist_mutex.lock().unwrap_or_else(|e| e.into_inner());
         let is_same_directory = current_directory.map(|p| p == directory).unwrap_or(false);
@@ -425,8 +425,57 @@ where
                 playlist.update_images(added, removed);
             }
         } else {
-            // 別のディレクトリまたは初回の場合は新規プレイリストを作成
-            *playlist_lock = Some(Playlist::new(included.clone()));
+            // メモリ上に無い（起動直後の初回スキャン、または別ディレクトリへの切替）。
+            // #62: 起動直後は `current_directory` が必ず `None`（`AppState.directory_path`は
+            // このスキャン完了後にしかセットされない）になるため、ここで無条件に
+            // 新規シャッフルすると、DBに保存済みのプレイリスト状態（前回の続き）を
+            // 毎回捨ててしまい「完全平等」が達成できない（元issueの問題1）。
+            // 保存済み状態のディレクトリが今回のスキャン対象と一致する場合だけ復元し、
+            // 現在の「含めるべき集合」との差分を `update_images` 相当で適用する。
+            let directory_str = directory.to_string_lossy().to_string();
+            let restored = {
+                let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+                db.load_playlist_state().unwrap_or(None)
+            };
+
+            *playlist_lock = match restored {
+                Some((saved_dir, shuffled_list, current_index, history, history_position))
+                    if saved_dir == directory_str =>
+                {
+                    let mut playlist = Playlist::from_persisted(
+                        shuffled_list,
+                        current_index,
+                        history,
+                        history_position,
+                    );
+                    let current_set = playlist.current_paths();
+                    let included_set: HashSet<String> = included.iter().cloned().collect();
+                    let added: Vec<String> =
+                        included_set.difference(&current_set).cloned().collect();
+                    let removed: Vec<String> =
+                        current_set.difference(&included_set).cloned().collect();
+                    if !added.is_empty() || !removed.is_empty() {
+                        playlist.update_images(added, removed);
+                    }
+                    Some(playlist)
+                }
+                // 保存済み状態が無い、または別ディレクトリのものなら新規シャッフル
+                _ => Some(Playlist::new(included.clone())),
+            };
+        }
+
+        // #62: シャッフルが確定した（新規作成・復元後の差分適用・同一ディレクトリの
+        // 差分更新のいずれも shuffled_list が変わりうる）ので、ここで必ずフル保存する。
+        // advance 単位の軽量保存（`save_playlist_position`）とは別経路。
+        if let Some(ref playlist) = *playlist_lock {
+            let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = db.save_playlist_full(
+                &directory.to_string_lossy(),
+                playlist.shuffled_list(),
+                playlist.current_index(),
+                playlist.history(),
+                playlist.history_position(),
+            );
         }
     } // ロック解放
 

@@ -2,6 +2,9 @@ use crate::ignore::RuleType;
 use rusqlite::{params, Connection, Result};
 use std::path::PathBuf;
 
+/// `playlist_state` の固定行ID（常に1行だけを更新する）。
+const PLAYLIST_STATE_ID: i64 = 1;
+
 /// テーブルに列が無ければ追加する（`PRAGMA user_version` による汎用マイグレーションの
 /// 部品。#61 で導入、#62 以降のスキーマ変更でも再利用する）。
 fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
@@ -37,6 +40,10 @@ type FileMetadataRow = (String, i64, i64);
 /// `pub`: `commands::scan::resolve_captured_dates`（pub、tests/exif_resolve_throughput.rs から
 /// 直接呼ぶ計測用ベンチ）の公開シグネチャに現れるため、private_interfaces lint を避ける必要がある。
 pub type ExifCacheRow = (String, Option<String>, i64);
+
+/// `playlist_state` の保存済み状態（#62）:
+/// (directory_path, shuffled_list, current_index, history, history_position)
+type PlaylistStateRow = (String, Vec<String>, usize, Vec<String>, usize);
 
 pub struct Database {
     conn: Connection,
@@ -77,12 +84,16 @@ impl Database {
             [],
         )?;
 
-        // プレイリスト状態
+        // プレイリスト状態（#62で directory_path/history/history_position を追加し実使用開始。
+        // shuffled_list/history は JSON 配列文字列で保存する。詳細は docs/architecture.md 参照）
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS playlist_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
+                directory_path TEXT,
                 current_index INTEGER DEFAULT 0,
                 shuffled_list TEXT,
+                history TEXT,
+                history_position INTEGER DEFAULT 0,
                 last_shuffled DATETIME,
                 is_paused BOOLEAN DEFAULT 0
             )",
@@ -224,6 +235,10 @@ impl Database {
             self.migrate_to_v1()?;
         }
 
+        if version < 2 {
+            self.migrate_to_v2()?;
+        }
+
         Ok(())
     }
 
@@ -273,6 +288,147 @@ impl Database {
         tx.execute("PRAGMA user_version = 1", [])?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// v2: `playlist_state` にプレイリスト永続化用の列を追加する（#62）。
+    /// 旧スキーマ（`current_index`/`shuffled_list`/`last_shuffled`/`is_paused` のみ）
+    /// は #61 まで一度も実使用されていなかったため、既存データの移行は考えず
+    /// 列追加のみでよい。新規DBは `CREATE TABLE` で既に最終形を持つため冪等。
+    fn migrate_to_v2(&self) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+
+        add_column_if_missing(&tx, "playlist_state", "directory_path", "TEXT")?;
+        add_column_if_missing(&tx, "playlist_state", "history", "TEXT")?;
+        add_column_if_missing(
+            &tx,
+            "playlist_state",
+            "history_position",
+            "INTEGER DEFAULT 0",
+        )?;
+
+        tx.execute("PRAGMA user_version = 2", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// プレイリストのシャッフル確定時（新規作成・巡の再シャッフル・`update_images`）に
+    /// `shuffled_list` を含む全状態を1トランザクションで保存する（#62）。
+    ///
+    /// 10万件規模だと `shuffled_list` の JSON は大きくなるため、advance のたびに
+    /// これを書くと重い（`save_playlist_position` が軽量版）。シャッフルが実際に
+    /// 変わった瞬間だけ呼ぶこと。
+    pub fn save_playlist_full(
+        &self,
+        directory_path: &str,
+        shuffled_list: &[String],
+        current_index: usize,
+        history: &[String],
+        history_position: usize,
+    ) -> Result<()> {
+        let shuffled_list_json = serde_json::to_string(shuffled_list)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let history_json = serde_json::to_string(history)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO playlist_state
+                (id, directory_path, shuffled_list, current_index, history, history_position)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+                 directory_path = excluded.directory_path,
+                 shuffled_list = excluded.shuffled_list,
+                 current_index = excluded.current_index,
+                 history = excluded.history,
+                 history_position = excluded.history_position",
+            params![
+                PLAYLIST_STATE_ID,
+                directory_path,
+                shuffled_list_json,
+                current_index as i64,
+                history_json,
+                history_position as i64,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// advance/go_back のたびに呼ぶ軽量な永続化（#62）。`shuffled_list` は書かない
+    /// （10万件規模で毎回書くと重いため）。`save_playlist_full` が一度も呼ばれておらず
+    /// 対象行が無い場合は何も起きない（0行更新、エラーにはならない）。
+    pub fn save_playlist_position(
+        &self,
+        current_index: usize,
+        history: &[String],
+        history_position: usize,
+    ) -> Result<()> {
+        let history_json = serde_json::to_string(history)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        self.conn.execute(
+            "UPDATE playlist_state SET current_index = ?1, history = ?2, history_position = ?3
+             WHERE id = ?4",
+            params![
+                current_index as i64,
+                history_json,
+                history_position as i64,
+                PLAYLIST_STATE_ID,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 保存済みのプレイリスト状態を読む（#62）。行が無ければ `None`。
+    /// 戻り値: (directory_path, shuffled_list, current_index, history, history_position)
+    pub fn load_playlist_state(&self) -> Result<Option<PlaylistStateRow>> {
+        let row = self.conn.query_row(
+            "SELECT directory_path, shuffled_list, current_index, history, history_position
+             FROM playlist_state WHERE id = ?1",
+            params![PLAYLIST_STATE_ID],
+            |row| {
+                let directory_path: Option<String> = row.get(0)?;
+                let shuffled_list_json: Option<String> = row.get(1)?;
+                let current_index: i64 = row.get(2)?;
+                let history_json: Option<String> = row.get(3)?;
+                let history_position: i64 = row.get(4)?;
+                Ok((
+                    directory_path,
+                    shuffled_list_json,
+                    current_index,
+                    history_json,
+                    history_position,
+                ))
+            },
+        );
+
+        match row {
+            Ok((
+                Some(directory_path),
+                shuffled_list_json,
+                current_index,
+                history_json,
+                history_position,
+            )) => {
+                let shuffled_list: Vec<String> = shuffled_list_json
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_default();
+                let history: Vec<String> = history_json
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_default();
+                Ok(Some((
+                    directory_path,
+                    shuffled_list,
+                    current_index.max(0) as usize,
+                    history,
+                    history_position.max(0) as usize,
+                )))
+            }
+            // directory_path が無い(=save_playlist_fullが一度も呼ばれていない旧行/空行)場合は
+            // 復元対象なしとして扱う
+            Ok((None, ..)) => Ok(None),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     /// ファイルメタデータを挿入または更新
@@ -715,7 +871,9 @@ mod tests {
             .conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 1);
+        // #62で playlist_state のv2マイグレーションが追加されたため、run_migrationsは
+        // 常に最新版まで進む。
+        assert_eq!(version, 2);
 
         let _ = std::fs::remove_file(&path);
     }
@@ -766,7 +924,8 @@ mod tests {
                 .conn
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(version, 1);
+            // #62で playlist_state のv2マイグレーションが追加されたため、最新版は2。
+            assert_eq!(version, 2);
         }
 
         let _ = std::fs::remove_file(&path);
@@ -878,6 +1037,131 @@ mod tests {
             matched,
             vec![("/a.jpg".to_string(), 1), ("/c.jpg".to_string(), 3)]
         );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #62: 保存済みの状態が無い（`save_playlist_full` を一度も呼んでいない）新規DBは
+    /// `load_playlist_state` が `None` を返す。
+    #[test]
+    fn load_playlist_state_returns_none_when_never_saved() {
+        let path = temp_db_path("playlist_state_none");
+        let db = Database::new(path.clone()).unwrap();
+
+        assert!(db.load_playlist_state().unwrap().is_none());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #62: `save_playlist_full` → `load_playlist_state` の往復で
+    /// directory_path/shuffled_list/current_index/history/history_position が
+    /// すべて過不足なく復元できる（再起動を跨いだ復元の土台）。
+    #[test]
+    fn save_and_load_playlist_full_roundtrip_preserves_state() {
+        let path = temp_db_path("playlist_full_roundtrip");
+        let db = Database::new(path.clone()).unwrap();
+
+        let shuffled_list: Vec<String> = vec!["a.jpg", "b.jpg", "c.jpg"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let history: Vec<String> = vec!["a.jpg", "b.jpg"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        db.save_playlist_full("/photos", &shuffled_list, 1, &history, 1)
+            .unwrap();
+
+        let (dir, list, idx, hist, hist_pos) = db.load_playlist_state().unwrap().unwrap();
+        assert_eq!(dir, "/photos");
+        assert_eq!(list, shuffled_list);
+        assert_eq!(idx, 1);
+        assert_eq!(hist, history);
+        assert_eq!(hist_pos, 1);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #62: `save_playlist_position` は `current_index`/履歴だけを更新し、
+    /// `shuffled_list`/`directory_path` は直前の `save_playlist_full` の値のまま残る
+    /// （advance のたびに全件書き直さない軽量パス）。
+    #[test]
+    fn save_playlist_position_does_not_touch_shuffled_list_or_directory() {
+        let path = temp_db_path("playlist_position_light_update");
+        let db = Database::new(path.clone()).unwrap();
+
+        let shuffled_list: Vec<String> = vec!["a.jpg", "b.jpg", "c.jpg"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        db.save_playlist_full("/photos", &shuffled_list, 0, &["a.jpg".to_string()], 0)
+            .unwrap();
+
+        let new_history: Vec<String> = vec!["a.jpg", "b.jpg"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        db.save_playlist_position(1, &new_history, 1).unwrap();
+
+        let (dir, list, idx, hist, hist_pos) = db.load_playlist_state().unwrap().unwrap();
+        assert_eq!(dir, "/photos", "directory_pathは軽量更新で変わらないはず");
+        assert_eq!(
+            list, shuffled_list,
+            "shuffled_listは軽量更新で書き換わらないはず"
+        );
+        assert_eq!(idx, 1);
+        assert_eq!(hist, new_history);
+        assert_eq!(hist_pos, 1);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #62 マイグレーション: 旧スキーマ（`directory_path`/`history`/`history_position`
+    /// 列が無い）の `playlist_state` テーブルを持つDBを開いても、列が追加され
+    /// エラーにならない。
+    #[test]
+    fn migrating_old_playlist_state_schema_adds_v2_columns() {
+        let path = temp_db_path("playlist_state_v2_migration");
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "CREATE TABLE playlist_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    current_index INTEGER DEFAULT 0,
+                    shuffled_list TEXT,
+                    last_shuffled DATETIME,
+                    is_paused BOOLEAN DEFAULT 0
+                )",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO playlist_state (id, current_index, shuffled_list) VALUES (1, 5, '[\"x.jpg\"]')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db =
+            Database::new(path.clone()).expect("旧playlist_stateスキーマでもエラーにならないはず");
+
+        // directory_path列が無かった(NULL)ので、load_playlist_stateはNoneを返す
+        // (復元対象が無いのと同じ扱い。#62: directory_pathが無いと復元先を判断できない)。
+        assert!(db.load_playlist_state().unwrap().is_none());
+
+        // 新しい列を使って書き込めることを確認する(冪等マイグレーション後に書込可能)。
+        db.save_playlist_full("/photos", &["x.jpg".to_string()], 0, &[], 0)
+            .unwrap();
+        let (dir, ..) = db.load_playlist_state().unwrap().unwrap();
+        assert_eq!(dir, "/photos");
+
+        let version: i32 = db
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
 
         let _ = std::fs::remove_file(&path);
     }

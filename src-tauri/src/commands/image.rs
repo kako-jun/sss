@@ -4,8 +4,46 @@ use crate::image_processor::{
     extract_date_only, get_display_dimensions, get_exif_info, is_video_file, plan_cache_file,
     requires_synchronous_cache, ImageInfo,
 };
+use crate::playlist::Playlist;
 use std::path::Path;
 use tauri::State;
+
+/// `advance()` 後の永続化（#62）。再シャッフルが起きた場合のみ `shuffled_list` を
+/// 含むフル保存（1トランザクション）、それ以外は `current_index`/履歴だけの
+/// 軽量な `UPDATE` にする。10万件規模のプレイリストで毎 advance 全件を書き直すと
+/// 重いため、シャッフルが確定したタイミングだけフル保存する設計（docs参照）。
+fn persist_playlist_after_advance(state: &State<AppState>, playlist: &Playlist, reshuffled: bool) {
+    if !reshuffled {
+        persist_playlist_position(state, playlist);
+        return;
+    }
+
+    let directory = state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    if let Some(dir) = directory {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = db.save_playlist_full(
+            &dir.to_string_lossy(),
+            playlist.shuffled_list(),
+            playlist.current_index(),
+            playlist.history(),
+            playlist.history_position(),
+        );
+    }
+}
+
+/// `current_index`/履歴だけを更新する軽量な永続化（#62）。`shuffled_list` は書かない。
+fn persist_playlist_position(state: &State<AppState>, playlist: &Playlist) {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = db.save_playlist_position(
+        playlist.current_index(),
+        playlist.history(),
+        playlist.history_position(),
+    );
+}
 
 /// 次の画像を取得（カウント+1）
 ///
@@ -26,7 +64,7 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             return Err("Playlist is empty".to_string());
         }
 
-        let (image_path, should_count) = playlist.advance();
+        let (image_path, should_count, reshuffled) = playlist.advance();
         let path_str = match image_path {
             Some(p) => p.clone(),
             None => return Ok(None),
@@ -39,6 +77,11 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
                 prefetch_paths.push(path.clone());
             }
         }
+
+        // 永続化(#62): 再シャッフルが起きたときだけ shuffled_list を含むフル保存、
+        // それ以外は current_index/履歴だけの軽量更新にする（10万件規模で毎advance
+        // 全件書き込むと重いため）。
+        persist_playlist_after_advance(&state, playlist, reshuffled);
 
         (path_str, should_count, prefetch_paths)
     };
@@ -86,10 +129,15 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
             return Ok(None);
         }
 
-        match playlist.go_back() {
+        let path = match playlist.go_back() {
             Some(p) => p.clone(),
             None => return Ok(None),
-        }
+        };
+
+        // 永続化(#62): go_back は current_index を変えないため常に軽量保存でよい。
+        persist_playlist_position(&state, playlist);
+
+        path
     };
 
     // apply_exif_rotation 設定を取得（デフォルト true）
