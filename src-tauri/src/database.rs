@@ -1548,4 +1548,281 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
     }
+
+    /// #63: `apply_file_metadata_changes` は新規/変更のupsertと確定削除の削除を
+    /// 1回の呼び出し（1トランザクション）で反映し、削除側は `mark_deleted` と同じく
+    /// `image_stats`/`exif_cache` も含めて消す。空配列2つはエラーにならず何もしない。
+    #[test]
+    fn apply_file_metadata_changes_upserts_and_deletes_together() {
+        let path = temp_db_path("apply_changes");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.apply_file_metadata_changes(&[], &[]).unwrap();
+
+        // 既存の状態を作る: a(残る・更新なし), b(削除される), の2件。
+        db.upsert_file_metadata("/p/a.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/b.jpg", 200, 20).unwrap();
+        db.increment_display_count("/p/b.jpg").unwrap();
+        db.upsert_exif_cache("/p/b.jpg", Some("2023-05-15"), 200)
+            .unwrap();
+
+        // c は新規、b は確定削除。a には触れない。
+        db.apply_file_metadata_changes(
+            &[("/p/c.jpg".to_string(), 300, 30)],
+            &["/p/b.jpg".to_string()],
+        )
+        .unwrap();
+
+        let all = db.get_all_file_metadata().unwrap();
+        let paths: Vec<&str> = all.iter().map(|(p, ..)| p.as_str()).collect();
+        assert!(paths.contains(&"/p/a.jpg"), "触れていないaは残るはず");
+        assert!(paths.contains(&"/p/c.jpg"), "新規cは追加されるはず");
+        assert!(
+            !paths.contains(&"/p/b.jpg"),
+            "確定削除したbはfile_metadataから消えるはず"
+        );
+
+        let (b_count, _) = db.get_image_stats("/p/b.jpg").unwrap();
+        assert_eq!(
+            b_count, 0,
+            "確定削除したbのimage_statsも消える(get_image_statsは未登録扱いの0を返す)はず"
+        );
+        assert!(
+            db.get_all_exif_cache()
+                .unwrap()
+                .iter()
+                .all(|(p, ..)| p != "/p/b.jpg"),
+            "確定削除したbのexif_cacheも消えるはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `increment_display_count` は初回で1、以降は加算し、`last_displayed` を埋める。
+    /// `get_image_stats` は未登録パスに対して `(0, None)` を返す（エラーにしない）。
+    #[test]
+    fn increment_display_count_accumulates_and_sets_last_displayed() {
+        let path = temp_db_path("increment_display_count");
+        let db = Database::new(path.clone()).unwrap();
+
+        let (count, last) = db.get_image_stats("/p/never_shown.jpg").unwrap();
+        assert_eq!((count, last), (0, None), "未登録パスは(0, None)のはず");
+
+        db.increment_display_count("/p/a.jpg").unwrap();
+        let (count, last) = db.get_image_stats("/p/a.jpg").unwrap();
+        assert_eq!(count, 1, "初回は1のはず");
+        assert!(last.is_some(), "last_displayedが埋まるはず");
+
+        db.increment_display_count("/p/a.jpg").unwrap();
+        let (count, _) = db.get_image_stats("/p/a.jpg").unwrap();
+        assert_eq!(count, 2, "2回目は加算されるはず");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `reset_all_display_counts` は表示回数を全件0に戻すが、行自体（last_displayed等）
+    /// は削除しない。
+    #[test]
+    fn reset_all_display_counts_zeroes_counts_without_deleting_rows() {
+        let path = temp_db_path("reset_display_counts");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/p/b.jpg").unwrap();
+
+        db.reset_all_display_counts().unwrap();
+
+        let (a_count, a_last) = db.get_image_stats("/p/a.jpg").unwrap();
+        let (b_count, _) = db.get_image_stats("/p/b.jpg").unwrap();
+        assert_eq!(a_count, 0);
+        assert_eq!(b_count, 0);
+        assert!(
+            a_last.is_some(),
+            "行自体は残るので last_displayed はリセットされないはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `get_total_image_count`（file_metadata件数）と `get_displayed_image_count`
+    /// （display_count>0のimage_stats件数）は独立に数える。
+    #[test]
+    fn total_and_displayed_image_counts_are_independent() {
+        let path = temp_db_path("image_counts");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/p/a.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/b.jpg", 200, 20).unwrap();
+        db.upsert_file_metadata("/p/c.jpg", 300, 30).unwrap();
+        db.increment_display_count("/p/a.jpg").unwrap();
+
+        assert_eq!(
+            db.get_total_image_count().unwrap(),
+            3,
+            "file_metadataの全件数"
+        );
+        assert_eq!(
+            db.get_displayed_image_count().unwrap(),
+            1,
+            "display_count>0のimage_statsだけ数えるはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `save_setting`/`get_setting`: 未設定キーは `None`、保存後は値が返り、
+    /// 同じキーへの再保存は上書きする（`INSERT OR REPLACE`）。
+    #[test]
+    fn save_and_get_setting_roundtrip_and_overwrite() {
+        let path = temp_db_path("setting_roundtrip");
+        let db = Database::new(path.clone()).unwrap();
+
+        assert_eq!(db.get_setting("theme").unwrap(), None);
+
+        db.save_setting("theme", "dark").unwrap();
+        assert_eq!(db.get_setting("theme").unwrap(), Some("dark".to_string()));
+
+        db.save_setting("theme", "light").unwrap();
+        assert_eq!(
+            db.get_setting("theme").unwrap(),
+            Some("light".to_string()),
+            "同じキーへの再保存は上書きするはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `add_ignore_rule`/`get_ignore_rules`: 追加した順（`added_at ASC`）で返り、
+    /// `INSERT OR IGNORE` により同じ `(pattern, rule_type)` の重複追加は無視される。
+    #[test]
+    fn add_ignore_rule_and_get_ignore_rules_roundtrip_dedupes_exact_duplicates() {
+        let path = temp_db_path("add_ignore_rule_roundtrip");
+        let db = Database::new(path.clone()).unwrap();
+        // デフォルトルール(6件)をクリアしてから検証する。
+        for (pattern, rule_type) in db.get_ignore_rules().unwrap() {
+            db.remove_ignore_rule(&pattern, rule_type).unwrap();
+        }
+
+        db.add_ignore_rule("*.tmp", RuleType::Glob).unwrap();
+        db.add_ignore_rule("*.tmp", RuleType::Glob).unwrap(); // 重複追加は無視される
+        db.add_ignore_rule("2023-05-15", RuleType::Date).unwrap();
+
+        let rules = db.get_ignore_rules().unwrap();
+        assert_eq!(
+            rules,
+            vec![
+                ("*.tmp".to_string(), RuleType::Glob),
+                ("2023-05-15".to_string(), RuleType::Date),
+            ],
+            "追加順(added_at ASC)で返り、重複は1件にまとまるはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `get_recent_images` は `last_displayed` が非NULLの行だけを降順・limit件で返す。
+    #[test]
+    fn get_recent_images_orders_by_last_displayed_desc_and_respects_limit() {
+        let path = temp_db_path("recent_images");
+        let db = Database::new(path.clone()).unwrap();
+
+        // last_displayedがまだ無い行はrecent_imagesに出ない。
+        db.upsert_file_metadata("/p/never_shown.jpg", 100, 10)
+            .unwrap();
+
+        db.increment_display_count("/p/old.jpg").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100)); // datetime('now')は秒精度
+        db.increment_display_count("/p/new.jpg").unwrap();
+
+        let recent = db.get_recent_images(1).unwrap();
+        assert_eq!(recent.len(), 1, "limit=1なら1件だけ");
+        assert_eq!(recent[0].0, "/p/new.jpg", "最新表示が先頭に来るはず");
+
+        let recent_all = db.get_recent_images(10).unwrap();
+        assert!(
+            recent_all.iter().all(|(p, ..)| p != "/p/never_shown.jpg"),
+            "表示したことのないファイルは含まれないはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `get_distinct_scan_directories` は `scan_history` に記録済みのディレクトリを
+    /// 重複無しで返す。
+    #[test]
+    fn get_distinct_scan_directories_dedupes_repeated_scans_of_same_directory() {
+        let path = temp_db_path("distinct_scan_dirs");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.record_scan_history("/photos/a", 10, 1, 0, 5).unwrap();
+        db.record_scan_history("/photos/a", 10, 0, 0, 3).unwrap(); // 同じディレクトリを再スキャン
+        db.record_scan_history("/photos/b", 5, 5, 0, 2).unwrap();
+
+        let mut dirs = db.get_distinct_scan_directories().unwrap();
+        dirs.sort();
+        assert_eq!(dirs, vec!["/photos/a".to_string(), "/photos/b".to_string()]);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `trim_scan_history` は指定件数を超える古いレコードを削除し、件数を上限以下に保つ。
+    #[test]
+    fn trim_scan_history_caps_row_count_at_max_entries() {
+        let path = temp_db_path("trim_scan_history");
+        let db = Database::new(path.clone()).unwrap();
+
+        for i in 0..10 {
+            db.record_scan_history(&format!("/photos/{i}"), 1, 1, 0, 1)
+                .unwrap();
+        }
+
+        db.trim_scan_history(3).unwrap();
+
+        let count: i32 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM scan_history", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 3, "上限3件まで削減されるはず");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `get_all_display_counts` はパス昇順で全件（display_count=0の行も含む）返す。
+    #[test]
+    fn get_all_display_counts_returns_all_rows_sorted_by_path() {
+        let path = temp_db_path("all_display_counts");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.increment_display_count("/p/b.jpg").unwrap();
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/p/a.jpg").unwrap();
+
+        let counts = db.get_all_display_counts().unwrap();
+        assert_eq!(
+            counts,
+            vec![("/p/a.jpg".to_string(), 2), ("/p/b.jpg".to_string(), 1)],
+            "パス昇順で全件返るはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `upsert_exif_cache`（単発）は `ON CONFLICT` で既存行を更新する
+    /// （`upsert_exif_cache_batch` と同じSQLだが、単発呼び出し経路もカバーする）。
+    #[test]
+    fn upsert_exif_cache_single_inserts_then_updates() {
+        let path = temp_db_path("upsert_exif_cache_single");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_exif_cache("/p/a.jpg", Some("2023-05-15"), 100)
+            .unwrap();
+        db.upsert_exif_cache("/p/a.jpg", None, 200).unwrap();
+
+        let all = db.get_all_exif_cache().unwrap();
+        assert_eq!(all.len(), 1, "同じpathへの2回目呼び出しは更新のはず");
+        assert_eq!(all[0], ("/p/a.jpg".to_string(), None, 200));
+
+        let _ = std::fs::remove_file(&path);
+    }
 }
