@@ -584,6 +584,111 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// #63 直接の回帰テスト: `WalkDir` が読み取りエラーになった**ディレクトリ配下**の
+    /// 複数ファイル（サブツリー全体）が「不明」として扱われ、確定削除されないこと。
+    /// 単一ファイルのmtimeエラー（上のテスト）とは異なり、こちらはディレクトリ自体を
+    /// 読めない場合（権限拒否等）に、配下のファイルがそもそも生スキャンの結果に一切
+    /// 現れない（`WalkDir`がread_dirに失敗し降りられない）ケースを検証する。
+    /// CI（ubuntu-22.04、非rootユーザーで実行）でのみ意味を持つため`#[cfg(unix)]`とし、
+    /// root権限で実行された場合はchmodが効かず前提が崩れるためテストをスキップする。
+    #[test]
+    #[cfg(unix)]
+    fn directory_with_walkdir_error_marks_its_whole_subtree_unknown_not_deleted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // root権限で実行されるとchmod 0o000でも読めてしまい前提が崩れるためスキップする。
+        if !chmod_000_actually_denies_read() {
+            eprintln!("root権限で実行されているためスキップ（chmodによる権限拒否が効かない）");
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "sss_scanner_locked_subtree_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let locked_dir = root.join("locked");
+        std::fs::create_dir_all(&locked_dir).unwrap();
+        std::fs::write(locked_dir.join("a.jpg"), b"a").unwrap();
+        std::fs::write(locked_dir.join("b.jpg"), b"b").unwrap();
+        std::fs::write(root.join("top.jpg"), b"top").unwrap();
+
+        let scanner = ImageScanner::new();
+        let no_prune_filter = crate::ignore::IgnoreFilter::from_patterns(&[]);
+
+        // 1回目: 全ファイルが読める状態でベースラインを作る。
+        let (first, first_errors) = scanner
+            .scan_directory_with_progress(&root, &no_prune_filter, |_, _| {})
+            .expect("first scan");
+        assert!(first_errors.is_empty());
+        assert_eq!(first.len(), 3, "locked配下2件+top.jpgの3件のはず");
+        let previous: Vec<(String, i64, i64)> = first
+            .iter()
+            .map(|f| (f.path.clone(), f.modified_time, f.file_size))
+            .collect();
+
+        // 2回目: lockedディレクトリの読み取り権限を奪う（WalkDirがread_dirに失敗する）。
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = scanner.scan_directory_incremental_with_progress(
+            &root,
+            previous,
+            &no_prune_filter,
+            |_, _| {},
+        );
+
+        // 後片付け（remove_dir_allの前に権限を戻す）は結果に関わらず必ず行う。
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let result = result.expect("incremental scan itself succeeds despite the subtree error");
+
+        let a_str = locked_dir.join("a.jpg").to_string_lossy().to_string();
+        let b_str = locked_dir.join("b.jpg").to_string_lossy().to_string();
+        let top_str = root.join("top.jpg").to_string_lossy().to_string();
+
+        assert!(
+            result.error_count >= 1,
+            "lockedディレクトリの読み取りエラーが1件以上あるはず"
+        );
+        assert!(
+            result.unknown_files.contains(&a_str) && result.unknown_files.contains(&b_str),
+            "locked配下の2件はどちらも不明扱いになるはず: {:?}",
+            result.unknown_files
+        );
+        assert!(
+            !result.deleted_files.contains(&a_str) && !result.deleted_files.contains(&b_str),
+            "locked配下を確定削除してはいけない: {:?}",
+            result.deleted_files
+        );
+        assert!(
+            !result.unknown_files.contains(&top_str) && !result.deleted_files.contains(&top_str),
+            "エラーと無関係なtop.jpgは不明にも削除にもならないはず（変更なしのまま）"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// この環境で `chmod 0o000` が実際に読み取りを拒否するかどうかを直接試して判定する
+    /// （root権限だと拒否が効かないため、`libc`のFFIを増やさず実際の効果で判定する）。
+    #[cfg(unix)]
+    fn chmod_000_actually_denies_read() -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        let probe_dir = std::env::temp_dir().join(format!(
+            "sss_root_probe_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&probe_dir).unwrap();
+        std::fs::write(probe_dir.join("x"), b"x").unwrap();
+        std::fs::set_permissions(&probe_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = std::fs::read_dir(&probe_dir).is_err();
+        std::fs::set_permissions(&probe_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::remove_dir_all(&probe_dir);
+        denied
+    }
+
     #[test]
     fn test_is_media_file() {
         let scanner = ImageScanner::new();
