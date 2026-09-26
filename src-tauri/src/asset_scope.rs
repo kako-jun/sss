@@ -98,14 +98,77 @@ fn sanitize_allow_dir_with_home(path: &Path, home_dir: Option<&Path>) -> Option<
 ///
 /// - Unix はルートが `/` の1種類しかなく、常に拒否対象。
 /// - Windows はドライブごとに存在するため、ホームディレクトリが属するドライブの
-///   ルート（`home_dir.ancestors().last()`。システムドライブ相当、通常 `C:\`）
-///   だけを拒否し、SD カード等の他ドライブ直下（例: `D:\`）は許可する。
+///   ルート（システムドライブ相当、通常 `C:\`）だけを拒否し、SD カード等の
+///   他ドライブ直下（例: `D:\`）は許可する。
 /// - ホームディレクトリが不明な場合は安全側に倒し、あらゆるルートを拒否する。
+///
+/// `canonical_root` と `home_dir` は [`normalize_root_for_comparison`] で正規化してから
+/// 比較する（3巡目レビュー #73 must）。`canonicalize()` は Windows で verbatim 形式
+/// （`\\?\C:\`, `Prefix::VerbatimDisk`）を返すが、`dirs::home_dir()` は通常表記
+/// （`C:\Users\...`, `Prefix::Disk`）を返すため、正規化なしの単純な `Path` 等価比較では
+/// 同じドライブでも一致しなかった。
 fn is_protected_root(canonical_root: &Path, home_dir: Option<&Path>) -> bool {
-    match home_dir.and_then(|home| home.ancestors().last().map(Path::to_path_buf)) {
-        Some(home_root) => canonical_root == home_root,
+    match home_dir {
+        Some(home) => {
+            normalize_root_for_comparison(canonical_root) == normalize_root_for_comparison(home)
+        }
         None => true,
     }
+}
+
+/// パスの「ルート部分」（ドライブレター/UNC共有）を比較用に正規化する純粋な文字列処理。
+/// `std::path::Component`/`Prefix` を使わず、OS のパス解釈規則に依存せず動作するため、
+/// Windows のパス表記を Windows 以外の CI でも直接テストできる。
+///
+/// - verbatim ディスク（`\\?\C:\...`）→ `C:`（ドライブ文字を大文字化）
+/// - verbatim UNC（`\\?\UNC\server\share\...`）→ `\\SERVER\SHARE`
+/// - 通常ディスク（`C:\...` / フルパス可）→ `C:`
+/// - 通常 UNC（`\\server\share\...`）→ `\\SERVER\SHARE`
+/// - Unix の絶対パス（`/...`）→ `/`（Unix はルートが1種類しかないため常に `/` に還元）
+/// - それ以外（相対パス等）→ 元の文字列をそのまま返す
+///
+/// `home_dir`（`C:\Users\kako` のようなフルパス）と、既にルートだけの `canonical_root`
+/// （`\\?\C:\` 等）の両方をこの関数に通すことで、`.ancestors()` のような OS 依存の
+/// パス分解を経由せずに「同じドライブ/共有を指しているか」を比較できる。
+fn normalize_root_for_comparison(path: &Path) -> String {
+    let s = path.to_string_lossy();
+
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return normalize_unc_server_share(rest);
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return extract_drive_letter(rest).unwrap_or_else(|| rest.to_uppercase());
+    }
+    if let Some(rest) = s.strip_prefix(r"\\") {
+        return normalize_unc_server_share(rest);
+    }
+    if let Some(drive) = extract_drive_letter(&s) {
+        return drive;
+    }
+    if s.starts_with('/') {
+        return "/".to_string();
+    }
+    s.to_string()
+}
+
+/// `C:` のようなドライブレター表記を文字列先頭から抽出し、大文字化して返す。
+/// 先頭2バイトが `<英字>:` の形でなければ `None`。
+fn extract_drive_letter(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        Some(format!("{}:", (bytes[0] as char).to_ascii_uppercase()))
+    } else {
+        None
+    }
+}
+
+/// `server\share\...` 形式の残り文字列から UNC のサーバー名・共有名部分だけを取り出し、
+/// `\\SERVER\SHARE`（大文字化）に正規化する。
+fn normalize_unc_server_share(rest: &str) -> String {
+    let mut parts = rest.splitn(3, '\\');
+    let server = parts.next().unwrap_or("").to_uppercase();
+    let share = parts.next().unwrap_or("").to_uppercase();
+    format!(r"\\{server}\{share}")
 }
 
 #[cfg(test)]
@@ -270,32 +333,120 @@ mod tests {
         );
     }
 
+    // --- normalize_root_for_comparison（純粋な文字列処理。OS非依存） ---
+    //
+    // must(3巡目レビュー #73): canonicalize() が返す verbatim 形式（\\?\C:\ 等）と
+    // dirs::home_dir() が返す通常形式（C:\Users\... 等）が同じドライブ/共有を指す場合に
+    // 正規化後の文字列が一致することを、Windows実機でなくても検証できる形で固定する。
+
+    #[test]
+    fn normalize_root_for_comparison_strips_verbatim_disk_prefix_and_uppercases_drive() {
+        assert_eq!(normalize_root_for_comparison(Path::new(r"\\?\C:\")), "C:");
+        assert_eq!(normalize_root_for_comparison(Path::new(r"\\?\c:\")), "C:");
+    }
+
+    #[test]
+    fn normalize_root_for_comparison_extracts_drive_from_plain_full_path() {
+        assert_eq!(
+            normalize_root_for_comparison(Path::new(r"C:\Users\kako")),
+            "C:"
+        );
+        assert_eq!(normalize_root_for_comparison(Path::new(r"d:\photos")), "D:");
+    }
+
+    #[test]
+    fn normalize_root_for_comparison_normalizes_verbatim_and_plain_unc_the_same_way() {
+        assert_eq!(
+            normalize_root_for_comparison(Path::new(r"\\?\UNC\server\share\")),
+            r"\\SERVER\SHARE"
+        );
+        assert_eq!(
+            normalize_root_for_comparison(Path::new(r"\\server\share\Users\kako")),
+            r"\\SERVER\SHARE"
+        );
+    }
+
+    #[test]
+    fn normalize_root_for_comparison_reduces_any_unix_absolute_path_to_root() {
+        // Unix はルートが `/` の1種類しかないため、フルパスでもルートは常に `/` に還元する
+        assert_eq!(normalize_root_for_comparison(Path::new("/")), "/");
+        assert_eq!(normalize_root_for_comparison(Path::new("/home/kako")), "/");
+    }
+
+    #[test]
+    fn normalize_root_for_comparison_leaves_relative_path_untouched() {
+        assert_eq!(
+            normalize_root_for_comparison(Path::new("relative/dir")),
+            "relative/dir"
+        );
+    }
+
     // --- is_protected_root（純関数。fsアクセスなし） ---
     //
     // should1(レビュー #73): ルート拒否は Unix の `/` と「ホームディレクトリが属する
     // ドライブのルート」に限定する不変条件を、実ファイルシステムに依存せず検証する。
+    // must(3巡目レビュー #73): verbatim/非verbatim表記の揺れがあっても同じドライブ/共有なら
+    // 一致すること（normalize_root_for_comparison 経由）もあわせて検証する。
 
     #[test]
-    fn is_protected_root_rejects_when_it_equals_home_ancestor_root() {
-        let root = Path::new("/");
-        let home = Path::new("/home/kako");
-        assert!(is_protected_root(root, Some(home)));
-    }
-
-    #[test]
-    fn is_protected_root_allows_root_different_from_home_ancestor_root() {
-        // Windows のドライブ直下を模したケース: home 側のルートと一致しない
-        // ルート候補（SDカード等の別ドライブに相当）は保護対象にしない。
-        let other_drive_root = Path::new("/mnt/sdcard");
-        let home = Path::new("/home/kako");
-        assert!(!is_protected_root(other_drive_root, Some(home)));
+    fn is_protected_root_rejects_unix_root_regardless_of_home_depth() {
+        assert!(is_protected_root(
+            Path::new("/"),
+            Some(Path::new("/home/kako"))
+        ));
     }
 
     #[test]
     fn is_protected_root_rejects_everything_when_home_is_unknown() {
         // ホームディレクトリが解決できない環境では安全側に倒し、あらゆるルートを拒否する
-        let root = Path::new("/mnt/sdcard");
-        assert!(is_protected_root(root, None));
+        assert!(is_protected_root(Path::new("/"), None));
+        assert!(is_protected_root(Path::new(r"\\?\D:\"), None));
+    }
+
+    #[test]
+    fn is_protected_root_rejects_home_drive_even_with_verbatim_canonical_prefix() {
+        // must(3巡目レビュー #73): canonicalize() 由来の \\?\C:\（VerbatimDisk）と
+        // dirs::home_dir() 由来の C:\Users\...（Disk）が、正規化を通せば同一ドライブとして
+        // 一致し、ホームドライブが保護されることを確認する。
+        assert!(is_protected_root(
+            Path::new(r"\\?\C:\"),
+            Some(Path::new(r"C:\Users\kako"))
+        ));
+        // ドライブレターの大小表記ゆれも同一視する
+        assert!(is_protected_root(
+            Path::new(r"\\?\c:\"),
+            Some(Path::new(r"C:\Users\kako"))
+        ));
+    }
+
+    #[test]
+    fn is_protected_root_allows_other_drive_different_from_home() {
+        // SDカード等の別ドライブ（例: D:\）はホームドライブと一致しないため保護しない
+        assert!(!is_protected_root(
+            Path::new(r"\\?\D:\"),
+            Some(Path::new(r"C:\Users\kako"))
+        ));
+        assert!(!is_protected_root(
+            Path::new(r"D:\"),
+            Some(Path::new(r"C:\Users\kako"))
+        ));
+    }
+
+    #[test]
+    fn is_protected_root_rejects_home_unc_share_even_with_verbatim_canonical_prefix() {
+        // ホームディレクトリがネットワーク共有上にある環境（企業ドメイン参加PC等）を想定
+        assert!(is_protected_root(
+            Path::new(r"\\?\UNC\fileserver\home\"),
+            Some(Path::new(r"\\fileserver\home\kako"))
+        ));
+    }
+
+    #[test]
+    fn is_protected_root_allows_other_unc_share_different_from_home() {
+        assert!(!is_protected_root(
+            Path::new(r"\\?\UNC\fileserver\public\"),
+            Some(Path::new(r"\\fileserver\home\kako"))
+        ));
     }
 
     // --- sanitize_allow_dir ---
@@ -361,6 +512,25 @@ mod tests {
         // Windows ドライブ相対緩和は影響しない）。実行中のホストが必ず持つ唯一の
         // ルートなので、CI (ubuntu) でも実際に検証できる。
         assert_eq!(sanitize_allow_dir(Path::new("/")), None);
+    }
+
+    // 3巡目レビュー #73 で明示的に指定された Windows 実機限定の統合確認テスト。
+    // 実際の dirs::home_dir() / canonicalize() を経由するため Windows でしか意味を
+    // 持たないが、上の normalize_root_for_comparison / is_protected_root の単体テストは
+    // 文字列処理のみで全 OS から検証済み。
+    #[cfg(windows)]
+    #[test]
+    fn sanitize_allow_dir_rejects_c_drive_root_on_real_windows() {
+        assert_eq!(sanitize_allow_dir(Path::new("C:\\")), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn is_protected_root_treats_verbatim_c_drive_as_home_drive_on_real_windows() {
+        assert!(is_protected_root(
+            Path::new(r"\\?\C:\"),
+            Some(Path::new(r"C:\Users\x"))
+        ));
     }
 
     #[test]
