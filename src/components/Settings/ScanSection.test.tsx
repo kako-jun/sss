@@ -82,3 +82,43 @@ describe('ScanSection scan error display', () => {
     });
   });
 });
+
+// #63: walkdir/メタデータ取得エラーはScanProgress.errorCount/errorExamplesとして
+// 返ってくる。スキャン結果表示にそのまま出すことをピン留めする。
+describe('ScanSection scan result error summary', () => {
+  it('shows the error count and examples when the scan completed with errors', async () => {
+    scanDirectory.mockResolvedValue({
+      totalFiles: 100,
+      newFiles: 5,
+      deletedFiles: 0,
+      durationMs: 1234,
+      errorCount: 2,
+      errorExamples: ['/photos/broken.jpg: failed to read metadata'],
+    });
+
+    await clickScanOnceDirectoryLoaded();
+
+    await waitFor(() => {
+      expect(screen.getByText('2件')).toBeTruthy();
+      expect(screen.getByText('/photos/broken.jpg: failed to read metadata')).toBeTruthy();
+    });
+  });
+
+  it('does not show the error summary when the scan completed without errors', async () => {
+    scanDirectory.mockResolvedValue({
+      totalFiles: 100,
+      newFiles: 5,
+      deletedFiles: 0,
+      durationMs: 1234,
+      errorCount: 0,
+      errorExamples: [],
+    });
+
+    await clickScanOnceDirectoryLoaded();
+
+    await waitFor(() => {
+      expect(screen.getByText(/ファイル数/)).toBeTruthy();
+    });
+    expect(screen.queryByText(/読み取りエラー/)).toBeNull();
+  });
+});

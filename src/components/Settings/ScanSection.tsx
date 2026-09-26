@@ -157,6 +157,25 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
               <span className="font-mono">{(scanProgress.durationMs / 1000).toFixed(2)}秒</span>
             </div>
           </div>
+
+          {scanProgress.errorCount > 0 && (
+            <div className="space-y-1 p-4 bg-amber-950/30 rounded border border-amber-500/20">
+              <div className="text-sm text-amber-400/80">
+                読み取りエラー:{' '}
+                <span className="font-mono">{scanProgress.errorCount.toLocaleString()}件</span>
+                （該当ファイル/フォルダは削除扱いにせず「不明」として保持します）
+              </div>
+              {scanProgress.errorExamples.length > 0 && (
+                <ul className="text-xs text-amber-400/50 font-mono space-y-0.5 pl-4 list-disc">
+                  {scanProgress.errorExamples.map((example) => (
+                    <li key={example} className="break-all">
+                      {example}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -26,6 +26,11 @@ export interface ScanProgress {
   newFiles: number;
   deletedFiles: number;
   durationMs: number;
+  // 走査中に発生したエラーの件数（WalkDir読み取りエラー＋ファイル単位のメタデータ/mtime
+  // 取得エラー。1970年より前のmtimeを含む）。#63
+  errorCount: number;
+  // エラーの代表例（最大5件、"{path}: {message}"形式）。#63
+  errorExamples: string[];
 }
 
 // 統計情報
