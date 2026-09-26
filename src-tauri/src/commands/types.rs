@@ -10,7 +10,8 @@ pub struct AppState {
     pub playlist: Mutex<Option<Playlist>>,
     pub directory_path: Mutex<Option<PathBuf>>,
     pub cache_dir: PathBuf,
-    pub _keep_awake: keepawake::AwakeHandle,
+    /// スクリーンセーバー抑制ハンドル。初期化に失敗した環境（D-Bus 無し等）では `None`
+    pub _keep_awake: Option<keepawake::AwakeHandle>,
 }
 
 /// スキャン進捗情報

@@ -15,7 +15,7 @@ import {
 import type { ImageInfo } from '../types';
 import { openInExplorer, pickImage, excludeImage } from '../lib/tauri';
 import { useState, useMemo } from 'react';
-import { open } from '@tauri-apps/plugin-shell';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 interface OverlayUIProps {
   image: ImageInfo | null;
@@ -179,7 +179,7 @@ export function OverlayUI({
               <button
                 onClick={async () => {
                   const url = `https://www.google.com/maps?q=${image.exif!.gpsLatitude},${image.exif!.gpsLongitude}`;
-                  await open(url);
+                  await openUrl(url);
                 }}
                 className="relative w-full h-14 bg-black/30 hover:bg-black/50 rounded border border-white/5 overflow-hidden transition-colors group"
               >

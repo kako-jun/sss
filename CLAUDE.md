@@ -23,8 +23,7 @@
 - **スクリーンセーバー抑制**: keepawake v0.4 (クロスプラットフォーム対応)
 - **プラグイン**:
   - tauri-plugin-dialog v2 (ダイアログ)
-  - tauri-plugin-shell v2 (シェル操作)
-  - tauri-plugin-fs v2 (ファイルシステム)
+  - tauri-plugin-opener v2 (URLを開く)
   - tauri-plugin-single-instance v2 (単一インスタンス)
 
 ### フロントエンド
@@ -490,8 +489,7 @@ CREATE TABLE scan_history (
 Tauri v1のallowlist機能が、v2では新しいプラグインシステムとパーミッションモデルに置き換わりました：
 
 - `tauri-plugin-dialog`: ファイル選択ダイアログ
-- `tauri-plugin-shell`: シェルコマンド実行
-- `tauri-plugin-fs`: ファイルシステムアクセス
+- `tauri-plugin-opener`: URLを開く（`tauri-plugin-shell`の`open`はv2で非推奨のため移行、#59）
 - `tauri-plugin-single-instance`: 単一インスタンス管理
 
 #### 2. APIの変更

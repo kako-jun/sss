@@ -1,10 +1,11 @@
+use crate::asset_scope::{resolve_and_sanitize_share_directory, resolve_share_directory};
 use crate::commands::types::AppState;
 use crate::ignore::IgnoreFilter;
 use crate::image_processor::get_exif_info;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::State;
+use tauri::{Manager, State};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,17 +15,20 @@ pub struct RecentImage {
     pub last_displayed: String,
 }
 
-/// デフォルトのピック先ディレクトリパスを取得
-#[tauri::command]
-pub async fn get_default_share_directory() -> Result<String, String> {
-    let pictures_dir = if cfg!(windows) {
+/// ホームディレクトリ配下の Pictures フォルダを取得する（OS別に環境変数を切り替え）。
+pub(crate) fn home_pictures_dir() -> Result<PathBuf, String> {
+    if cfg!(windows) {
         std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
     } else {
         std::env::var("HOME").map(|p| PathBuf::from(p).join("Pictures"))
     }
-    .map_err(|_| "Failed to get home directory".to_string())?;
+    .map_err(|_| "Failed to get home directory".to_string())
+}
 
-    let share_directory = pictures_dir.join("sss-picked");
+/// デフォルトのピック先ディレクトリパスを取得
+#[tauri::command]
+pub async fn get_default_share_directory() -> Result<String, String> {
+    let share_directory = home_pictures_dir()?.join("sss-picked");
     Ok(share_directory.to_str().unwrap_or("").to_string())
 }
 
@@ -95,7 +99,11 @@ pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
 
 /// ピック機能：画像をPictures/sss-pickedフォルダにコピー
 #[tauri::command]
-pub async fn pick_image(image_path: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn pick_image(
+    image_path: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
     let source_path = Path::new(&image_path);
 
     if !source_path.exists() {
@@ -104,29 +112,38 @@ pub async fn pick_image(image_path: String, state: State<'_, AppState>) -> Resul
 
     // コピー先ディレクトリを取得（設定から、なければデフォルト）
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    let share_directory = match db
+    let share_setting = db
         .get_setting("share_directory_path")
-        .map_err(|e| e.to_string())?
-    {
-        Some(path) => PathBuf::from(path),
-        None => {
-            // デフォルト: Pictures/sss-picked
-            let pictures_dir = if cfg!(windows) {
-                std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
-            } else {
-                std::env::var("HOME").map(|p| PathBuf::from(p).join("Pictures"))
-            }
-            .map_err(|_| "Failed to get home directory".to_string())?;
-
-            pictures_dir.join("sss-picked")
-        }
-    };
+        .map_err(|e| e.to_string())?;
     drop(db);
+    let pictures_dir = home_pictures_dir()?;
+    let share_directory = resolve_share_directory(&pictures_dir, share_setting.as_deref());
 
     // ディレクトリが存在しない場合は作成
     if !share_directory.exists() {
         fs::create_dir_all(&share_directory)
             .map_err(|e| format!("Failed to create share directory: {e}"))?;
+    }
+
+    // 起動時・設定変更時点ではディレクトリが未作成で asset scope 許可に失敗していることが
+    // ある（新規環境の既定ピック先など）。実在が保証された今このタイミングで改めて許可し、
+    // 「ピック済み」タブのサムネイル/動画表示が次回起動を待たずに動くようにする
+    // （レビュー #73 must）。
+    match resolve_and_sanitize_share_directory(&pictures_dir, share_setting.as_deref()) {
+        Some(safe_dir) => {
+            if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
+                eprintln!(
+                    "Failed to allow asset scope for {}: {e}",
+                    safe_dir.display()
+                );
+            }
+        }
+        None => {
+            eprintln!(
+                "Refusing to allow unsafe asset scope directory: {}",
+                share_directory.display()
+            );
+        }
     }
 
     // ファイル名を取得
@@ -281,23 +298,14 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
 }
 
 /// ピック済みフォルダのパスを取得するヘルパー
-fn get_picked_directory(db: &crate::database::Database) -> Result<PathBuf, String> {
-    match db
+pub(crate) fn get_picked_directory(db: &crate::database::Database) -> Result<PathBuf, String> {
+    let share_setting = db
         .get_setting("share_directory_path")
-        .map_err(|e| e.to_string())?
-    {
-        Some(path) => Ok(PathBuf::from(path)),
-        None => {
-            let pictures_dir = if cfg!(windows) {
-                std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
-            } else {
-                std::env::var("HOME").map(|p| PathBuf::from(p).join("Pictures"))
-            }
-            .map_err(|_| "Failed to get home directory".to_string())?;
-
-            Ok(pictures_dir.join("sss-picked"))
-        }
-    }
+        .map_err(|e| e.to_string())?;
+    Ok(resolve_share_directory(
+        &home_pictures_dir()?,
+        share_setting.as_deref(),
+    ))
 }
 
 /// ピック済み画像一覧を取得（sss-pickedフォルダをスキャン）

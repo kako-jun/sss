@@ -28,7 +28,8 @@ dist-ssr
 
 # Tauri
 src-tauri/target
-src-tauri/gen/schemas/linux-schema.json
+# ビルドのたびに生成・上書きされる（capabilities.json はビルド設定から自動生成される派生物）
+src-tauri/gen/schemas/
 
 # Windows temporary files
 nul

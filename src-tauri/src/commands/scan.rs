@@ -1,9 +1,10 @@
+use crate::asset_scope::sanitize_allow_dir;
 use crate::commands::types::{AppState, ScanProgress};
 use crate::ignore::IgnoreFilter;
 use crate::playlist::Playlist;
 use crate::scanner::ImageScanner;
 use std::path::PathBuf;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 /// ~/.sssignore が存在する場合、内容を DB にインポートして .sssignore.bak にリネーム
 fn migrate_sssignore_to_db(db: &crate::database::Database) {
@@ -59,8 +60,28 @@ pub async fn scan_directory(
 ) -> Result<ScanProgress, String> {
     let directory = PathBuf::from(&directory_path);
 
-    if !directory.exists() {
-        return Err(format!("Directory does not exist: {directory_path}"));
+    if !directory.is_dir() {
+        return Err(format!(
+            "Directory does not exist or is not a directory: {directory_path}"
+        ));
+    }
+
+    // asset scope（convertFileSrc が読み込めるディレクトリ）にスキャン対象を動的に許可する。
+    // 手動スキャン・起動時自動スキャンはどちらもこのコマンドを通るため、ここ1箇所で両方をカバーする。
+    // sanitize_allow_dir() で is_dir・絶対パス・非保護ルートを再検証してから allow する
+    // （空文字列/相対パスが紛れ込んで意図せず広い scope になる事故を防ぐ、レビュー #73 M1）。
+    // 拒否された場合はスキャンしても画像が一切表示できないため、ここで Err を返して
+    // UI にエラー理由を伝える（黙って続行し原因不明のまま表示できない、を防ぐ。should1）。
+    let safe_dir = sanitize_allow_dir(&directory).ok_or_else(|| {
+        format!(
+            "Cannot use this directory for security reasons (e.g. a system drive root): {directory_path}"
+        )
+    })?;
+    if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
+        eprintln!(
+            "Failed to allow asset scope for {}: {e}",
+            safe_dir.display()
+        );
     }
 
     // マイグレーション処理：~/.sssignore が存在する場合は DB にインポート

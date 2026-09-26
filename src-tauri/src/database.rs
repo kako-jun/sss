@@ -331,6 +331,23 @@ impl Database {
         Ok(result)
     }
 
+    /// 過去にスキャンした全ディレクトリパス（重複なし）を取得する。
+    /// 起動時に asset scope へ動的許可するために使う（前回ディレクトリだけでなく、
+    /// 履歴タブ〔`get_recent_images`〕に残る他ディレクトリの画像も表示できるようにする。
+    /// レビュー #73 should2）。
+    pub fn get_distinct_scan_directories(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT directory_path FROM scan_history WHERE directory_path IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
     /// スキャン履歴の上限管理（max_entries件を超える古いレコードを削除）
     pub fn trim_scan_history(&self, max_entries: i32) -> Result<()> {
         self.conn.execute(

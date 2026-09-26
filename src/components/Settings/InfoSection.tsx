@@ -1,5 +1,5 @@
 import { ExternalLink, RotateCcw } from 'lucide-react';
-import { open } from '@tauri-apps/plugin-shell';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { useState } from 'react';
 import { resetAllData } from '../../lib/tauri';
 
@@ -9,7 +9,7 @@ export function InfoSection() {
 
   const handleOpenGitHub = async () => {
     try {
-      await open('https://github.com/kako-jun/sss');
+      await openUrl('https://github.com/kako-jun/sss');
     } catch (err) {
       console.error('Failed to open GitHub:', err);
     }
