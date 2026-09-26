@@ -1598,6 +1598,62 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// #63 テスト観点補完（トランザクション途中失敗時のロールバック）: `apply_file_metadata_changes`
+    /// は upsert → delete の順で1トランザクションにまとめて実行する。途中の1件
+    /// （後続のdelete）が失敗したら、それより**前に同一トランザクション内で成功していた
+    /// 変更（先行するupsert・先行するdelete）も含めて全てロールバックされ、部分反映
+    /// されないことを検証する。SQLiteのトリガーで特定パスのDELETEを意図的に失敗させ、
+    /// 途中失敗を再現する（本番コードは変更しない）。
+    #[test]
+    fn apply_file_metadata_changes_rolls_back_entirely_on_mid_transaction_failure() {
+        let path = temp_db_path("apply_changes_rollback");
+        let db = Database::new(path.clone()).unwrap();
+
+        // 既存の状態: keep(ロールバックで生き残るべき), poison(削除が失敗する対象)。
+        db.upsert_file_metadata("/p/keep.jpg", 100, 10).unwrap();
+        db.upsert_file_metadata("/p/poison.jpg", 200, 20).unwrap();
+
+        // poison.jpg のDELETEだけを意図的に失敗させるトリガーを仕込む。
+        db.conn
+            .execute_batch(
+                "CREATE TRIGGER fail_on_poison_delete
+                 BEFORE DELETE ON file_metadata
+                 WHEN OLD.path = '/p/poison.jpg'
+                 BEGIN SELECT RAISE(ABORT, 'forced test failure'); END;",
+            )
+            .unwrap();
+
+        // upsert(new.jpg)は先に処理され、delete(keep.jpg)もpoison.jpgより先に処理される
+        // 実装順（upsert全件→delete全件、deleteは引数順）なので、両方が「失敗より前に
+        // 同一トランザクション内で成功済み」の状態を作れる。
+        let result = db.apply_file_metadata_changes(
+            &[("/p/new.jpg".to_string(), 300, 30)],
+            &["/p/keep.jpg".to_string(), "/p/poison.jpg".to_string()],
+        );
+
+        assert!(
+            result.is_err(),
+            "トリガーによる途中失敗はErrとして伝播するはず"
+        );
+
+        let all = db.get_all_file_metadata().unwrap();
+        let paths: Vec<&str> = all.iter().map(|(p, ..)| p.as_str()).collect();
+        assert!(
+            paths.contains(&"/p/keep.jpg"),
+            "ロールバックによりkeepの削除も取り消され残るはず: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"/p/poison.jpg"),
+            "失敗した削除対象自身もロールバックで残るはず: {paths:?}"
+        );
+        assert!(
+            !paths.contains(&"/p/new.jpg"),
+            "ロールバックにより先行するupsertも反映されないはず（部分反映禁止）: {paths:?}"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// `increment_display_count` は初回で1、以降は加算し、`last_displayed` を埋める。
     /// `get_image_stats` は未登録パスに対して `(0, None)` を返す（エラーにしない）。
     #[test]

@@ -527,6 +527,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// #63 境界テスト: エラー件数が `MAX_ERROR_EXAMPLES` を超えても、`error_examples`
+    /// は先頭 `MAX_ERROR_EXAMPLES` 件に切り詰められる（結果/UIの肥大化防止）。
+    /// `error_count` は切り詰めず実際の総数を保持することも合わせて検証する。
+    #[test]
+    fn error_examples_are_capped_at_max_while_error_count_reflects_true_total() {
+        let root =
+            std::env::temp_dir().join(format!("sss_scanner_error_cap_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let error_file_count = MAX_ERROR_EXAMPLES + 2;
+        let before_epoch = SystemTime::UNIX_EPOCH
+            .checked_sub(std::time::Duration::from_secs(3600))
+            .unwrap();
+        for i in 0..error_file_count {
+            let p = root.join(format!("ancient_{i}.jpg"));
+            std::fs::write(&p, b"x").unwrap();
+            let file = std::fs::File::options().write(true).open(&p).unwrap();
+            file.set_modified(before_epoch)
+                .expect("この環境ではエポック前のmtime設定に対応しているはず");
+        }
+
+        let scanner = ImageScanner::new();
+        let no_prune_filter = crate::ignore::IgnoreFilter::from_patterns(&[]);
+        let result = scanner
+            .scan_directory_incremental_with_progress(&root, vec![], &no_prune_filter, |_, _| {})
+            .expect("scan itself succeeds despite per-file errors");
+
+        assert_eq!(
+            result.error_count, error_file_count,
+            "error_countは切り詰めず実際の総数を保持するはず"
+        );
+        assert_eq!(
+            result.error_examples.len(),
+            MAX_ERROR_EXAMPLES,
+            "error_examplesはMAX_ERROR_EXAMPLES件に切り詰められるはず"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// #63: エラーになったファイルは、差分スキャンで「削除」ではなく「不明」として
     /// 扱われる（`file_metadata`/`image_stats` を温存するため）。
     #[test]

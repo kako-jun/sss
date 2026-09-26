@@ -10,7 +10,8 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use sss_lib::commands::scan::perform_scan;
 use sss_lib::database::Database;
@@ -500,6 +501,76 @@ fn restart_with_all_saved_files_physically_deleted_yields_empty_playlist_without
     );
     assert_eq!(playlist.total_count(), 0);
     assert!(playlist.current().is_none());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #63 テスト観点補完（並行: async化したsettingsと同時スキャン）: `save_setting`/
+/// `get_setting`（`commands/settings.rs`）は #63 で非同期コマンドに変更されたが、
+/// 実体は他の全DBコマンドと同じ `AppState.db`（`Mutex<Database>`）を取り合うだけで、
+/// `perform_scan`（Stage 1/Stage 3で同じMutexを短時間だけ取る）と排他制御の仕組みは
+/// 変わっていない。設定の読み書きを別スレッドから連打しながらスキャンしても、
+/// デッドロックせず両方が正しく完了し、最後に書いた設定値がそのまま読めることを
+/// 検証する（Tauriコマンド層を経由しない分、`Database`のメソッドを直接叩く）。
+#[test]
+fn settings_read_write_do_not_deadlock_or_corrupt_during_concurrent_scan() {
+    let dir = workspace("settings_concurrent_scan");
+    let photos_dir = dir.join("photos");
+    std::fs::create_dir_all(&photos_dir).unwrap();
+
+    const TOTAL: usize = 300;
+    for i in 0..TOTAL {
+        write_jpeg(&photos_dir.join(format!("img{i}.jpg")));
+    }
+
+    let db_mutex = Arc::new(Mutex::new(
+        Database::new(dir.join("sss.db")).expect("db init"),
+    ));
+
+    // スキャンと並行して、別スレッドから設定の保存/取得を繰り返す。
+    let settings_db_mutex = Arc::clone(&db_mutex);
+    let settings_thread = thread::spawn(move || {
+        for i in 0..200 {
+            let db = settings_db_mutex.lock().unwrap();
+            db.save_setting("concurrent_test_key", &format!("v{i}"))
+                .expect("save_settingは同時実行下でも失敗しないはず");
+            let _ = db.get_setting("concurrent_test_key");
+        }
+    });
+
+    let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        None,
+        &photos_dir,
+        |_, _| {},
+    )
+    .expect("設定の同時読み書きがあってもscanは成功するはず（デッドロックしない）");
+
+    settings_thread
+        .join()
+        .expect("設定スレッドはpanicせず完了するはず");
+
+    // 最後に書いた値がそのまま読める(競合で壊れていない)ことを確認する。
+    {
+        let db = db_mutex.lock().unwrap();
+        db.save_setting("concurrent_test_key", "final").unwrap();
+        assert_eq!(
+            db.get_setting("concurrent_test_key").unwrap(),
+            Some("final".to_string())
+        );
+    }
+
+    let playlist_lock = playlist_mutex.lock().unwrap();
+    let playlist = playlist_lock.as_ref().unwrap();
+    assert_eq!(
+        playlist.total_count(),
+        TOTAL,
+        "設定の同時アクセスがあってもスキャン結果自体は正しいはず"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
