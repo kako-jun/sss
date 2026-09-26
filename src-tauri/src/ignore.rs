@@ -360,6 +360,33 @@ impl IgnoreFilter {
         false
     }
 
+    /// `path`（前回スキャン時には追跡していたファイル）の祖先ディレクトリのいずれかが
+    /// `should_prune_dir` で刈られる対象かどうかを判定する（#61レビュー nit）。
+    ///
+    /// `scan_directory_with_progress` の `WalkDir::filter_entry` は、ディレクトリに対して
+    /// のみ `should_prune_dir` で枝刈りを行い、ファイルに対しては常に列挙する
+    /// （ファイル単位のglobルール——`*.tmp`や特定ファイルパスの除外パターン等——では
+    /// 列挙自体は止めない）。そのため「前回は追跡していたファイルが今回の生スキャンに
+    /// 現れなかった」ことが「実ファイルが消えた（確定削除）」を意味するか
+    /// 「祖先ディレクトリが枝刈りされWalkDirがそもそも配下を見ていない（不明）」を
+    /// 意味するかは、ファイル自身がいずれかのglobに一致するか（`is_ignored`）ではなく、
+    /// 祖先ディレクトリが刈られているかだけで判定しなければならない。
+    /// ファイル単位のglobで除外されているだけのファイルが実際にディスクから消えた場合は
+    /// （ディレクトリ自体は刈られていないのでWalkDirは配下を探索済み）確定削除として扱う。
+    pub fn has_pruned_ancestor_dir(&self, path: &Path, scan_root: &Path) -> bool {
+        let mut current = path.parent();
+        while let Some(dir) = current {
+            if dir == scan_root || !dir.starts_with(scan_root) {
+                break;
+            }
+            if self.should_prune_dir(dir, scan_root) {
+                return true;
+            }
+            current = dir.parent();
+        }
+        false
+    }
+
     /// パターンが設定されているかチェック（テスト用）
     #[cfg(test)]
     pub fn has_patterns(&self) -> bool {

@@ -205,10 +205,15 @@ impl ImageScanner {
 
         // previous_map に残っているもの（今回の生スキャンで見つからなかったパス）を
         // 「確定削除」と「不明（ディレクトリ系除外で枝刈りされ未確認）」に分ける。
+        // #61レビュー nit: `is_ignored`（ファイル単位のglobも含む）ではなく
+        // `has_pruned_ancestor_dir`（祖先ディレクトリの枝刈りだけ）で判定する。
+        // filter_entry はディレクトリしか刈らずファイルは常に列挙するため、
+        // ファイル単位のglobで除外されていただけのファイルが本当に消えていた場合は
+        // 確定削除として扱う（不明扱いにしてfile_metadata/image_statsを温存しない）。
         let mut deleted_files = Vec::new();
         let mut unknown_files = Vec::new();
         for path in previous_map.keys() {
-            if walk_filter.is_ignored(Path::new(path), directory) {
+            if walk_filter.has_pruned_ancestor_dir(Path::new(path), directory) {
                 unknown_files.push(path.clone());
             } else {
                 deleted_files.push(path.clone());

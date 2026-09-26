@@ -9,8 +9,12 @@
 //! 2. 除外ルールで対象外になったファイルは「削除」と区別され、`file_metadata` から
 //!    消えない（プレイリストからのみ外れる）こと。また複数回スキャンしても
 //!    除外され続けること（一度外れたファイルが再度紛れ込まない）。
+//! 3. Stage 1（除外ルール読み込み）〜Stage 4（プレイリスト反映）の間に除外ルールが
+//!    追加された場合でも、Stage 4直前の再読み込みにより完了時点のプレイリストに
+//!    正しく反映されること（#61レビュー S-1）。
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use sss_lib::commands::scan::perform_scan;
@@ -251,6 +255,73 @@ fn excluded_file_survives_in_file_metadata_and_stays_excluded_across_rescans() {
         "除外対象でないa.jpgは引き続きプレイリストに残るはず"
     );
     drop(playlist_lock);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #61 レビュー S-1 回帰: Stage 1（前回スナップショット・除外ルール読み込み）と
+/// Stage 4（プレイリスト反映）の間には生スキャン（`WalkDir`）と並列EXIF読みが挟まり、
+/// 10万件規模だと数秒〜数十秒かかる。この間にユーザーがオーバーレイの「除外」操作等で
+/// 新しい除外ルールを追加した場合、Stage 1で読んだ古いルールのまま「含める集合」を
+/// 作ってしまうと、スキャン中に除外したはずの画像がスキャン完了時点のプレイリストに
+/// 再び現れてしまう。`perform_scan` はStage 4直前でルールを読み直すため、この退行は
+/// 起きないはず。
+///
+/// `perform_scan` はStage 1完了後・Stage 4より前というタイミングを外から直接指定
+/// できないため、Stage 2内部で複数回呼ばれる`progress_callback`（生スキャン開始直後の
+/// `progress_callback(0, total)`を含む）をテスト用フックとして使い、その最初の呼び出し
+/// 時点でDBにルールを追加する（Stage 1のDBロックは解放済みなのでデッドロックしない）。
+#[test]
+fn rule_added_between_stage1_and_stage4_is_still_excluded_at_scan_completion() {
+    let dir = workspace("mid_scan_rule_add");
+    let photos_dir = dir.join("photos");
+    std::fs::create_dir_all(&photos_dir).unwrap();
+
+    write_plain_jpeg(&photos_dir.join("a.jpg"));
+    write_plain_jpeg(&photos_dir.join("b.jpg"));
+
+    let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
+    let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
+    let a_path = photos_dir.join("a.jpg").to_string_lossy().to_string();
+    let b_path = photos_dir.join("b.jpg").to_string_lossy().to_string();
+
+    let added_mid_scan = AtomicBool::new(false);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        None,
+        &photos_dir,
+        |_current, _total| {
+            // Stage 1完了後（DBロック解放後）に呼ばれる生スキャンの進捗コールバック内で、
+            // 一度だけb.jpgを除外するルールを追加する。Stage 1が読んだルール一覧には
+            // 含まれていない状態を意図的に作る。
+            if !added_mid_scan.swap(true, Ordering::SeqCst) {
+                let db = db_mutex.lock().unwrap();
+                db.add_ignore_rule(&globset::escape(&b_path), RuleType::Glob)
+                    .expect("スキャン中の除外ルール追加は成功するはず");
+            }
+        },
+    )
+    .expect("perform_scanは成功するはず");
+
+    assert!(
+        added_mid_scan.load(Ordering::SeqCst),
+        "テスト前提: progress_callbackが最低1回は呼ばれ、ルールが追加されたはず"
+    );
+
+    let playlist_slot = playlist_mutex.into_inner().unwrap();
+    let playlist = playlist_slot.expect("プレイリストが初期化されているはず");
+    let paths = playlist.current_paths();
+
+    assert!(
+        !paths.contains(&b_path),
+        "スキャン中（Stage1〜4の間）に追加した除外ルールも、Stage4直前の再読み込みで\
+         反映され、完了時点のプレイリストから除外されるはず"
+    );
+    assert!(
+        paths.contains(&a_path),
+        "除外対象でないa.jpgは引き続きプレイリストに残るはず"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -511,3 +511,56 @@ fn scan_skips_pruned_directory_regardless_of_its_size() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// #61 レビュー nit: ファイル単位のglob除外（ディレクトリ系ではない。例: 特定ファイル
+/// パスの除外パターン）はWalkDirの`filter_entry`で枝刈りされない（ディレクトリしか
+/// 刈らないため、ファイルは常に列挙される）。よって、そのファイルが今回の生スキャンに
+/// 現れなかったのは「祖先ディレクトリが枝刈りされ未確認」ではなく「実際にディスクから
+/// 消えた」ことを意味するはずで、`unknown_files`ではなく`deleted_files`に分類される
+/// べき（ディレクトリ系除外による枝刈りとの取り違えを防ぐ）。
+#[test]
+fn incremental_scan_treats_actually_deleted_file_level_excluded_file_as_deleted_not_unknown() {
+    let root = workspace("file_glob_excluded_deleted");
+
+    write_file(&root, "keep/normal.jpg", b"normal");
+    write_file(&root, "keep/secret.jpg", b"secret");
+
+    let scanner = ImageScanner::new();
+    let no_prune_filter = IgnoreFilter::from_patterns(&[]);
+
+    // 1回目: 除外ルールが無い状態でスキャンし、両方とも追跡される。
+    let first = scanner
+        .scan_directory_with_progress(&root, &no_prune_filter, |_, _| {})
+        .expect("first scan");
+    let previous: Vec<(String, i64, i64)> = first
+        .iter()
+        .map(|f| (f.path.clone(), f.modified_time, f.file_size))
+        .collect();
+    assert_eq!(previous.len(), 2, "初回は2件とも追跡されるはず");
+
+    // secret.jpgをファイル単位のglobルール（ディレクトリ指定ではない）で除外し、
+    // かつ実際にディスクから削除する。
+    let secret_path = root.join("keep/secret.jpg");
+    let secret_str = secret_path.to_string_lossy().to_string();
+    let escaped = globset::escape(&secret_str);
+    std::fs::remove_file(&secret_path).unwrap();
+
+    let file_glob_filter = IgnoreFilter::from_rules(&[IgnoreRule::glob(escaped)]);
+    let result = scanner
+        .scan_directory_incremental_with_progress(&root, previous, &file_glob_filter, |_, _| {})
+        .expect("incremental scan with file-level glob rule");
+
+    assert!(
+        result.deleted_files.contains(&secret_str),
+        "ファイル単位のglobで除外されていても、ディレクトリは枝刈りされていない\
+         （WalkDirは探索済み）ので、実際に消えたファイルは確定削除扱いになるはず"
+    );
+    assert!(
+        !result.unknown_files.contains(&secret_str),
+        "ディレクトリ系除外による枝刈りが無いのでunknownに分類してはいけない"
+    );
+    assert_eq!(result.deleted_count, 1);
+    assert_eq!(result.unknown_count, 0);
+
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -77,7 +77,7 @@ export function ExcludeRulesSection() {
             >
               <div className="flex items-center gap-2 min-w-0">
                 {ruleType === 'date' && (
-                  <span className="shrink-0 px-1.5 py-0.5 text-[10px] leading-none rounded bg-white/10 text-white/50">
+                  <span className="shrink-0 px-1.5 py-0.5 text-xs leading-none rounded bg-white/10 text-white/50">
                     撮影日
                   </span>
                 )}

@@ -8,6 +8,7 @@ use crate::scanner::{FileMetadata, ImageScanner};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
 
@@ -15,6 +16,74 @@ use tauri::{Emitter, Manager, State};
 /// 一度でも移行処理を試みた（ファイルの有無に関わらず）後は二度と実行しない
 /// （#61: 毎スキャン走ってしまい `.sssignore.bak` を上書きし続けるバグの修正）。
 const SSSIGNORE_MIGRATED_KEY: &str = "sssignore_migrated";
+
+/// `scan_directory` の二重実行を防ぐRAIIガード（#61レビュー nit）。
+///
+/// `AppState::scan_in_progress` を `compare_exchange` で `false → true` にできた
+/// 場合のみ生成でき、生成に成功すると必ず1つの `Drop` で `false` に戻す
+/// （panic・早期`return`（`?`）・正常終了のいずれの経路でも解除される）。
+struct ScanGuard<'a> {
+    flag: &'a AtomicBool,
+}
+
+impl<'a> ScanGuard<'a> {
+    /// 既にスキャンが実行中（`flag == true`）なら `Err` を返す。
+    fn acquire(flag: &'a AtomicBool) -> Result<Self, String> {
+        flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map(|_| ScanGuard { flag })
+            .map_err(|_| "スキャン実行中です。完了までお待ちください。".to_string())
+    }
+}
+
+impl Drop for ScanGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod scan_guard_tests {
+    use super::ScanGuard;
+    use std::sync::atomic::AtomicBool;
+
+    /// 1本目が保持している間、2本目の `acquire` はエラーになる。
+    /// 1本目を drop すればロックは解除され、次の `acquire` は成功する。
+    #[test]
+    fn acquire_blocks_concurrent_scan_and_releases_on_drop() {
+        let flag = AtomicBool::new(false);
+
+        let guard = ScanGuard::acquire(&flag).expect("最初のacquireは成功するはず");
+        assert!(
+            ScanGuard::acquire(&flag).is_err(),
+            "実行中に2本目のacquireをするとエラーになるはず"
+        );
+
+        drop(guard);
+
+        assert!(
+            ScanGuard::acquire(&flag).is_ok(),
+            "1本目がdropされればロックは解除され、次のacquireは成功するはず"
+        );
+    }
+
+    /// 保持中にpanicしても（`?`による早期returnと同様に）Dropは必ず走り、
+    /// ロックが解除されたままにならない。
+    #[test]
+    fn guard_releases_even_when_scope_panics() {
+        let flag = AtomicBool::new(false);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ScanGuard::acquire(&flag).unwrap();
+            panic!("simulated failure mid-scan");
+        }));
+        assert!(result.is_err());
+
+        assert!(
+            ScanGuard::acquire(&flag).is_ok(),
+            "panic経由でもguardのDropでロックは解除されるはず"
+        );
+    }
+}
 
 /// 撮影日除外ルールの判定に使う `path → captured_date` マップを作る（#61レビュー M2/S-a）。
 ///
@@ -170,7 +239,8 @@ fn migrate_sssignore_to_db(db: &crate::database::Database) {
 /// 2. **ロック無し** — 生スキャン（`WalkDir`。ディレクトリ系除外は枝刈り）＋
 ///    必要なら並列EXIF読み。
 /// 3. 短時間のDBロック — `file_metadata`/`exif_cache`/スキャン履歴への反映のみ。
-/// 4. 短時間のplaylistロック — 「含めるべき集合」との差分適用のみ。
+/// 4. 短時間のDBロック — 除外ルールを読み直す（#61レビュー S-1。下記参照）。
+/// 5. 短時間のplaylistロック — 「含めるべき集合」との差分適用のみ。
 ///
 /// #61レビュー M2/S1 の骨格（各段階の詳細）:
 /// - 生スキャン（除外ルール抜き）でディスク上の物理的な事実だけを集め、
@@ -180,6 +250,12 @@ fn migrate_sssignore_to_db(db: &crate::database::Database) {
 ///   「含めるべき集合」の差分で更新する。除外ルールで対象外になったファイルも
 ///   物理削除されたファイルも同じ経路でプレイリストから外れるが、
 ///   `file_metadata`/`image_stats` は除外だけでは消えない。
+/// - **#61レビュー S-1**: 「含める集合」はStage 1で読んだ古いルールではなく、
+///   Stage 4で読み直した最新のルールで作る。生スキャン・EXIF並列読みが
+///   長時間かかる間にユーザーが除外ルールを追加/削除しても、その変更をスキャン
+///   完了時点のプレイリストに正しく反映するため（さもないとスキャン中に除外した
+///   画像がスキャン完了時に復活してしまう）。`captured_dates`（EXIF撮影日）は
+///   Stage 2の結果をそのまま流用し、遡って読み直さない。
 pub fn perform_scan<F>(
     db_mutex: &Mutex<Database>,
     playlist_mutex: &Mutex<Option<Playlist>>,
@@ -298,7 +374,26 @@ where
         }
     }; // ロック解放
 
-    let ignore_filter = IgnoreFilter::from_rules_with_captured_dates(&rules, captured_dates);
+    // --- Stage 4: 短時間のDBロック（除外ルールの読み直しのみ） ---
+    // 除外ルールを読み直す（#61レビュー S-1）。
+    // Stage 1〜ここまでの生スキャン・EXIF並列読みは10万件規模だと数秒〜数十秒かかり、
+    // その間にユーザーがオーバーレイの「除外」操作等で新しいルールを追加/削除しうる。
+    // Stage 1で読んだ`rules`のまま「含める集合」を作ると、スキャン中に追加した除外が
+    // 完了時点で無視され、除外したはずの画像がプレイリストに再び現れてしまう。
+    // ここで短時間のDBロックを取ってルールだけ読み直し、フィルタを作り直す。
+    // captured_dates（EXIF撮影日の並列読み取り結果）はStage 2で計算済みのものを
+    // そのまま流用する（スキャン中に新しく追加された日付ルールの分までは
+    // 遡ってEXIFを読み直さない。次回スキャンで拾われる）。
+    let fresh_rules: Vec<IgnoreRule> = {
+        let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+        db.get_ignore_rules()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(pattern, rule_type)| IgnoreRule { pattern, rule_type })
+            .collect()
+    }; // ロック解放
+
+    let ignore_filter = IgnoreFilter::from_rules_with_captured_dates(&fresh_rules, captured_dates);
 
     // プレイリストに含めるべき集合（除外ルール適用後）。物理的な新規/削除判定
     // （上のfile_metadata操作）とは完全に独立した、別の段階として計算する
@@ -310,7 +405,7 @@ where
         .map(|f| f.path.clone())
         .collect();
 
-    // --- Stage 4: 短時間のplaylistロック（差分適用のみ） ---
+    // --- Stage 5: 短時間のplaylistロック（差分適用のみ） ---
     {
         let mut playlist_lock = playlist_mutex.lock().unwrap_or_else(|e| e.into_inner());
         let is_same_directory = current_directory.map(|p| p == directory).unwrap_or(false);
@@ -359,6 +454,10 @@ pub async fn scan_directory(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<ScanProgress, String> {
+    // #61レビュー nit: 二重実行防止。2本目のスキャンは即座にエラーを返す
+    // （RAIIガードなので、この後のどの`?`早期returnでも確実に解除される）。
+    let _scan_guard = ScanGuard::acquire(&state.scan_in_progress)?;
+
     let directory = PathBuf::from(&directory_path);
 
     if !directory.is_dir() {
