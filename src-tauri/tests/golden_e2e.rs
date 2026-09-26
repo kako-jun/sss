@@ -77,6 +77,21 @@ fn relative_set(root: &Path, paths: &[String]) -> BTreeSet<String> {
         .collect()
 }
 
+/// #61 レビュー M2/S1: `ImageScanner` はもう除外ルールを一切適用しない（ディスク上の
+/// 物理的な事実だけを集める）。除外フィルタの適用は呼び出し元（`commands/scan.rs`）が
+/// 別段階として行う設計になったため、テストでもその2段階を明示的に再現する。
+fn included_paths(
+    files: &[sss_lib::scanner::FileMetadata],
+    filter: &IgnoreFilter,
+    root: &Path,
+) -> Vec<String> {
+    files
+        .iter()
+        .filter(|f| !filter.is_ignored(Path::new(&f.path), root))
+        .map(|f| f.path.clone())
+        .collect()
+}
+
 /// 期待される収集集合（メディアかつ非 ignore）。
 fn expected_set() -> BTreeSet<String> {
     [
@@ -99,7 +114,8 @@ fn scan_collects_exactly_media_minus_ignored() {
     let root = workspace("scan");
     build_fixture(&root);
 
-    let scanner = ImageScanner::new(IgnoreFilter::from_patterns(&ignore_patterns()));
+    let scanner = ImageScanner::new();
+    let filter = IgnoreFilter::from_patterns(&ignore_patterns());
 
     // 進捗コールバックの発火を記録する（並列なので Arc/Atomic で共有）。
     let calls = Arc::new(AtomicUsize::new(0));
@@ -113,15 +129,16 @@ fn scan_collects_exactly_media_minus_ignored() {
         })
         .expect("scan は成功するはず");
 
+    // #61: 生スキャンはメディア判定のみ行い、ignoreは適用しない。ここでまず
+    // 「メディア∧非ignore」の判定は別段階（included_paths）で行うことを確認する。
+    let included = included_paths(&files, &filter, &root);
+
     // --- golden: 収集集合がメディア∧非ignore に厳密一致 ---
-    let got = relative_set(
-        &root,
-        &files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
-    );
+    let got = relative_set(&root, &included);
     assert_eq!(got, expected_set(), "収集されたメディア集合が期待と不一致");
 
     // 件数（仕様の主張）。
-    assert_eq!(files.len(), 8);
+    assert_eq!(included.len(), 8);
 
     // 動画は含まれ、非メディアは含まれない（明示）。
     assert!(got.contains("movie.mp4") && got.contains("clip.webm"));
@@ -134,12 +151,14 @@ fn scan_collects_exactly_media_minus_ignored() {
     // メタデータが埋まっている（非空ファイルなのでサイズ>0・mtime>0）。
     assert!(files.iter().all(|f| f.file_size > 0 && f.modified_time > 0));
 
-    // 進捗コールバックが発火し、最終 total が件数と一致する。
+    // 進捗コールバックが発火する（#61: 生スキャンはignore対象も含めて収集するため、
+    // 最終totalは非メディアを除いた全ファイル数になる。メディア∧非ignoreの8件より
+    // 多い可能性がある点が変わったので、ここでは「呼ばれたこと」だけを確認する）。
     assert!(
         calls.load(Ordering::Relaxed) >= 1,
         "進捗コールバックが呼ばれていない"
     );
-    assert_eq!(last_total.load(Ordering::Relaxed), 8);
+    assert!(last_total.load(Ordering::Relaxed) >= 8);
 
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -149,11 +168,12 @@ fn playlist_preserves_membership_and_updates() {
     let root = workspace("playlist");
     build_fixture(&root);
 
-    let scanner = ImageScanner::new(IgnoreFilter::from_patterns(&ignore_patterns()));
+    let scanner = ImageScanner::new();
+    let filter = IgnoreFilter::from_patterns(&ignore_patterns());
     let files = scanner
         .scan_directory_with_progress(&root, |_, _| {})
         .expect("scan");
-    let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+    let paths: Vec<String> = included_paths(&files, &filter, &root);
 
     let mut playlist = Playlist::new(paths.clone());
     assert!(!playlist.is_empty());
@@ -187,7 +207,8 @@ fn incremental_scan_detects_added_and_deleted() {
     let root = workspace("incremental");
     build_fixture(&root);
 
-    let scanner = ImageScanner::new(IgnoreFilter::from_patterns(&ignore_patterns()));
+    // #61: 生スキャンなのでignoreとは無関係（このテストはscannerの差分検出だけを見る）。
+    let scanner = ImageScanner::new();
 
     // 1回目: 前回スナップショットを作る。
     let first = scanner
@@ -223,8 +244,10 @@ fn incremental_scan_detects_added_and_deleted() {
     assert_eq!(result.new_count, result.new_files.len());
     assert_eq!(result.deleted_count, result.deleted_files.len());
 
-    // 総数は 8 のまま（-1 +1）。変更なしのファイルは new 扱いされない。
-    assert_eq!(result.total_count, 8);
+    // 総数は変わらない（-1 +1）。変更なしのファイルは new 扱いされない。
+    // #61: 生スキャンなのでignore対象（screenshot_01.png・private/secret.jpg）も
+    // 総数に含まれる（8件のメディア∧非ignore + 2件のignore対象 = 10件）。
+    assert_eq!(result.total_count, 10);
     assert_eq!(
         result.new_files.len(),
         1,
@@ -269,14 +292,12 @@ fn scan_excludes_default_dotfolder_and_synology_thumbs_rules() {
     write_file(&root, ".git/config.jpg", b"dotfolder-catch-all");
     write_file(&root, "Thumbs.db", b"windows-thumb-cache"); // 拡張子非対応なのでそもそも非メディア
 
-    let scanner = ImageScanner::new(IgnoreFilter::from_rules(&default_ignore_rules()));
+    let scanner = ImageScanner::new();
+    let filter = IgnoreFilter::from_rules(&default_ignore_rules());
     let files = scanner
         .scan_directory_with_progress(&root, |_, _| {})
         .expect("scan");
-    let got = relative_set(
-        &root,
-        &files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
-    );
+    let got = relative_set(&root, &included_paths(&files, &filter, &root));
 
     assert_eq!(
         got,
@@ -301,14 +322,12 @@ fn scan_excludes_metachar_named_file_via_escaped_pattern() {
     let excluded_path = root.join("dir [2020]/photo[1].jpg");
     let rule = IgnoreRule::glob(globset::escape(&excluded_path.to_string_lossy()));
 
-    let scanner = ImageScanner::new(IgnoreFilter::from_rules(&[rule]));
+    let scanner = ImageScanner::new();
+    let filter = IgnoreFilter::from_rules(&[rule]);
     let files = scanner
         .scan_directory_with_progress(&root, |_, _| {})
         .expect("scan");
-    let got = relative_set(
-        &root,
-        &files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
-    );
+    let got = relative_set(&root, &included_paths(&files, &filter, &root));
 
     assert_eq!(
         got,
@@ -320,8 +339,11 @@ fn scan_excludes_metachar_named_file_via_escaped_pattern() {
 }
 
 /// #61 問題2/3: 撮影日除外は、ファイル名に日付が含まれない画像（例: `IMG_0001.jpg`）でも、
-/// DBに保存済みの撮影日（`file_metadata.captured_date`、表示時にEXIFから取得・保存された
-/// もの）があれば正しく除外できることを golden e2e レベルで確認する。
+/// DBに保存済みの撮影日（`exif_cache`、表示時にEXIFから取得・保存されたもの）があれば
+/// 正しく除外できることを golden e2e レベルで確認する（`IgnoreFilter` 単体のロジック）。
+/// スキャン時に実際にEXIFを読み直す経路（表示履歴が無い画像の初回スキャン除外）は
+/// `tests/date_and_exclusion_rescan_e2e.rs` で `scan_directory` コマンド経由で検証する
+/// （#61レビュー M2: この2つは意味が異なるため両方残す）。
 #[test]
 fn scan_excludes_by_captured_date_even_without_date_in_filename() {
     let root = workspace("date_exclude");
@@ -330,8 +352,8 @@ fn scan_excludes_by_captured_date_even_without_date_in_filename() {
     write_file(&root, "IMG_0002.jpg", b"kept-different-date");
     write_file(&root, "IMG_0003.jpg", b"kept-never-viewed-yet");
 
-    // IMG_0001/0002 は過去に一度表示され、EXIF撮影日がDBに保存済みという想定
-    // （get_image_info 経由の遅延取得。IMG_0003 は未表示＝captured_date 未取得のまま）。
+    // IMG_0001/0002 は過去に一度表示され、EXIF撮影日が exif_cache に保存済みという想定
+    // （get_image_info 経由の遅延取得。IMG_0003 は未表示＝未取得のまま）。
     let mut captured_dates = HashMap::new();
     captured_dates.insert(
         root.join("IMG_0001.jpg").to_string_lossy().to_string(),
@@ -345,14 +367,11 @@ fn scan_excludes_by_captured_date_even_without_date_in_filename() {
     let rules = vec![IgnoreRule::date("2023-05-15")];
     let filter = IgnoreFilter::from_rules_with_captured_dates(&rules, captured_dates);
 
-    let scanner = ImageScanner::new(filter);
+    let scanner = ImageScanner::new();
     let files = scanner
         .scan_directory_with_progress(&root, |_, _| {})
         .expect("scan");
-    let got = relative_set(
-        &root,
-        &files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
-    );
+    let got = relative_set(&root, &included_paths(&files, &filter, &root));
 
     assert_eq!(
         got,

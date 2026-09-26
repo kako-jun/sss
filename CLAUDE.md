@@ -59,10 +59,11 @@
 
 ### 3. 除外ルール（ignore）フィルタリング
 
-- 除外ルールはDBの `ignore_rules` テーブル（`pattern` + `rule_type`）に保存する（旧 `.sssignore` ファイルは初回起動時にDBへ**1回限り**移行し、`app_settings` にフラグを立てる。移行後は `.sssignore.bak` にリネームされ二度と読まれない）
+- 除外ルールはDBの `ignore_rules` テーブル（`pattern` + `rule_type`。主キーは `(pattern, rule_type)` の複合キー）に保存する（旧 `.sssignore` ファイルは**初回スキャン時**にDBへ**1回限り**移行し、`app_settings` にフラグを立てる。移行後は `.sssignore.bak` にリネームされ二度と読まれない）
 - `rule_type = "glob"`: gitignoreスタイルのglobパターン（globsetライブラリ）。**末尾 `/` のパターンはディレクトリ名照合として扱う**（「スキャンルートからの相対パス上で、いずれかの祖先ディレクトリ名が一致」。`**/.thumbnails/`・`**/@eaDir/`・任意のドットフォルダを表す `**/.**/` など）。スキャンルート自体がドットディレクトリ配下でも、相対パスで判定するため誤って全除外にはならない
-- `rule_type = "date"`: 撮影日（`YYYY-MM-DD`）による除外。判定はDBに保存済みの撮影日（`file_metadata.captured_date`。表示時にEXIFから取得・保存する遅延方式、詳細は `docs/architecture.md`）を最優先に使い、未取得の画像はパス文字列中の日付表記（`YYYY-MM-DD`/`YYYYMMDD`）でフォールバック判定する
-- ファイル/ディレクトリ単位の除外（オーバーレイの除外メニュー）は `globset::escape` でメタ文字（`[`,`]`,`{`,`}`,`*`,`?`）をエスケープしてから登録するため、`photo[1].jpg` のような名前でも自己マッチする。手動追加（設定画面）は `Glob::new` で検証し、不正なパターンはエラーを返す
+- `rule_type = "date"`: 撮影日（`YYYY-MM-DD`）による除外。判定は独立テーブル `exif_cache`（`path`/`captured_date`/`file_mtime`。`file_metadata` とは別で `mark_deleted` の対象外）に保存済みの撮影日を最優先に使う。撮影日ルールが1件以上ある場合に限り、スキャン時に `exif_cache` が未取得/古い（ファイルのmtimeが食い違う）候補だけ rayon で並列にEXIFを読み直す。未取得のまま残った画像はパス文字列中の日付表記（`YYYY-MM-DD`/`YYYYMMDD`、スキャンルートからの相対パスで探索）でフォールバック判定する。詳細は `docs/architecture.md` 参照
+- ファイル/ディレクトリ単位の除外（オーバーレイの除外メニュー）は `globset::escape` でメタ文字（`[`,`]`,`{`,`}`,`*`,`?`）をエスケープしてから登録するため、`photo[1].jpg` のような名前でも自己マッチする。手動追加（設定画面）は `Glob::new` で検証し、不正なパターンはエラーを返す（UIにも表示する）
+- 除外ルールで対象外になったファイルは「削除」とは区別される。`file_metadata`/`image_stats`（表示履歴）は消えず、プレイリストからのみ外れる。物理的な削除の判定は、除外ルールを一切適用しない生スキャンの結果を基準に行う
 
 ### 4. 表示履歴管理
 
@@ -180,14 +181,27 @@ CREATE TABLE playlist_state (
 
 ```sql
 CREATE TABLE ignore_rules (
-    pattern TEXT PRIMARY KEY,
+    pattern TEXT NOT NULL,
     rule_type TEXT NOT NULL DEFAULT 'glob',  -- "glob" | "date"（#61で追加）
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (pattern, rule_type)  -- 複合主キー（#61: 同一文字列のglob/dateルール衝突回避）
 );
 ```
 
 - **用途**: 除外ルール（旧 `.sssignore` の移行先）。`rule_type` で通常globと撮影日ルールを区別する
-- **マイグレーション**: `PRAGMA user_version` を使った汎用マイグレーション機構（`database.rs::run_migrations`）で列を追加する。既存の `pattern` 文字列自体は変更不要（判定ロジック側の修正のみで新しい挙動が効くため）
+- **マイグレーション**: `PRAGMA user_version` を使った汎用マイグレーション機構（`database.rs::run_migrations`）で列追加・主キーの作り直しを1トランザクションで行う。既存の `pattern` 文字列自体は変更不要（判定ロジック側の修正のみで新しい挙動が効くため）
+
+### exif_cache テーブル
+
+```sql
+CREATE TABLE exif_cache (
+    path TEXT PRIMARY KEY,
+    captured_date TEXT,      -- YYYY-MM-DD。EXIFに無ければNULL
+    file_mtime INTEGER       -- 取得時点のファイルmtime（再取得要否の判定に使う）
+);
+```
+
+- **用途**: 撮影日除外ルールの判定用キャッシュ（#61）。`file_metadata` とは独立し、`mark_deleted`（物理削除の反映）の対象外にする。表示時（`get_next_image`等）の遅延取得、およびスキャン時（撮影日ルールが1件以上ある場合のみ）の並列EXIF再取得の両方で書き込む
 
 ### scan_history テーブル
 
@@ -404,15 +418,15 @@ CREATE TABLE scan_history (
 - [x] **視覚的フィードバック**: コピー完了時にステータスメッセージを表示
 - [x] **設定画面でカスタマイズ**: コピー先フォルダパスを変更可能
 
-### 🚫 除外機能（.sssignore連携）
+### 🚫 除外機能（ignore_rulesテーブル連携）
 
 - [x] **オーバーレイUIに「除外」ボタンを追加**
 - [x] **除外時に3つの選択肢を表示**:
-  1. **撮影日付で除外**: EXIF DateTimeから日付を抽出し、その日付を含むパスにマッチするパターンを.sssignoreに追加
-  2. **このファイルだけ除外**: 特定のファイル名パターンを.sssignoreに追加
-  3. **このフォルダで除外**: 親フォルダパスを.sssignoreに追加
-- [x] **即座にプレイリストから削除**: .sssignore更新後、該当ファイルをプレイリストから除外
-- [x] **視覚的フィードバック**: 除外完了時にステータスメッセージを表示
+  1. **撮影日付で除外**: EXIF `DateTimeOriginal`優先で撮影日を抽出し、`rule_type="date"`のルールとして`ignore_rules`に追加。`exif_cache`で既に該当日と分かっている画像は即座にプレイリストから外す
+  2. **このファイルだけ除外**: `globset::escape`したファイルパスを`rule_type="glob"`で`ignore_rules`に追加
+  3. **このフォルダで除外**: `globset::escape`した親フォルダパス+`/**`（サブフォルダ含め再帰的）を`rule_type="glob"`で`ignore_rules`に追加
+- [x] **即座にプレイリストから削除**: ファイル除外は即座、日付除外は`exif_cache`既知分のみ即座。それ以外（ディレクトリ除外・未取得の日付）は次回スキャンで反映
+- [x] **視覚的フィードバック**: 除外完了時にステータスメッセージを表示（失敗時はエラーメッセージも表示）
 
 ### 🖼️ 画像回転の設定
 

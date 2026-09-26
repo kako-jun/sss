@@ -51,24 +51,37 @@ impl IgnoreRule {
     }
 }
 
-/// 末尾 `/` のディレクトリ指定パターンを「祖先ディレクトリのいずれかの名前が一致」
-/// 判定用の glob に正規化する。
+/// 末尾 `/`（Windowsで手入力されうる `\` も同様に扱う）のディレクトリ指定パターンを
+/// 「祖先ディレクトリのいずれかの名前が一致」判定用の glob に正規化する。
 ///
 /// 例:
 /// - `"**/.thumbnails/"` → `"**/.thumbnails/**"`
 /// - `"@eaDir/"`         → `"**/@eaDir/**"`
 /// - `"**/.**/"`         → `"**/.**/**"`（`.` で始まる任意のディレクトリ名）
+/// - `"SomeFolder\"`     → `"**/SomeFolder/**"`（Windows手入力の `\` 終端）
 ///
-/// 末尾が `/` でなければ `None`（ディレクトリ指定パターンではない＝通常のglob）。
+/// 末尾が `/`/`\` でなければ `None`（ディレクトリ指定パターンではない＝通常のglob）。
+/// 先頭の `**/` は（手入力で複数回重ねられていても）すべて剥がしてから正規化するため、
+/// `"**/**/foo/"` のような手入力でも `**/**/foo/**` のような二重にはならない。
+/// 剥がした結果が空、または `**` 単体になる場合（`"**/"` のような無意味な入力）は
+/// ディレクトリ指定パターンとして扱わず `None` を返す。
 pub fn normalize_dir_pattern(pattern: &str) -> Option<String> {
     let trimmed = pattern.trim();
-    if trimmed.len() <= 1 || !trimmed.ends_with('/') {
+    if trimmed.len() <= 1 || !(trimmed.ends_with('/') || trimmed.ends_with('\\')) {
         return None;
     }
-    let middle = trimmed.trim_end_matches('/');
-    let middle = middle.strip_prefix("**/").unwrap_or(middle);
-    let middle = middle.strip_prefix('/').unwrap_or(middle);
-    if middle.is_empty() {
+    let mut middle = trimmed.trim_end_matches(['/', '\\']);
+    loop {
+        if let Some(stripped) = middle.strip_prefix("**/") {
+            middle = stripped;
+        } else if let Some(stripped) = middle.strip_prefix("**\\") {
+            middle = stripped;
+        } else {
+            break;
+        }
+    }
+    middle = middle.strip_prefix(['/', '\\']).unwrap_or(middle);
+    if middle.is_empty() || middle == "**" {
         return None;
     }
     Some(format!("**/{middle}/**"))
@@ -261,22 +274,27 @@ impl IgnoreFilter {
             }
         }
 
+        // スキャンルートからの相対パス（ディレクトリ指定ルール・撮影日のパスフォールバック
+        // 両方で使う。ルート自体がドットディレクトリ/日付名でも誤って全除外にならないよう
+        // 相対パス基準で統一する）
+        let relative = path.strip_prefix(scan_root).unwrap_or(path);
+
         // ディレクトリ指定ルール: スキャンルートからの相対パスで判定
         if let Some(ref dir_globset) = self.dir_globset {
-            let relative = path.strip_prefix(scan_root).unwrap_or(path);
             if dir_globset.is_match(relative) {
                 return true;
             }
         }
 
-        // 撮影日除外: DBに保存済みの撮影日を最優先。未取得ならパス文字列中の日付で代替。
+        // 撮影日除外: DBに保存済みの撮影日を最優先。未取得ならパス文字列中の日付で代替
+        // （フォールバック探索も相対パスに対して行う。#61レビュー nit）。
         if !self.date_rules.is_empty() {
             let path_str = path.to_string_lossy();
             let date = self
                 .captured_dates
                 .get(path_str.as_ref())
                 .cloned()
-                .or_else(|| extract_date_from_path(&path_str));
+                .or_else(|| extract_date_from_path(&relative.to_string_lossy()));
             if let Some(date) = date {
                 if self.date_rules.contains(&date) {
                     return true;
@@ -484,5 +502,48 @@ mod tests {
         // 末尾 / が無ければ通常glob扱い（None）
         assert_eq!(normalize_dir_pattern("**/Thumbs.db"), None);
         assert_eq!(normalize_dir_pattern("*.tmp"), None);
+    }
+
+    /// #61 レビュー nit: Windowsで手入力されうる末尾 `\` もディレクトリ指定として正規化する。
+    #[test]
+    fn normalize_dir_pattern_accepts_windows_trailing_backslash() {
+        assert_eq!(
+            normalize_dir_pattern("SomeFolder\\"),
+            Some("**/SomeFolder/**".to_string())
+        );
+        assert_eq!(
+            normalize_dir_pattern("**\\SomeFolder\\"),
+            Some("**/SomeFolder/**".to_string())
+        );
+    }
+
+    /// #61 レビュー nit: 手入力で `**/` が重なっていても `**/**/foo/**` のような
+    /// 二重にはならない。剥がした結果が空/`**`単体の無意味な入力は None を返す。
+    #[test]
+    fn normalize_dir_pattern_does_not_double_up_leading_globstar() {
+        assert_eq!(
+            normalize_dir_pattern("**/**/foo/"),
+            Some("**/foo/**".to_string())
+        );
+        assert_eq!(normalize_dir_pattern("**/"), None);
+    }
+
+    /// #61 レビュー nit: 撮影日のパスフォールバック探索はスキャンルートからの相対パスで
+    /// 行う。ルートパス自体に日付らしき文字列が含まれていても、それだけで配下の
+    /// ファイルが誤って除外されないこと。
+    #[test]
+    fn date_path_fallback_only_looks_at_relative_path_not_scan_root() {
+        let rules = vec![IgnoreRule::date("2020-01-01")];
+        let filter = IgnoreFilter::from_rules(&rules);
+        // ルート自体が日付名（バックアップフォルダ等でよくある）
+        let root = Path::new("/Users/x/Backup-2020-01-01");
+
+        // ルート名由来では誤って除外されない
+        assert!(!filter.is_ignored(Path::new("/Users/x/Backup-2020-01-01/normal.jpg"), root));
+        // 相対パス側に本当に日付があれば従来どおり除外される
+        assert!(filter.is_ignored(
+            Path::new("/Users/x/Backup-2020-01-01/2020-01-01/photo.jpg"),
+            root
+        ));
     }
 }

@@ -99,4 +99,32 @@ describe('ExcludeRulesSection captured-date badge (#61)', () => {
     });
     expect(screen.queryByText('撮影日')).toBeNull();
   });
+
+  // #61レビュー S2: 不正なglob（閉じていない `{` 等）は addIgnorePattern がバックエンドの
+  // Err文字列で reject するようになった。従来は画面上に何も表示されなかったので、
+  // エラーメッセージが表示されること・ルール一覧に追加されないことをピン留めする。
+  it('shows the backend error message and does not add the rule when addIgnorePattern rejects', async () => {
+    getIgnorePatterns.mockResolvedValue([]);
+    addIgnorePattern.mockRejectedValue('Invalid pattern: unclosed alternate group');
+
+    render(<ExcludeRulesSection />);
+
+    await waitFor(() => {
+      expect(screen.getByText('除外ルールはありません')).toBeTruthy();
+    });
+
+    const input = screen.getByPlaceholderText('パターンを入力（例: **/thumbs/）');
+    fireEvent.change(input, { target: { value: 'a{b.jpg' } });
+    fireEvent.click(screen.getByText('追加'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Invalid pattern: unclosed alternate group')).toBeTruthy();
+    });
+    expect(screen.queryByText('a{b.jpg')).toBeNull();
+    expect(screen.getByText('除外ルールはありません')).toBeTruthy();
+
+    // 入力を変えるとエラーが消える
+    fireEvent.change(input, { target: { value: 'a{b.jpg2' } });
+    expect(screen.queryByText('Invalid pattern: unclosed alternate group')).toBeNull();
+  });
 });

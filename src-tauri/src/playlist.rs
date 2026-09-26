@@ -154,6 +154,13 @@ impl Playlist {
     pub fn is_empty(&self) -> bool {
         self.shuffled_list.is_empty()
     }
+
+    /// 現在プレイリストに含まれている全パスの集合を返す（クローン）。
+    /// スキャン結果（除外ルール適用後の「含めるべき」集合）との差分を取り、
+    /// `update_images` に渡す addded/removed を計算するために使う（#61 レビュー M2）。
+    pub fn current_paths(&self) -> std::collections::HashSet<String> {
+        self.shuffled_list.iter().cloned().collect()
+    }
 }
 
 #[cfg(test)]
@@ -243,5 +250,24 @@ mod tests {
         // 画像を削除
         playlist.update_images(vec![], vec!["img2.jpg".to_string()]);
         assert_eq!(playlist.total_count(), 2);
+    }
+
+    /// #61 レビュー M2: `current_paths` はプレイリストの現在のメンバーシップを
+    /// 過不足なく返す（スキャン結果との差分計算の土台）。
+    #[test]
+    fn current_paths_reflects_membership_after_updates() {
+        let images = vec!["img1.jpg".to_string(), "img2.jpg".to_string()];
+        let mut playlist = Playlist::new(images);
+
+        let mut expected: std::collections::HashSet<String> = ["img1.jpg", "img2.jpg"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(playlist.current_paths(), expected);
+
+        playlist.update_images(vec!["img3.jpg".to_string()], vec!["img1.jpg".to_string()]);
+        expected.remove("img1.jpg");
+        expected.insert("img3.jpg".to_string());
+        assert_eq!(playlist.current_paths(), expected);
     }
 }

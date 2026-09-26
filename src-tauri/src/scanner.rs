@@ -1,4 +1,3 @@
-use crate::ignore::IgnoreFilter;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
@@ -33,15 +32,28 @@ pub struct ScanResult {
     pub duration_ms: u128,
 }
 
-/// 画像スキャナー
-pub struct ImageScanner {
-    ignore_filter: IgnoreFilter,
+/// 画像スキャナー。
+///
+/// #61 レビュー M2/S1: 除外ルール（ignore）は一切適用しない。ここで集める
+/// `FileMetadata` はディスク上の**物理的な事実**（存在する全メディアファイル）を表し、
+/// `file_metadata` テーブルへの反映・新規/削除の検出はこの物理的事実だけを基準に行う。
+/// 除外ルールの適用は、この結果を受け取った呼び出し元（`commands/scan.rs`）が
+/// 「プレイリストに含めるかどうか」を決める別の段階として行う。これにより、既存の
+/// ファイルに新しい除外ルールが付いても「削除」とは区別され、`image_stats`/
+/// `file_metadata` の履歴が消えない（除外前は普通に含まれていたファイルが、
+/// ルール追加のタイミングだけで物理削除と誤判定されるバグを構造的に防ぐ）。
+pub struct ImageScanner;
+
+impl Default for ImageScanner {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ImageScanner {
     /// スキャナーを作成
-    pub fn new(ignore_filter: IgnoreFilter) -> Self {
-        ImageScanner { ignore_filter }
+    pub fn new() -> Self {
+        ImageScanner
     }
 
     /// ディレクトリをスキャン（進捗コールバック付き）
@@ -69,7 +81,6 @@ impl ImageScanner {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
             .filter(|e| self.is_media_file(e.path()))
-            .filter(|e| !self.ignore_filter.is_ignored(e.path(), directory))
             .collect();
 
         let total = entries.len();
@@ -205,7 +216,7 @@ mod tests {
 
     #[test]
     fn test_is_image_file() {
-        let scanner = ImageScanner::new(IgnoreFilter::from_patterns(&[]));
+        let scanner = ImageScanner::new();
 
         assert!(scanner.is_image_file(Path::new("test.jpg")));
         assert!(scanner.is_image_file(Path::new("test.JPG")));
@@ -217,7 +228,7 @@ mod tests {
 
     #[test]
     fn test_is_video_file() {
-        let scanner = ImageScanner::new(IgnoreFilter::from_patterns(&[]));
+        let scanner = ImageScanner::new();
 
         assert!(scanner.is_video_file(Path::new("test.mp4")));
         assert!(scanner.is_video_file(Path::new("test.MP4")));
@@ -234,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_is_media_file() {
-        let scanner = ImageScanner::new(IgnoreFilter::from_patterns(&[]));
+        let scanner = ImageScanner::new();
 
         // 画像もメディア
         assert!(scanner.is_media_file(Path::new("test.jpg")));

@@ -7,6 +7,7 @@ export function ExcludeRulesSection() {
   const [rules, setRules] = useState<IgnoreRule[]>([]);
   const [newPattern, setNewPattern] = useState('');
   const [loading, setLoading] = useState(true);
+  const [addError, setAddError] = useState<string | null>(null);
 
   useEffect(() => {
     getIgnorePatterns()
@@ -39,8 +40,13 @@ export function ExcludeRulesSection() {
       await addIgnorePattern(trimmed);
       setRules((prev) => [...prev, { pattern: trimmed, ruleType: 'glob' }]);
       setNewPattern('');
+      setAddError(null);
     } catch (err) {
+      // #61レビュー S2: 不正なglob（閉じていない `{` 等）はバックエンドがErrを返す
+      // ようになった。従来はconsole.errorに流すだけで画面上は何も起きなかったので、
+      // ユーザーに失敗を伝える。
       console.error('Failed to add ignore pattern:', err);
+      setAddError(typeof err === 'string' ? err : 'パターンの追加に失敗しました');
     }
   };
 
@@ -91,7 +97,10 @@ export function ExcludeRulesSection() {
         <input
           type="text"
           value={newPattern}
-          onChange={(e) => setNewPattern(e.target.value)}
+          onChange={(e) => {
+            setNewPattern(e.target.value);
+            setAddError(null);
+          }}
           onKeyDown={handleKeyDown}
           placeholder="パターンを入力（例: **/thumbs/）"
           className="flex-1 px-3 py-2 bg-black/40 text-white/50 rounded border border-white/8 focus:outline-none focus:border-white/20 text-sm"
@@ -105,6 +114,7 @@ export function ExcludeRulesSection() {
           追加
         </button>
       </div>
+      {addError && <div className="text-red-400/80 text-sm">{addError}</div>}
     </div>
   );
 }

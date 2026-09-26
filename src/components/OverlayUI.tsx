@@ -84,8 +84,11 @@ export function OverlayUI({
     if (!image) return;
 
     try {
-      const pattern = await excludeImage(image.path, type);
-      setStatusMessage(`除外パターン追加: ${pattern}`);
+      // #61レビュー nit: excludeImage の戻り値は既に「除外パターン追加: ...」を含む
+      // 完成済みメッセージ（バックエンド側で組み立て済み）。ここで再度プレフィックスを
+      // 付けると「除外パターン追加: 除外パターン追加: ...」の二重表示になっていた。
+      const message = await excludeImage(image.path, type);
+      setStatusMessage(message);
       setTimeout(() => setStatusMessage(''), 3000);
     } catch (err) {
       console.error('Failed to exclude image:', err);

@@ -11,6 +11,16 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: (...args: unknown[]) => openUrl(...args),
 }));
 
+const openInExplorer = vi.fn();
+const pickImage = vi.fn();
+const excludeImage = vi.fn();
+
+vi.mock('../lib/tauri', () => ({
+  openInExplorer: (...args: unknown[]) => openInExplorer(...args),
+  pickImage: (...args: unknown[]) => pickImage(...args),
+  excludeImage: (...args: unknown[]) => excludeImage(...args),
+}));
+
 import { OverlayUI } from './OverlayUI';
 import type { ImageInfo } from '../types';
 
@@ -52,6 +62,32 @@ function clickMapButton() {
 beforeEach(() => {
   openUrl.mockReset();
   openUrl.mockResolvedValue(undefined);
+  openInExplorer.mockReset();
+  pickImage.mockReset();
+  excludeImage.mockReset();
+});
+
+describe('OverlayUI exclude status message (#61 レビュー nit)', () => {
+  it('shows the backend message verbatim instead of double-prefixing "除外パターン追加:"', async () => {
+    // バックエンドは既に「除外パターン追加: ...」を含む完成済みメッセージを返す。
+    // フロント側で再度プレフィックスを足すと二重表示になっていた。
+    excludeImage.mockResolvedValue(
+      '除外パターン追加: *.tmp (変更を反映するには再スキャンしてください)',
+    );
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    fireEvent.click(screen.getByText('ファイルを除外'));
+
+    await screen.findByText('除外パターン追加: *.tmp (変更を反映するには再スキャンしてください)');
+    expect(
+      screen.queryByText(
+        '除外パターン追加: 除外パターン追加: *.tmp (変更を反映するには再スキャンしてください)',
+      ),
+    ).toBeNull();
+  });
 });
 
 describe('OverlayUI map button (openUrl)', () => {
