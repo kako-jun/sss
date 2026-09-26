@@ -558,29 +558,18 @@ impl Database {
         Ok(())
     }
 
-    /// ファイルメタデータをまとめて挿入または更新する（#63）。
-    ///
-    /// `perform_scan` Stage 3 は、以前は生スキャンで見つかった全ファイル
-    /// （10万件規模なら10万件）を1件ずつ`upsert_file_metadata`していたが、実際に
-    /// DBへの反映が必要なのは新規/変更分だけ（`scanner::ScanResult::new_files`/
-    /// `modified_files`）で、大半を占める「変更なし」のファイルへの書き込みは
-    /// 無駄なI/O・ロック保持時間の伸長でしかない。呼び出し元が新規/変更分だけに
-    /// 絞った `entries` を渡すこと。1トランザクション＋`prepare_cached`で発行する。
-    pub fn upsert_file_metadata_batch(&self, entries: &[(String, i64, i64)]) -> Result<()> {
-        if entries.is_empty() {
-            return Ok(());
-        }
-        let tx = self.conn.unchecked_transaction()?;
-        upsert_file_metadata_within(&tx, entries)?;
-        tx.commit()?;
-        Ok(())
-    }
-
     /// `perform_scan` Stage 3 の file_metadata 反映本体（#63）。新規/変更分の
     /// upsertと確定削除分の削除（`file_metadata`/`image_stats`/`exif_cache`）を
-    /// **1トランザクション**・`prepare_cached`でまとめて行う。以前は
-    /// `upsert_file_metadata_batch`と`mark_deleted`を別々に（＝別トランザクションで）
-    /// 呼んでおり、ロックを握ったままDBへ2往復していた。
+    /// **1トランザクション**・`prepare_cached`でまとめて行う。
+    ///
+    /// 以前は生スキャンで見つかった全ファイル（10万件規模なら10万件。大半は
+    /// 「変更なし」）を1件ずつ`upsert_file_metadata`していたが、実際にDBへの反映が
+    /// 必要なのは新規/変更分だけ（`scanner::ScanResult::new_files`/`modified_files`）
+    /// で、無駄なI/O・ロック保持時間の伸長でしかなかった。upsert専用の
+    /// `upsert_file_metadata_batch`と削除専用の`mark_deleted`を別々に（＝別
+    /// トランザクションで）呼ぶ中間実装を経て、**PR#77レビューS5**で本番未使用に
+    /// なった`upsert_file_metadata_batch`を削除しこの1本に統合した（呼び出し元は
+    /// 常に新規/変更upsertと確定削除を同時に持っているため、分ける理由が無かった）。
     pub fn apply_file_metadata_changes(
         &self,
         upserts: &[(String, i64, i64)],
@@ -1615,21 +1604,25 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// #63: `upsert_file_metadata_batch` は新規/更新をまとめて1トランザクションで
-    /// 反映し、`added_at` を保つ既存の `upsert_file_metadata` と同じ `ON CONFLICT`
-    /// 挙動になる。空配列はエラーにならず何もしない。
+    /// #63（PR#77レビューS5で`upsert_file_metadata_batch`から`apply_file_metadata_changes`
+    /// に移行）: upsertをまとめて1トランザクションで反映し、`added_at` を保つ既存の
+    /// `upsert_file_metadata` と同じ `ON CONFLICT` 挙動になる。空配列2つはエラーに
+    /// ならず何もしない。
     #[test]
-    fn upsert_file_metadata_batch_inserts_and_updates_in_one_transaction() {
+    fn apply_file_metadata_changes_batch_inserts_and_updates_in_one_transaction() {
         let path = temp_db_path("upsert_batch");
         let db = Database::new(path.clone()).unwrap();
 
-        db.upsert_file_metadata_batch(&[]).unwrap();
+        db.apply_file_metadata_changes(&[], &[]).unwrap();
 
         db.upsert_file_metadata("/p/a.jpg", 100, 10).unwrap();
-        db.upsert_file_metadata_batch(&[
-            ("/p/a.jpg".to_string(), 999, 999), // 既存: 更新される
-            ("/p/b.jpg".to_string(), 200, 20),  // 新規
-        ])
+        db.apply_file_metadata_changes(
+            &[
+                ("/p/a.jpg".to_string(), 999, 999), // 既存: 更新される
+                ("/p/b.jpg".to_string(), 200, 20),  // 新規
+            ],
+            &[],
+        )
         .unwrap();
 
         let all = db.get_all_file_metadata().unwrap();
