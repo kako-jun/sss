@@ -180,7 +180,8 @@ fn playlist_preserves_membership_and_updates() {
     assert_eq!(playlist.total_count(), 8);
 
     // シャッフルされても集合（メンバーシップ）は保存される。
-    // peek_next_n(0..len) は current_index=0 起点で全要素を覗ける（破壊しない）。
+    // peek_next_n(0..len) は next_index=0（まだ何も表示していない）起点で
+    // 全要素を覗ける（破壊しない）。
     let mut seen: BTreeSet<String> = BTreeSet::new();
     for n in 0..playlist.total_count() {
         seen.insert(playlist.peek_next_n(n).expect("要素があるはず").clone());

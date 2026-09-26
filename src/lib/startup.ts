@@ -98,6 +98,13 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
 
       // スキャンはバックグラウンドで実行し、完了したら差分をプレイリスト情報に反映する。
       // ここは意図的に await しない（表示をブロックしないのがS1の目的）。
+      //
+      // #62レビュー2巡目 nit: 失敗時、スライドショー鑑賞中のユーザーへ割り込む専用UIは
+      // 今は用意していない（console.errorのみ）。手動で「スキャン」を再実行すれば
+      // Settings画面のScanSectionが日本語のエラーメッセージを表示する（ScanGuardの
+      // 「スキャン実行中です。完了までお待ちください。」等も同経路で既に表示される）。
+      // バックグラウンド失敗を鑑賞画面自体に通知する専用UIは、エラー表示の本格整理
+      // （#65）でまとめて設計する。
       void runScanWithProgress(lastDirectory, deps)
         .then(() => updatePlaylistInfo())
         .catch((err) => {

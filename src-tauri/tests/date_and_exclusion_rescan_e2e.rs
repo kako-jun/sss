@@ -15,7 +15,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use sss_lib::commands::scan::perform_scan;
 use sss_lib::database::Database;
@@ -131,8 +132,16 @@ fn first_scan_excludes_never_displayed_image_by_reading_exif_directly() {
 
     let db_mutex = Mutex::new(db);
     let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
-    perform_scan(&db_mutex, &playlist_mutex, None, &photos_dir, |_, _| {})
-        .expect("perform_scan は成功するはず");
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        None,
+        &photos_dir,
+        |_, _| {},
+    )
+    .expect("perform_scan は成功するはず");
 
     let playlist_slot = playlist_mutex.into_inner().unwrap();
     let playlist = playlist_slot.expect("プレイリストが初期化されているはず");
@@ -174,12 +183,20 @@ fn excluded_file_survives_in_file_metadata_and_stays_excluded_across_rescans() {
 
     let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
     let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
     let b_path = photos_dir.join("b.jpg").to_string_lossy().to_string();
     let a_path = photos_dir.join("a.jpg").to_string_lossy().to_string();
 
     // 1回目のスキャン: 除外ルールは無いので両方プレイリストに含まれる
-    perform_scan(&db_mutex, &playlist_mutex, None, &photos_dir, |_, _| {})
-        .expect("1回目のscanは成功するはず");
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        None,
+        &photos_dir,
+        |_, _| {},
+    )
+    .expect("1回目のscanは成功するはず");
     assert!(
         playlist_mutex
             .lock()
@@ -204,6 +221,7 @@ fn excluded_file_survives_in_file_metadata_and_stays_excluded_across_rescans() {
     perform_scan(
         &db_mutex,
         &playlist_mutex,
+        &directory_path_mutex,
         Some(photos_dir.as_path()),
         &photos_dir,
         |_, _| {},
@@ -238,6 +256,7 @@ fn excluded_file_survives_in_file_metadata_and_stays_excluded_across_rescans() {
     perform_scan(
         &db_mutex,
         &playlist_mutex,
+        &directory_path_mutex,
         Some(photos_dir.as_path()),
         &photos_dir,
         |_, _| {},
@@ -282,6 +301,7 @@ fn rule_added_between_stage1_and_stage4_is_still_excluded_at_scan_completion() {
 
     let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
     let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
     let a_path = photos_dir.join("a.jpg").to_string_lossy().to_string();
     let b_path = photos_dir.join("b.jpg").to_string_lossy().to_string();
 
@@ -289,6 +309,7 @@ fn rule_added_between_stage1_and_stage4_is_still_excluded_at_scan_completion() {
     perform_scan(
         &db_mutex,
         &playlist_mutex,
+        &directory_path_mutex,
         None,
         &photos_dir,
         |_current, _total| {
@@ -322,6 +343,115 @@ fn rule_added_between_stage1_and_stage4_is_still_excluded_at_scan_completion() {
         paths.contains(&a_path),
         "除外対象でないa.jpgは引き続きプレイリストに残るはず"
     );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #62レビュー2巡目 N-S3(must) 回帰: スキャン中に `exclude_image`（ファイル即時除外。
+/// DB書込→playlist更新の順）相当の操作が実スレッドで並行して割り込んでも、
+/// スキャン完了時点のプレイリストにその画像が再び現れない。
+///
+/// 上の`rule_added_between_stage1_and_stage4_...`は「ルールをDBに足すだけ」で
+/// `progress_callback`（Stage 2の間だけ発火）のタイミングに乗せて再現できたが、
+/// 本来の競合は「Stage 4のルール再読み込み」〜「Stage 5のplaylistロック取得」という
+/// コード上のごく狭い区間で起きていた。この修正でルール再読み込みをplaylistロック
+/// 取得の**後**（同じ临界区間内）に移したため、その区間自体が無くなり
+/// `progress_callback`だけでは再現できなくなった。そこで実スレッドで
+/// `exclude_image`の2段階（DB書込→playlist更新）を並行実行し、スキャン側の
+/// `progress_callback`にわずかな譲歩（`thread::yield_now`）を挟んで競合ウィンドウを
+/// 広げたうえで、複数回試行しても最終状態が除外後のファイルを含まないことを確認する
+/// （Mutexの総順序に基づく構造的な修正の妥当性を補強する回帰テスト）。
+#[test]
+fn exclude_racing_with_concurrent_rescan_is_never_resurrected() {
+    let dir = workspace("concurrent_exclude");
+    let photos_dir = dir.join("photos");
+    std::fs::create_dir_all(&photos_dir).unwrap();
+
+    write_plain_jpeg(&photos_dir.join("a.jpg"));
+    write_plain_jpeg(&photos_dir.join("b.jpg"));
+
+    let db_mutex = Arc::new(Mutex::new(
+        Database::new(dir.join("sss.db")).expect("db init"),
+    ));
+    let playlist_mutex: Arc<Mutex<Option<Playlist>>> = Arc::new(Mutex::new(None));
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
+    let b_path = photos_dir.join("b.jpg").to_string_lossy().to_string();
+    let b_escaped = globset::escape(&b_path);
+
+    // 初回スキャンでプレイリストを作る(b.jpgも含む)。
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        None,
+        &photos_dir,
+        |_, _| {},
+    )
+    .expect("初回scanは成功するはず");
+    assert!(playlist_mutex
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .current_paths()
+        .contains(&b_path));
+
+    for trial in 0..20 {
+        let db_mutex_bg = Arc::clone(&db_mutex);
+        let playlist_mutex_bg = Arc::clone(&playlist_mutex);
+        let b_path_bg = b_path.clone();
+        let b_escaped_bg = b_escaped.clone();
+
+        // `exclude_image`相当: DB書込→playlist更新の順で、スキャンと並行に実行する。
+        let exclude_thread = thread::spawn(move || {
+            let db = db_mutex_bg.lock().unwrap();
+            db.add_ignore_rule(&b_escaped_bg, RuleType::Glob).unwrap();
+            drop(db);
+            thread::yield_now();
+            let mut playlist_lock = playlist_mutex_bg.lock().unwrap();
+            if let Some(ref mut playlist) = *playlist_lock {
+                playlist.update_images(vec![], vec![b_path_bg]);
+            }
+        });
+
+        perform_scan(
+            &db_mutex,
+            &playlist_mutex,
+            &directory_path_mutex,
+            Some(photos_dir.as_path()),
+            &photos_dir,
+            |_current, _total| {
+                // スキャン側にわずかな譲歩を挟み、並行exclude側と競合しやすくする。
+                thread::yield_now();
+            },
+        )
+        .unwrap_or_else(|e| panic!("trial {trial}: 再scanは成功するはず: {e}"));
+
+        exclude_thread.join().unwrap();
+
+        {
+            let playlist_lock = playlist_mutex.lock().unwrap();
+            let paths = playlist_lock.as_ref().unwrap().current_paths();
+            assert!(
+                !paths.contains(&b_path),
+                "trial {trial}: スキャンと並行したexcludeの後、b.jpgが\
+                 プレイリストに復活してはいけない"
+            );
+        }
+
+        // 次trialのために状態を元に戻す(除外ルールを消し、b.jpgをプレイリストへ復帰)。
+        db_mutex
+            .lock()
+            .unwrap()
+            .remove_ignore_rule(&b_escaped, RuleType::Glob)
+            .unwrap();
+        playlist_mutex
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .update_images(vec![b_path.clone()], vec![]);
+    }
 
     let _ = std::fs::remove_dir_all(&dir);
 }

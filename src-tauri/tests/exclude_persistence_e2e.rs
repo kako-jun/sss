@@ -50,10 +50,18 @@ fn excluding_a_file_then_advancing_then_restarting_does_not_resurrect_it() {
     let db_path = dir.join("sss.db");
     let db_mutex = Mutex::new(Database::new(db_path.clone()).expect("db init"));
     let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
 
     // 初回スキャンでプレイリストを作る（perform_scan自体がsave_playlist_fullまで行う）。
-    perform_scan(&db_mutex, &playlist_mutex, None, &photos_dir, |_, _| {})
-        .expect("初回scanは成功するはず");
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        None,
+        &photos_dir,
+        |_, _| {},
+    )
+    .expect("初回scanは成功するはず");
 
     let db = db_mutex.into_inner().unwrap();
     let playlist = playlist_mutex.into_inner().unwrap();

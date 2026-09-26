@@ -916,7 +916,7 @@ mod tests {
     /// 空になり「開始前」相当（`next_index==0`・履歴空）にリセットされる。その後に
     /// 新規画像が追加されれば、最初の `advance` がindex 0を飛ばさず返す。
     #[test]
-    fn update_images_deleting_all_images_resets_to_before_start_and_recovers_on_new_images() {
+    fn update_images_deleting_all_images_resets_to_empty_state_and_recovers_on_new_images() {
         let images: Vec<String> = (0..5).map(|i| format!("img{i}.jpg")).collect();
         let mut playlist = Playlist::new(images.clone());
 

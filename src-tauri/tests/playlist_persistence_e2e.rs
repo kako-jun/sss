@@ -85,8 +85,16 @@ fn scan_directory_restores_saved_playlist_across_simulated_restart() {
 
     // --- 1回目の起動: 初回スキャン ---
     let playlist_mutex_1: Mutex<Option<Playlist>> = Mutex::new(None);
-    perform_scan(&db_mutex, &playlist_mutex_1, None, &photos_dir, |_, _| {})
-        .expect("初回scanは成功するはず");
+    let directory_path_mutex_1: Mutex<Option<PathBuf>> = Mutex::new(None);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex_1,
+        &directory_path_mutex_1,
+        None,
+        &photos_dir,
+        |_, _| {},
+    )
+    .expect("初回scanは成功するはず");
 
     let mut shown = Vec::new();
     {
@@ -105,8 +113,16 @@ fn scan_directory_restores_saved_playlist_across_simulated_restart() {
     // --- 2回目の起動: current_directory=None（実アプリの起動直後と同条件）で
     //     再度 perform_scan を呼ぶ。メモリ上のプレイリストは無い(新しいMutex)。 ---
     let playlist_mutex_2: Mutex<Option<Playlist>> = Mutex::new(None);
-    perform_scan(&db_mutex, &playlist_mutex_2, None, &photos_dir, |_, _| {})
-        .expect("2回目(復元)のscanは成功するはず");
+    let directory_path_mutex_2: Mutex<Option<PathBuf>> = Mutex::new(None);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex_2,
+        &directory_path_mutex_2,
+        None,
+        &photos_dir,
+        |_, _| {},
+    )
+    .expect("2回目(復元)のscanは成功するはず");
 
     {
         let mut playlist_lock = playlist_mutex_2.lock().unwrap();
@@ -169,9 +185,17 @@ fn rescanning_a_modified_file_does_not_duplicate_it_in_the_playlist() {
 
     let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
     let playlist_mutex: Mutex<Option<Playlist>> = Mutex::new(None);
+    let directory_path_mutex: Mutex<Option<PathBuf>> = Mutex::new(None);
 
-    perform_scan(&db_mutex, &playlist_mutex, None, &photos_dir, |_, _| {})
-        .expect("1回目のscanは成功するはず");
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex,
+        &directory_path_mutex,
+        None,
+        &photos_dir,
+        |_, _| {},
+    )
+    .expect("1回目のscanは成功するはず");
     {
         let playlist_lock = playlist_mutex.lock().unwrap();
         let playlist = playlist_lock.as_ref().unwrap();
@@ -198,6 +222,7 @@ fn rescanning_a_modified_file_does_not_duplicate_it_in_the_playlist() {
     perform_scan(
         &db_mutex,
         &playlist_mutex,
+        &directory_path_mutex,
         Some(photos_dir.as_path()),
         &photos_dir,
         |_, _| {},
@@ -243,8 +268,16 @@ fn scan_directory_mismatch_discards_saved_state_and_shuffles_fresh() {
 
     // フォルダAをスキャンして少し進め、DBに保存する(directory_path = photos_a)。
     let playlist_mutex_1: Mutex<Option<Playlist>> = Mutex::new(None);
-    perform_scan(&db_mutex, &playlist_mutex_1, None, &photos_dir_a, |_, _| {})
-        .expect("フォルダAの初回scanは成功するはず");
+    let directory_path_mutex_1: Mutex<Option<PathBuf>> = Mutex::new(None);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex_1,
+        &directory_path_mutex_1,
+        None,
+        &photos_dir_a,
+        |_, _| {},
+    )
+    .expect("フォルダAの初回scanは成功するはず");
     {
         let db = db_mutex.lock().unwrap();
         let mut playlist_lock = playlist_mutex_1.lock().unwrap();
@@ -257,8 +290,16 @@ fn scan_directory_mismatch_discards_saved_state_and_shuffles_fresh() {
     // 「再起動してフォルダBを選び直した」想定(current_directory=None、メモリ上の
     // プレイリストも新しいMutexで空)。
     let playlist_mutex_2: Mutex<Option<Playlist>> = Mutex::new(None);
-    perform_scan(&db_mutex, &playlist_mutex_2, None, &photos_dir_b, |_, _| {})
-        .expect("フォルダBへのscanは成功するはず");
+    let directory_path_mutex_2: Mutex<Option<PathBuf>> = Mutex::new(None);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex_2,
+        &directory_path_mutex_2,
+        None,
+        &photos_dir_b,
+        |_, _| {},
+    )
+    .expect("フォルダBへのscanは成功するはず");
 
     let playlist_lock = playlist_mutex_2.lock().unwrap();
     let playlist = playlist_lock.as_ref().unwrap();
@@ -269,7 +310,7 @@ fn scan_directory_mismatch_discards_saved_state_and_shuffles_fresh() {
     );
     assert!(
         playlist.current().is_none(),
-        "新規作成されたプレイリストはまだ何も表示していない(before_start)はず"
+        "新規作成されたプレイリストはまだ何も表示していない(next_index==0かつ履歴も空)はず"
     );
     let paths = playlist.current_paths();
     for i in 0..TOTAL_B {
@@ -304,8 +345,16 @@ fn restart_with_all_saved_files_physically_deleted_yields_empty_playlist_without
     let directory_str = photos_dir.to_string_lossy().to_string();
 
     let playlist_mutex_1: Mutex<Option<Playlist>> = Mutex::new(None);
-    perform_scan(&db_mutex, &playlist_mutex_1, None, &photos_dir, |_, _| {})
-        .expect("初回scanは成功するはず");
+    let directory_path_mutex_1: Mutex<Option<PathBuf>> = Mutex::new(None);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex_1,
+        &directory_path_mutex_1,
+        None,
+        &photos_dir,
+        |_, _| {},
+    )
+    .expect("初回scanは成功するはず");
     {
         let db = db_mutex.lock().unwrap();
         let mut playlist_lock = playlist_mutex_1.lock().unwrap();
@@ -323,8 +372,16 @@ fn restart_with_all_saved_files_physically_deleted_yields_empty_playlist_without
 
     // 再起動相当: メモリ上のプレイリストは無い。同じフォルダを再スキャンする。
     let playlist_mutex_2: Mutex<Option<Playlist>> = Mutex::new(None);
-    perform_scan(&db_mutex, &playlist_mutex_2, None, &photos_dir, |_, _| {})
-        .expect("全件削除後の再scanでもクラッシュせず成功するはず");
+    let directory_path_mutex_2: Mutex<Option<PathBuf>> = Mutex::new(None);
+    perform_scan(
+        &db_mutex,
+        &playlist_mutex_2,
+        &directory_path_mutex_2,
+        None,
+        &photos_dir,
+        |_, _| {},
+    )
+    .expect("全件削除後の再scanでもクラッシュせず成功するはず");
 
     let playlist_lock = playlist_mutex_2.lock().unwrap();
     let playlist = playlist_lock.as_ref().unwrap();

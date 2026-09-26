@@ -9,6 +9,16 @@ use crate::playlist::Playlist;
 use std::path::Path;
 use tauri::State;
 
+/// 実ファイルが消えている（NAS/USB切断・外部ツールでの削除等）画像に当たった場合に
+/// 内部でさらに次/前へ進み直す上限回数（#62レビュー2巡目 N-S1）。
+///
+/// 消えたファイルは次回スキャンでプレイリストから除去される（母集団自体から
+/// 外れる）ため、ここで飛ばしても「1巡で全件ちょうど1回」という完全平等の保証には
+/// 影響しない。上限を設けるのは、万一ほとんどのファイルが一斉に消えている
+/// （フォルダごとアンマウント等）異常事態で無限ループにならないようにするため。
+/// 上限に到達した場合は従来どおり `Ok(None)` を返す。
+const MAX_MISSING_FILE_SKIPS: usize = 20;
+
 /// `advance()` 後の永続化（#62）。再シャッフルが起きた場合のみ `shuffled_list` を
 /// 含むフル保存（1トランザクション）、それ以外は `next_index`/履歴だけの
 /// 軽量な `UPDATE` にする。10万件規模のプレイリストで毎 advance 全件を書き直すと
@@ -39,42 +49,17 @@ fn persist_playlist_after_advance(state: &State<AppState>, playlist: &Playlist, 
 /// `get_image_info_internal` 呼び出し）をまたいで生存させられない。ブロックで
 /// スコープを切り、await の前に確実にドロップさせる（#60 レビュー2巡目
 /// should(2) で `get_image_info_internal` を async 化した際に必要になった）。
+///
+/// #62レビュー2巡目 N-S1: 実ファイルが消えている画像に当たった場合、`Ok(None)` を
+/// 即座に返す（＝フロントは「No more images」のエラー画面にフォールバックする）
+/// 旧実装は、1件消えただけでスライドショーが止まって見えてしまっていた。
+/// `MAX_MISSING_FILE_SKIPS` 回を上限に内部で次へ進み直し、最初に実在する画像が
+/// 見つかったものだけを返す。表示回数はその実在する画像1件にだけ加算する
+/// （欠損ファイルの分は加算しない、従来どおり）。
 #[tauri::command]
 pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
-    let (path_str, should_count, prefetch_paths) = {
-        let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
-        let playlist = playlist_lock
-            .as_mut()
-            .ok_or_else(|| "Playlist not initialized".to_string())?;
-
-        // プレイリストが空の場合はエラー
-        if playlist.is_empty() {
-            return Err("Playlist is empty".to_string());
-        }
-
-        let (image_path, should_count, reshuffled) = playlist.advance();
-        let path_str = match image_path {
-            Some(p) => p.clone(),
-            None => return Ok(None),
-        };
-
-        // 5枚先までのパスを取得（先読み用。peek_next_n(0)が次に表示される画像）
-        let mut prefetch_paths = Vec::new();
-        for i in 0..5 {
-            if let Some(path) = playlist.peek_next_n(i) {
-                prefetch_paths.push(path.clone());
-            }
-        }
-
-        // 永続化(#62): 再シャッフルが起きたときだけ shuffled_list を含むフル保存、
-        // それ以外は next_index/履歴だけの軽量更新にする（10万件規模で毎advance
-        // 全件書き込むと重いため）。
-        persist_playlist_after_advance(&state, playlist, reshuffled);
-
-        (path_str, should_count, prefetch_paths)
-    };
-
-    // apply_exif_rotation 設定を取得（デフォルト true）
+    // apply_exif_rotation 設定を取得（デフォルト true）。欠損ファイルのスキップで
+    // 何度もadvanceし直しても、この設定自体はループの外で一度読めば十分。
     let apply_rotation = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
         db.get_setting("apply_exif_rotation")
@@ -84,51 +69,70 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
             .unwrap_or(true)
     };
 
-    // 画像情報を取得（内部で存在確認・現在画像のキャッシュ要求まで行う）
-    let info = get_image_info_internal(&path_str, &state, apply_rotation).await?;
+    for _ in 0..MAX_MISSING_FILE_SKIPS {
+        let (path_str, should_count, prefetch_paths) = {
+            let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
+            let playlist = playlist_lock
+                .as_mut()
+                .ok_or_else(|| "Playlist not initialized".to_string())?;
 
-    // 表示回数の加算はファイル存在確認後（#60 問題9: 消失ファイルを無駄カウントしない）
-    if info.is_some() && should_count {
-        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = db.increment_display_count(&path_str);
+            // プレイリストが空の場合はエラー
+            if playlist.is_empty() {
+                return Err("Playlist is empty".to_string());
+            }
+
+            let (image_path, should_count, reshuffled) = playlist.advance();
+            let path_str = match image_path {
+                Some(p) => p.clone(),
+                None => return Ok(None),
+            };
+
+            // 5枚先までのパスを取得（先読み用。peek_next_n(0)が次に表示される画像）
+            let mut prefetch_paths = Vec::new();
+            for i in 0..5 {
+                if let Some(path) = playlist.peek_next_n(i) {
+                    prefetch_paths.push(path.clone());
+                }
+            }
+
+            // 永続化(#62): 再シャッフルが起きたときだけ shuffled_list を含むフル保存、
+            // それ以外は next_index/履歴だけの軽量更新にする（10万件規模で毎advance
+            // 全件書き込むと重いため）。ファイルが後で存在しないと分かった場合でも、
+            // プレイリストの進行自体は「消費済み」として確定させてよい（次回スキャンで
+            // 除去される前提のため、#62レビュー2巡目 N-S1 コメント参照）。
+            persist_playlist_after_advance(&state, playlist, reshuffled);
+
+            (path_str, should_count, prefetch_paths)
+        };
+
+        // 画像情報を取得（内部で存在確認・現在画像のキャッシュ要求まで行う）
+        let info = get_image_info_internal(&path_str, &state, apply_rotation).await?;
+
+        if info.is_some() {
+            // 表示回数の加算はファイル存在確認後（#60 問題9: 消失ファイルを無駄カウントしない）
+            if should_count {
+                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+                let _ = db.increment_display_count(&path_str);
+            }
+
+            // 5枚先まで先読みキュー投入（単一ワーカーが直列処理・重複排除・世代管理する）
+            enqueue_prefetch(&state, prefetch_paths, apply_rotation);
+
+            return Ok(info);
+        }
+        // ファイルが存在しない: カウントせず、次のループでさらに advance し直す。
     }
 
-    // 5枚先まで先読みキュー投入（単一ワーカーが直列処理・重複排除・世代管理する）
-    enqueue_prefetch(&state, prefetch_paths, apply_rotation);
-
-    Ok(info)
+    // 上限に到達（ほとんどのファイルが一斉に消えている等の異常事態）。従来どおり None。
+    Ok(None)
 }
 
-/// 前の画像を取得（カウント増やさない）
+/// 前の画像を取得（カウント増やさない）。
+///
+/// #62レビュー2巡目 N-S1: `get_next_image` と同様、実ファイルが消えている画像に
+/// 当たったら `MAX_MISSING_FILE_SKIPS` 回を上限にさらに前へ戻り直す。
 #[tauri::command]
 pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
-    let path_str = {
-        let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
-        let playlist = playlist_lock
-            .as_mut()
-            .ok_or_else(|| "Playlist not initialized".to_string())?;
-
-        // プレイリストが空の場合はエラー
-        if playlist.is_empty() {
-            return Err("Playlist is empty".to_string());
-        }
-
-        if !playlist.can_go_back() {
-            return Ok(None);
-        }
-
-        let path = match playlist.go_back() {
-            Some(p) => p.clone(),
-            None => return Ok(None),
-        };
-
-        // 永続化(#62): go_back は next_index を変えないため常に軽量保存でよい。
-        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        playlist_persistence::save_position(&db, playlist);
-
-        path
-    };
-
     // apply_exif_rotation 設定を取得（デフォルト true）
     let apply_rotation = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
@@ -139,8 +143,44 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
             .unwrap_or(true)
     };
 
-    // 画像情報を取得（カウントは増やさない）
-    get_image_info_internal(&path_str, &state, apply_rotation).await
+    for _ in 0..MAX_MISSING_FILE_SKIPS {
+        let path_str = {
+            let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
+            let playlist = playlist_lock
+                .as_mut()
+                .ok_or_else(|| "Playlist not initialized".to_string())?;
+
+            // プレイリストが空の場合はエラー
+            if playlist.is_empty() {
+                return Err("Playlist is empty".to_string());
+            }
+
+            if !playlist.can_go_back() {
+                return Ok(None);
+            }
+
+            let path = match playlist.go_back() {
+                Some(p) => p.clone(),
+                None => return Ok(None),
+            };
+
+            // 永続化(#62): go_back は next_index を変えないため常に軽量保存でよい。
+            let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+            playlist_persistence::save_position(&db, playlist);
+
+            path
+        };
+
+        // 画像情報を取得（カウントは増やさない）
+        let info = get_image_info_internal(&path_str, &state, apply_rotation).await?;
+        if info.is_some() {
+            return Ok(info);
+        }
+        // ファイルが存在しない: 次のループでさらに go_back し直す
+        // （履歴の先頭に達したら can_go_back() が false になり Ok(None) で終わる）。
+    }
+
+    Ok(None)
 }
 
 /// 画像情報を取得（内部ヘルパー関数）
