@@ -445,6 +445,28 @@ mod tests {
         assert_eq!(extract_date_from_path("/a/1202305150001.jpg"), None);
     }
 
+    /// #61 日付境界: 月/日レンジ外の数字列（決定表の「不正な日付 20231345」）は
+    /// 誤って日付として抽出しない。うるう年の2/29は妥当な日付として抽出できる。
+    #[test]
+    fn extract_date_from_path_rejects_out_of_range_month_and_accepts_leap_day() {
+        // 月が13は存在しない → YYYYMMDD/YYYY-MM-DD のどちらの形式でも誤検出しない
+        assert_eq!(extract_date_from_path("/a/IMG_20231345_010101.jpg"), None);
+        assert_eq!(extract_date_from_path("/a/2023-13-45/b.jpg"), None);
+        // 日が0や32は存在しない
+        assert_eq!(extract_date_from_path("/a/20230100.jpg"), None);
+        assert_eq!(extract_date_from_path("/a/20230132.jpg"), None);
+
+        // うるう年（2024年）の2/29は妥当な日付として抽出できる
+        assert_eq!(
+            extract_date_from_path("/a/2024-02-29/b.jpg"),
+            Some("2024-02-29".to_string())
+        );
+        assert_eq!(
+            extract_date_from_path("/a/IMG_20240229_090000.jpg"),
+            Some("2024-02-29".to_string())
+        );
+    }
+
     #[test]
     fn normalize_dir_pattern_extracts_name_regardless_of_prefix() {
         assert_eq!(

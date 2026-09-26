@@ -460,3 +460,174 @@ impl Database {
         Ok(results)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// テスト専用の一意なDBファイルパス（並列テストでも衝突しない。process::id() だけでは
+    /// 同一プロセス内の複数テストが衝突するため tag を組み合わせる）。
+    fn temp_db_path(tag: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "sss_database_test_{tag}_{}.sqlite",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    /// #61 マイグレーション状態遷移: 旧スキーマ（`ignore_rules` に `rule_type` 列が無く、
+    /// `file_metadata` に `captured_date` 列が無い）のDBを直接構築してから `Database::new`
+    /// で開いたとき、列が追加されつつ既存データ（旧ルール・旧ファイルメタデータ）が
+    /// 失われないこと。デフォルト除外ルールも「既存ルールが1件でもあれば」重複挿入しない。
+    #[test]
+    fn migrating_old_schema_db_adds_columns_and_preserves_existing_data() {
+        let path = temp_db_path("old_schema");
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "CREATE TABLE file_metadata (
+                    path TEXT PRIMARY KEY,
+                    modified_time INTEGER NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "CREATE TABLE ignore_rules (
+                    pattern TEXT PRIMARY KEY,
+                    added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO file_metadata (path, modified_time, file_size) VALUES ('/old/a.jpg', 111, 222)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO ignore_rules (pattern) VALUES ('*.oldrule')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = Database::new(path.clone()).unwrap();
+
+        // 旧ファイルメタデータは captured_date=NULL の状態で残っている
+        let files = db.get_all_file_metadata().unwrap();
+        assert_eq!(
+            files.iter().find(|(p, ..)| p == "/old/a.jpg"),
+            Some(&("/old/a.jpg".to_string(), 111, 222, None))
+        );
+
+        // 旧ルールは rule_type='glob' 補完で残り、デフォルトルールは重複挿入されない
+        let rules = db.get_ignore_rules().unwrap();
+        assert_eq!(
+            rules,
+            vec![("*.oldrule".to_string(), RuleType::Glob)],
+            "既存ルールがある旧DBにはデフォルトルールを追加せず、旧ルールだけが残るはず"
+        );
+
+        let version: i32 = db
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 1);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #61 状態遷移: マイグレーション済みDBを複数回開き直しても（例: アプリの再起動を
+    /// 繰り返す）ALTER TABLE の二重実行エラーにならず、データも壊れないこと（冪等性）。
+    #[test]
+    fn reopening_migrated_db_multiple_times_is_idempotent() {
+        let path = temp_db_path("idempotent");
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "CREATE TABLE file_metadata (
+                    path TEXT PRIMARY KEY,
+                    modified_time INTEGER NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO file_metadata (path, modified_time, file_size) VALUES ('/old/b.jpg', 1, 2)",
+                [],
+            )
+            .unwrap();
+        }
+
+        {
+            let db = Database::new(path.clone()).unwrap();
+            db.set_captured_date("/old/b.jpg", "2023-05-15").unwrap();
+        }
+
+        // 2回・3回目の再オープンでもエラーにならず、値も保たれる
+        for _ in 0..2 {
+            let db = Database::new(path.clone()).unwrap();
+            let files = db.get_all_file_metadata().unwrap();
+            let row = files.iter().find(|(p, ..)| p == "/old/b.jpg").unwrap();
+            assert_eq!(row.3, Some("2023-05-15".to_string()));
+
+            let version: i32 = db
+                .conn
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, 1);
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #61 回帰防止: `upsert_file_metadata`（再スキャンのたびに全ファイルへ呼ばれる）が
+    /// 既に表示時に取得済みの `captured_date` をリセットしないこと
+    /// （`INSERT OR REPLACE` → `ON CONFLICT DO UPDATE` への変更の本丸）。
+    #[test]
+    fn upsert_file_metadata_preserves_captured_date_on_rescan() {
+        let path = temp_db_path("upsert_preserve");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/photos/a.jpg", 100, 200).unwrap();
+        db.set_captured_date("/photos/a.jpg", "2023-05-15").unwrap();
+
+        // 再スキャン相当（mtime/sizeが変化するケース）
+        db.upsert_file_metadata("/photos/a.jpg", 999, 888).unwrap();
+
+        let files = db.get_all_file_metadata().unwrap();
+        let row = files.iter().find(|(p, ..)| p == "/photos/a.jpg").unwrap();
+        assert_eq!(row.1, 999);
+        assert_eq!(row.2, 888);
+        assert_eq!(
+            row.3,
+            Some("2023-05-15".to_string()),
+            "再スキャンでcaptured_dateがリセットされてはいけない"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// 同値分割: captured_date が未取得（表示したことがない）新規ファイルは、
+    /// upsert 後も None のままであること（Some に化けない）。
+    #[test]
+    fn upsert_file_metadata_new_file_has_no_captured_date() {
+        let path = temp_db_path("upsert_new");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.upsert_file_metadata("/photos/new.jpg", 1, 2).unwrap();
+        let files = db.get_all_file_metadata().unwrap();
+        let row = files.iter().find(|(p, ..)| p == "/photos/new.jpg").unwrap();
+        assert_eq!(row.3, None);
+
+        let _ = std::fs::remove_file(&path);
+    }
+}
