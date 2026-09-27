@@ -42,6 +42,23 @@ describe('i18n locale resolution (#80)', () => {
     expect(resolveLocale('auto')).toBe('en');
   });
 
+  it('resolves "auto" to en when navigator.language is an empty string (falsy, treated as "unset")', () => {
+    setNavigatorLanguage('');
+    expect(resolveLocale('auto')).toBe('en');
+  });
+
+  it('resolves "auto" to en when navigator.language is undefined', () => {
+    // `!navigator.language` はundefinedでもtrueになるため、空文字と同じ経路を通る。
+    // 実行環境で navigator.language が未設定になるケース（本当に「未設定」）を模す。
+    Object.defineProperty(navigator, 'language', { value: undefined, configurable: true });
+    expect(resolveLocale('auto')).toBe('en');
+  });
+
+  it('is case-insensitive when matching "ja" (e.g. uppercase locale tags)', () => {
+    setNavigatorLanguage('JA-JP');
+    expect(resolveLocale('auto')).toBe('ja');
+  });
+
   it('setLanguageSetting updates the setting and resolved locale, and notifies subscribers', () => {
     setNavigatorLanguage('en-US');
     let notified = 0;
@@ -53,6 +70,29 @@ describe('i18n locale resolution (#80)', () => {
     expect(getLocale()).toBe('ja');
     expect(notified).toBe(1);
     unsubscribe();
+  });
+
+  it('stops notifying a listener after it unsubscribes, without affecting other listeners', () => {
+    let notifiedA = 0;
+    let notifiedB = 0;
+    const unsubscribeA = subscribeLocale(() => {
+      notifiedA++;
+    });
+    const unsubscribeB = subscribeLocale(() => {
+      notifiedB++;
+    });
+
+    setLanguageSetting('ja');
+    expect(notifiedA).toBe(1);
+    expect(notifiedB).toBe(1);
+
+    unsubscribeA();
+    setLanguageSetting('en');
+    // Aは解除済みなので増えない。Bはまだ購読中なので増える。
+    expect(notifiedA).toBe(1);
+    expect(notifiedB).toBe(2);
+
+    unsubscribeB();
   });
 
   it('initLocale loads the saved setting via getSetting("language")', async () => {

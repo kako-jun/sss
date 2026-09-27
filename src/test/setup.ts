@@ -24,6 +24,28 @@ beforeEach(() => {
   setLanguageSetting('auto');
 });
 
+// #80: GraphSection.test.tsx（uPlotでチャートを描画する）向けのjsdom補完。
+// uPlotはモジュール読み込み時点で`matchMedia`をグローバル関数として直接呼ぶため
+// （devicePixelRatio変更の監視用）、テストファイル内のbeforeEachで用意しても
+// import巻き上げにより間に合わない。jsdomはmatchMedia自体を実装していないため、
+// setupFiles（テストファイルのimportより先に実行される）でここに用意する。
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  // `MediaQueryList`はプロジェクトのeslint.config.jsのDOM型グローバル許可リストに
+  // 無いため（no-undef）、`typeof window.matchMedia`経由で戻り値型を参照し、
+  // 型名を裸のグローバル識別子として書かない。
+  window.matchMedia = ((query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as ReturnType<typeof window.matchMedia>) as typeof window.matchMedia;
+}
+
 // Global teardown ordering matters for hooks that schedule recurring timers
 // (useSlideshow runs a ~16ms progress interval). We must unmount every mounted
 // component *before* restoring real timers, otherwise a queued fake-timer

@@ -67,10 +67,14 @@ mod scan_guard_tests {
         let flag = AtomicBool::new(false);
 
         let guard = ScanGuard::acquire(&flag).expect("最初のacquireは成功するはず");
-        assert!(
-            ScanGuard::acquire(&flag).is_err(),
-            "実行中に2本目のacquireをするとエラーになるはず"
-        );
+        let second = ScanGuard::acquire(&flag);
+        // #80: ユーザー向け文言でなくエラーコードで返る契約をここで固定する。
+        // フロント辞書（resolveScanErrorMessage/resolveResetAllDataErrorMessage）が
+        // このコード文字列を直接switchしているため、文言（日本語/英語）に変わって
+        // しまうと両方とも未知コード扱いのフォールバック文言に落ちてしまう。
+        // `ScanGuard` は `Debug` を実装していないため `unwrap_err()` は使えず、
+        // `err()` で `Option<String>` に変換してから比較する。
+        assert_eq!(second.err(), Some("scanInProgress".to_string()));
 
         drop(guard);
 

@@ -15,6 +15,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 }));
 
 import * as tauri from './tauri';
+import { setLanguageSetting } from './i18n/store';
 import type {
   ImageInfo,
   ImageNavigationResult,
@@ -222,6 +223,17 @@ describe('selectDirectory (dialog plugin)', () => {
       title: '写真フォルダを選択',
     });
     expect(result).toBe('/chosen/dir');
+  });
+
+  it('uses the English dialog title once the language setting is switched to "en" (#80)', async () => {
+    setLanguageSetting('en');
+    open.mockResolvedValue('/chosen/dir');
+    await tauri.selectDirectory();
+    expect(open).toHaveBeenCalledWith({
+      directory: true,
+      multiple: false,
+      title: 'Select Photo Directory',
+    });
   });
 
   it('returns null when the dialog is cancelled (open resolves null)', async () => {

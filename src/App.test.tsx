@@ -445,4 +445,27 @@ describe('App i18n (#80): language setting resolution', () => {
     });
     expect(document.documentElement.lang).toBe('ja');
   });
+
+  it('renders in English when the saved language setting is "en", even if navigator.language is Japanese', async () => {
+    // src/test/setup.ts の既定（ja-JP）のまま。settingが常にnavigatorに勝つことを
+    // 前のテスト（ja設定がnavigator=enに勝つ）と逆方向でも確認する。
+    getSetting.mockImplementation(async (key: string) => (key === 'language' ? 'en' : null));
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Welcome to SSS')).toBeTruthy();
+    });
+    expect(document.documentElement.lang).toBe('en');
+  });
+
+  it('sets the native window title to the translated windowTitle for the resolved locale', async () => {
+    getSetting.mockImplementation(async (key: string) => (key === 'language' ? 'en' : null));
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(win.setTitle).toHaveBeenCalledWith('sss - Smart Slide Show');
+    });
+  });
 });
