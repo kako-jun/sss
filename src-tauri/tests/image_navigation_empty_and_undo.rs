@@ -198,6 +198,13 @@ fn undo_display_count_does_nothing_when_path_does_not_match_last_incremented() {
 
 /// #65レビューS1: `get_previous_image`（表示回数を増やさない）の直後に
 /// `undo_display_count` を呼んでも、無関係な過去の加算を誤って減らさない。
+///
+/// #65レビュー2巡目M3(must): `Playlist::new` はシャッフルするため、2件の
+/// パスのどちらが1回目/2回目に返るかは決め打ちできない（旧実装は`vec![a,b]`の
+/// 並び順のまま`a`が1回目に出る前提で書かれており、約50%の確率でFAILしていた）。
+/// 1回目の`get_next_image`が実際に返したパスを`first_path`として使い、
+/// `undo_display_count`には`get_previous_image`が実際に返したパスを渡すことで、
+/// シャッフル順に依存しないようにする。
 #[test]
 fn undo_display_count_does_not_decrement_after_get_previous_image() {
     let dir = workspace("undo_previous_noop");
@@ -214,30 +221,55 @@ fn undo_display_count_does_not_decrement_after_get_previous_image() {
     let app = build_app(playlist, Some(root), dir.join("cache"));
     let state = app.state::<AppState>();
 
-    // a→b と進めて、aの表示回数を1にしておく（bはまだ加算されない想定ではなく、
-    // advanceのたびに加算されるが、ここで重要なのはaの既存カウント=1という事実）。
-    tauri::async_runtime::block_on(get_next_image(state.clone())).unwrap();
-    tauri::async_runtime::block_on(get_next_image(state.clone())).unwrap();
-    let a_count_before = state.db.lock().unwrap().get_image_stats(&a).unwrap().0;
-    assert_eq!(a_count_before, 1, "前提: aは1加算されているはず");
+    let extract_found_path = |result: ImageNavigationResult| match result {
+        ImageNavigationResult::Found(info) => info.path,
+        other => panic!("実在する2件のうちの1件なのでFoundのはず: {other:?}"),
+    };
 
-    // 履歴を戻る（表示回数は加算されない = last_incremented_displayは更新されない）。
-    let back = tauri::async_runtime::block_on(get_previous_image(state.clone()))
-        .expect("get_previous_imageはエラーにならないはず");
-    assert!(
-        matches!(back, ImageNavigationResult::Found(_)),
-        "aへ戻れるはず: {back:?}"
+    // 2件を1回ずつ進める。シャッフル順は問わない
+    // （first_path/second_pathを実際の結果から取り出す）。
+    let first_result = tauri::async_runtime::block_on(get_next_image(state.clone())).unwrap();
+    let first_path = extract_found_path(first_result);
+    tauri::async_runtime::block_on(get_next_image(state.clone())).unwrap();
+
+    let first_count_before = state
+        .db
+        .lock()
+        .unwrap()
+        .get_image_stats(&first_path)
+        .unwrap()
+        .0;
+    assert_eq!(
+        first_count_before, 1,
+        "前提: 1回目に表示した画像は1加算されているはず"
     );
 
-    // 「前へ」で表示したaがonErrorになった、というシナリオでundoを呼んでも、
-    // get_previous_imageはlast_incremented_displayを更新していないため無視される。
-    tauri::async_runtime::block_on(undo_display_count(state.clone(), a.clone()))
+    // 履歴を1つ戻る（表示回数は加算されない = last_incremented_displayは更新されない）。
+    // 2件しか無いプレイリストなので、1つ戻ると必ず1回目に表示したものに戻る。
+    let back_result = tauri::async_runtime::block_on(get_previous_image(state.clone()))
+        .expect("get_previous_imageはエラーにならないはず");
+    let back_path = extract_found_path(back_result);
+    assert_eq!(
+        back_path, first_path,
+        "1つ戻ると1回目に表示したものに戻るはず"
+    );
+
+    // 「前へ」で表示した画像（get_previous_imageが実際に返したパス）がonErrorに
+    // なった、というシナリオでundoを呼んでも、get_previous_imageは
+    // last_incremented_displayを更新していないため無視される。
+    tauri::async_runtime::block_on(undo_display_count(state.clone(), back_path))
         .expect("undo_display_countはエラーにならないはず");
 
-    let a_count_after = state.db.lock().unwrap().get_image_stats(&a).unwrap().0;
+    let first_count_after = state
+        .db
+        .lock()
+        .unwrap()
+        .get_image_stats(&first_path)
+        .unwrap()
+        .0;
     assert_eq!(
-        a_count_after, a_count_before,
-        "get_previous_image由来のonErrorはaの既存カウントを減らさないはず"
+        first_count_after, first_count_before,
+        "get_previous_image由来のonErrorは既存カウントを減らさないはず"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
