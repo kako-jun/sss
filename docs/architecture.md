@@ -84,30 +84,31 @@ sss は、10万枚規模の写真・動画コレクションを **完全平等�
 
 ### フロントエンド（`src/`）
 
-| モジュール                                      | 責務                                                                                                                                                                                                                   |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `App.tsx`                                       | アプリのオーケストレーション。起動時初期化（設定読込→前回フォルダの差分スキャン→プレイリスト初期化）、フルスクリーン同期、キーボードショートカット（←/→/ESC）、ホバー/設定画面での自動一時停止                         |
-| `components/Slideshow.tsx`                      | 現在の画像/動画を全画面表示。`optimizedPath` 優先で `convertFileSrc` 化、framer-motion でクロスフェード                                                                                                                |
-| `components/OverlayUI.tsx`                      | 操作オーバーレイ（前/次・再生一時停止・ピック・除外・ファイラで開く・EXIF/位置情報表示）。マウスアイドルでフェードアウト                                                                                               |
-| `components/Settings/index.tsx`                 | 設定モーダルのタブ管理（scan / options / exclude / pick / history / stats / info）                                                                                                                                     |
-| `components/Settings/ScanSection.tsx`           | フォルダ選択・スキャン実行・進捗表示                                                                                                                                                                                   |
-| `components/Settings/IntervalSection.tsx`       | 表示間隔（秒）の設定                                                                                                                                                                                                   |
-| `components/Settings/SettingsSection.tsx`       | EXIF 自動回転の ON/OFF など表示オプション                                                                                                                                                                              |
-| `components/Settings/ShareDirectorySection.tsx` | ピック先フォルダの設定                                                                                                                                                                                                 |
-| `components/Settings/ExcludeRulesSection.tsx`   | 除外ルールの一覧・追加・削除。撮影日ルール（`ruleType: "date"`）は「撮影日」バッジ付きで表示し、手動追加は常に通常globとして扱う                                                                                       |
-| `components/Settings/PickSection.tsx`           | ピック済み画像の一覧・削除                                                                                                                                                                                             |
-| `components/Settings/HistorySection.tsx`        | 最近表示した画像の一覧と、そこからの除外操作                                                                                                                                                                           |
-| `components/Settings/GraphSection.tsx`          | 表示回数の分布グラフ（uPlot）と表示回数リセット                                                                                                                                                                        |
-| `components/Settings/InfoSection.tsx`           | アプリ情報・GitHub リンク・全データ初期化（確認ダイアログ→`resetAllData`呼び出しのみ。成功時はバックエンドがプロセスごと再起動するため以降の処理は無い。失敗時は日本語エラーメッセージを表示しボタンを再度有効化する） |
-| `hooks/useSlideshow.ts`                         | スライドショーの状態（現在画像・再生中・進捗）と自動進行タイマー。動画はタイマーでなく `onEnded` で次へ                                                                                                                |
-| `hooks/useMouseIdle.ts`                         | マウス無操作の検知（既定3秒）。オーバーレイの表示/非表示を制御                                                                                                                                                         |
-| `lib/tauri.ts`                                  | 全 IPC コマンドの型付きラッパ群とディレクトリ選択ダイアログ                                                                                                                                                            |
-| `constants.ts`                                  | 表示間隔の既定/下限/上限、モーダルアニメーション時間                                                                                                                                                                   |
-| `types.ts`                                      | フロント側の型定義（`ImageInfo` / `ExifInfo` / `ScanProgress` / `Stats` / `RecentImage` / `IgnoreRule`）                                                                                                               |
+| モジュール                                      | 責務                                                                                                                                                                                                                                         |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `App.tsx`                                       | アプリのオーケストレーション。起動時初期化（設定読込→前回フォルダの差分スキャン→プレイリスト初期化）、フルスクリーン同期、キーボードショートカット（←/→/ESC）、ホバー/設定画面での自動一時停止                                               |
+| `components/Slideshow.tsx`                      | 現在の画像/動画を全画面表示。`optimizedPath` 優先で `convertFileSrc` 化、framer-motion でクロスフェード                                                                                                                                      |
+| `components/OverlayUI.tsx`                      | 操作オーバーレイ（前/次・再生一時停止・ピック・除外・ファイラで開く・EXIF/位置情報表示）。マウスアイドルでフェードアウト                                                                                                                     |
+| `components/Settings/index.tsx`                 | 設定モーダルのタブ管理（scan / options / exclude / pick / history / stats / info）                                                                                                                                                           |
+| `components/Settings/ScanSection.tsx`           | フォルダ選択・スキャン実行・進捗表示                                                                                                                                                                                                         |
+| `components/Settings/IntervalSection.tsx`       | 表示間隔（秒）の設定                                                                                                                                                                                                                         |
+| `components/Settings/SettingsSection.tsx`       | EXIF 自動回転の ON/OFF など表示オプション                                                                                                                                                                                                    |
+| `components/Settings/ShareDirectorySection.tsx` | ピック先フォルダの設定                                                                                                                                                                                                                       |
+| `components/Settings/ExcludeRulesSection.tsx`   | 除外ルールの一覧・追加・削除。撮影日ルール（`ruleType: "date"`）は「撮影日」バッジ付きで表示し、手動追加は常に通常globとして扱う                                                                                                             |
+| `components/Settings/PickSection.tsx`           | ピック済み画像の一覧・削除                                                                                                                                                                                                                   |
+| `components/Settings/HistorySection.tsx`        | 最近表示した画像の一覧と、そこからの除外操作                                                                                                                                                                                                 |
+| `components/Settings/GraphSection.tsx`          | 表示回数の分布グラフ（uPlot）と表示回数リセット                                                                                                                                                                                              |
+| `components/Settings/InfoSection.tsx`           | アプリ情報・GitHub リンク・全データ初期化（確認ダイアログ→`resetAllData`呼び出しのみ。成功時はバックエンドがプロセスごと再起動するため以降の処理は無い。失敗時は日本語エラーメッセージを表示しボタンを再度有効化する）                       |
+| `hooks/useSlideshow.ts`                         | スライドショーの状態（現在画像・通知・進捗）と自動進行タイマー。`isPlaying` は `App.tsx` が導出した派生値を引数で受け取るだけで、このフック自身は持たない（#65。理由は§6(f)参照）。動画はタイマーでなく `onEnded`（`Slideshow.tsx`側）で次へ |
+| `hooks/useMouseIdle.ts`                         | マウス無操作の検知（既定3秒）。オーバーレイの表示/非表示を制御                                                                                                                                                                               |
+| `lib/tauri.ts`                                  | 全 IPC コマンドの型付きラッパ群とディレクトリ選択ダイアログ                                                                                                                                                                                  |
+| `lib/messages.ts`                               | UI文言の集約辞書（#65。`uiText`: キー→文言のフラットなオブジェクト、`noticeMessages`: 状態コード→文言。i18n本体の別Issue #80でロケール分割しやすい構造にしてある）                                                                           |
+| `constants.ts`                                  | 表示間隔の既定/下限/上限、`clampDisplayInterval`（NaN/範囲外を丸める。#65問題7）、モーダルアニメーション時間                                                                                                                                 |
+| `types.ts`                                      | フロント側の型定義（`ImageInfo` / `ExifInfo` / `ScanProgress` / `Stats` / `RecentImage` / `IgnoreRule` / `ImageNavigationResult`）                                                                                                           |
 
 ## 4. IPC コマンド一覧
 
-`lib.rs` の `run()` 内 `invoke_handler` に登録された全 22 コマンドをドメイン別に示します（フロントからは `src/lib/tauri.ts` 経由で呼ばれます）。
+`lib.rs` の `run()` 内 `invoke_handler` に登録された全 23 コマンドをドメイン別に示します（フロントからは `src/lib/tauri.ts` 経由で呼ばれます）。
 
 ### scan（走査）
 
@@ -117,10 +118,11 @@ sss は、10万枚規模の写真・動画コレクションを **完全平等�
 
 ### image（プレイリスト遷移）
 
-| コマンド             | 役割                                                                                                                                    |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_next_image`     | 次の画像へ進める。新規画像かつファイル存在確認後にのみ表示回数を +1 し、5枚先まで先読み要求を単一ワーカーへ投入する。`ImageInfo` を返す |
-| `get_previous_image` | 履歴を1つ戻る（表示回数は加算しない）。`ImageInfo` を返す                                                                               |
+| コマンド             | 役割                                                                                                                                                                                                              |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_next_image`     | 次の画像へ進める。新規画像かつファイル存在確認後にのみ表示回数を +1 し、5枚先まで先読み要求を単一ワーカーへ投入する。`ImageNavigationResult`（#65。`found`/`emptyPlaylist`/`loadFailed`/`rootUnavailable`）を返す |
+| `get_previous_image` | 履歴を1つ戻る（表示回数は加算しない）。`ImageNavigationResult`（#65。上記に加え、履歴の先頭で `noHistory`）を返す                                                                                                 |
+| `undo_display_count` | `<img>`/`<video>` の `onError`（WebViewでのデコード/描画失敗）で、`get_next_image`/`get_previous_image` が既に加算した表示回数を1減らす（#65。詳細は本ファイル末尾の追記セクション参照）                          |
 
 ### file_operations（ピック / 除外 / 削除 / ファイラ / 履歴）
 
@@ -243,11 +245,11 @@ DBリセット・メモリ状態クリア・キャッシュクリアの中核ロ
 
 **`restore_playlist` の呼び出し前提（#62レビュー2巡目 N-S2、#62レビュー3巡目 nit で強化）**: `playlist_mutex` が既に `Some`（別経路で既に初期化済み）で、かつ `directory_path_mutex` が今回リクエストされたディレクトリと一致するなら、何もせず「既存維持」で `true` 相当（`RestoreOutcome::AlreadyReady`）を返す。一致しない（例: 別ディレクトリへの切替直後で古いディレクトリのプレイリストがまだ残っている）場合は「既存維持」を騙らず `NotRestored` を返す。`scan_in_progress` が立っている間（`scan_directory` 実行中）は `false` 相当（`NotRestored`）を返し、スキャンの完了に任せる。**#62レビュー3巡目 nit(TOCTOU対策)**: `playlist_mutex` の `is_some` 確認から実際に `Some(playlist)` を設定するまで、同じ `MutexGuard` を関数の最後まで保持し続ける（確認と代入の間に別スレッドの `perform_restore`/`perform_scan` が割り込む隙を無くす）。`db_mutex`/`directory_path_mutex` はこの `playlist_mutex` ロックを保持したまま内側で取る（順序は playlist→db／playlist→directory_path。`perform_scan` の Stage 4 や `commands/image.rs` の永続化と同じ順序で、逆順は無いためデッドロックしない）。
 
-**`get_next_image`/`get_previous_image` は消えたファイルを内部で読み飛ばす（#62レビュー2巡目 N-S1、#62レビュー3巡目 T-M1/S-bで精緻化）**: 実ファイルが後から消えている（NAS切断・USB取り外し・外部ツールでの削除等）画像に `advance`/`go_back` で当たった場合、以前は即座に `Ok(None)` を返し、フロントは「No more images」のエラー画面にフォールバックしていた（1件消えているだけでスライドショーが止まって見えてしまう）。`MAX_MISSING_FILE_SKIPS`（20）を上限に内部でさらに次/前へ進み直し、最初に実在する画像が見つかったものだけを返すよう変更した。消えたファイルは次回スキャンでプレイリストから除去される（母集団自体から外れる）ため、ここで飛ばしても「1巡で全件ちょうど1回」という完全平等の保証には影響しない。表示回数は実在が確認できた画像1件にのみ加算する（従来どおり）。上限は、フォルダごとアンマウントされた等の異常事態で無限ループにしないための安全弁で、到達時は従来どおり `None` を返す。
+**`get_next_image`/`get_previous_image` は消えたファイルを内部で読み飛ばす（#62レビュー2巡目 N-S1、#62レビュー3巡目 T-M1/S-bで精緻化）**: 実ファイルが後から消えている（NAS切断・USB取り外し・外部ツールでの削除等）画像に `advance`/`go_back` で当たった場合、以前は即座に `Ok(None)` を返し、フロントは「No more images」のエラー画面にフォールバックしていた（1件消えているだけでスライドショーが止まって見えてしまう）。`MAX_MISSING_FILE_SKIPS`（20）を上限に内部でさらに次/前へ進み直し、最初に実在する画像が見つかったものだけを返すよう変更した。消えたファイルは次回スキャンでプレイリストから除去される（母集団自体から外れる）ため、ここで飛ばしても「1巡で全件ちょうど1回」という完全平等の保証には影響しない。表示回数は実在が確認できた画像1件にのみ加算する（従来どおり）。上限は、フォルダごとアンマウントされた等の異常事態で無限ループにしないための安全弁で、到達時は `ImageNavigationResult::LoadFailed` を返す（#65。旧実装は `None` だった。フロントは `loadFailed` を受けたら自動でもう一度呼び直す＝連続失敗上限つきの自動読み飛ばしを行う）。
 
-**`get_next_image`/`get_previous_image` はループの各反復でディレクトリ自体の生死も確認する（#62レビュー3巡目 T-M1 must）**: `MAX_MISSING_FILE_SKIPS` の上限は「個々のファイルが飛び飛びに消えている」通常のケースを想定したものであり、スキャン対象ディレクトリ自体（NAS/USB）が丸ごと外れている場合にそのまま適用すると、`advance` するたびにほぼ確実にファイルが見つからず、鑑賞中に数秒おきに呼ばれる `get_next_image` のたびに毎回上限（20件）ぶん未表示画像を無駄に消費してしまう（1回の呼び出しで最大20倍の消費速度になる）。ループの各反復の直前に `directory_root_is_accessible`（`AppState.directory_path` の `Path::is_dir()`）でルート自体の存在を確認し、無ければその回は一切 `advance` せず即座に `Ok(None)` を返す。`directory_path` が未設定（テスト等）の場合はチェック対象が無いとみなし許可する。
+**`get_next_image`/`get_previous_image` はループの各反復でディレクトリ自体の生死も確認する（#62レビュー3巡目 T-M1 must）**: `MAX_MISSING_FILE_SKIPS` の上限は「個々のファイルが飛び飛びに消えている」通常のケースを想定したものであり、スキャン対象ディレクトリ自体（NAS/USB）が丸ごと外れている場合にそのまま適用すると、`advance` するたびにほぼ確実にファイルが見つからず、鑑賞中に数秒おきに呼ばれる `get_next_image` のたびに毎回上限（20件）ぶん未表示画像を無駄に消費してしまう（1回の呼び出しで最大20倍の消費速度になる）。ループの各反復の直前に `directory_root_is_accessible`（`AppState.directory_path` の `Path::is_dir()`）でルート自体の存在を確認し、無ければその回は一切 `advance` せず即座に `ImageNavigationResult::RootUnavailable` を返す（#65。旧実装は `None`）。フロントはこれを受けたら鑑賞中の画像を消さずに維持し、控えめな再接続待ち通知を出す。`directory_path` が未設定（テスト等）の場合はチェック対象が無いとみなし許可する。
 
-**`get_next_image`/`get_previous_image` はファイル欠損とキャッシュ変換失敗を区別する（#62レビュー3巡目 S-b）**: `get_image_info_internal` の戻り値を `ImageLookup::{Found, Missing, ProcessingFailed}` の3値にした。`Missing`（ファイルが存在しない、軽い）はループで次のファイルへ読み飛ばしてよいが、`ProcessingFailed`（存在はするがキャッシュ変換が失敗/タイムアウト。`request_current_and_wait` が最大 `CACHE_WAIT_TIMEOUT`＝既定5秒待つ）は同じ扱いにしない。もし区別せず両方とも読み飛ばしていたら、同じ理由（壊れたファイル群等）で何枚も連続して同じ待ちが発生した場合に最悪 `MAX_MISSING_FILE_SKIPS × CACHE_WAIT_TIMEOUT`（20×5秒＝100秒）ブロックしてしまう。`ProcessingFailed` はループで繰り返さずその場で `Ok(None)` を返して打ち切る。
+**`get_next_image`/`get_previous_image` はファイル欠損とキャッシュ変換失敗を区別する（#62レビュー3巡目 S-b）**: `get_image_info_internal` の戻り値を `ImageLookup::{Found, Missing, ProcessingFailed}` の3値にした。`Missing`（ファイルが存在しない、軽い）はループで次のファイルへ読み飛ばしてよいが、`ProcessingFailed`（存在はするがキャッシュ変換が失敗/タイムアウト。`request_current_and_wait` が最大 `CACHE_WAIT_TIMEOUT`＝既定5秒待つ）は同じ扱いにしない。もし区別せず両方とも読み飛ばしていたら、同じ理由（壊れたファイル群等）で何枚も連続して同じ待ちが発生した場合に最悪 `MAX_MISSING_FILE_SKIPS × CACHE_WAIT_TIMEOUT`（20×5秒＝100秒）ブロックしてしまう。`ProcessingFailed` はループで繰り返さずその場で `ImageNavigationResult::LoadFailed` を返して打ち切る（#65。旧実装は `Ok(None)`）。
 
 **`AppState.directory_path` はplaylistロックを保持したまま更新する（#62レビュー2巡目 nit）**: `perform_scan` は最終的に `directory_path_mutex`（`AppState.directory_path` 相当）へ今回スキャンしたディレクトリを書き込むが、これを呼び出し元（`scan_directory` コマンド）が `perform_scan` の**戻り値受領後**に別途行っていた旧実装だと、「Stage完了〜directory_path更新」の間に小さな窓ができ、その間に他コマンド（`get_next_image`/`exclude_image`）が軽量保存すると、古いディレクトリパスを `playlist_list.directory_path` へ書いてしまうおそれがあった。`perform_scan` はplaylistロックを保持したまま `directory_path_mutex` も同じ区間内で更新することでこの窓を無くしている。
 
@@ -334,6 +336,40 @@ DBリセット・メモリ状態クリア・キャッシュクリアの中核ロ
 - `apply_rotation=false` なのに EXIF が回転を要求している画像だけは例外で、原本をそのまま返すと WebView 既定の `from-image` が勝手に回転してしまい設定（OFF）と食い違う。この場合はバックエンドが「格納画素のまま・EXIF無し」で書き出したキャッシュに差し替える（`optimize_image_for_4k(path, false)` は回転を適用せず、再エンコードでEXIFも失われるため、結果的に「回転なし」を保証できる）。この差し替えは (d) の同期待ち経路を使う。
 - 4K超/TIFF等で `apply_rotation=true` として結局キャッシュが焼かれる画像は、生成時に画素を回転しEXIFなしで書き出す。`from-image` を当てても（EXIFが無いので）二重回転はしない。
 - 動画・地図タイル（OverlayUI の OSM 画像）はこの変更と無関係（別要素・別ファイル）。
+
+### (f) スライドショー進行のフロント状態管理を再設計する（#65）
+
+`useSlideshow`/`App.tsx`/`Slideshow.tsx` はIssue #65で全面改修した。主な設計判断:
+
+- **`isPlaying` はフックの内部状態でなく `App.tsx` が導出する派生値にする**:
+  `isPlaying = isInitialized && !isPausedByUser && !isOverlayHovered && !isSettingsOpen`。
+  旧実装は `useSlideshow` が `isPlaying` を持ち `play()`/`pause()` で外から書き換えて
+  いたため、`initialize(true)` のような「初期化ついでに再生開始」の呼び出しが、
+  設定画面が開いていても構わず再生を始めてしまうバグ（設定画面で再スキャンすると
+  裏でスライドショーが進む）があった。派生値にすることで、初期化やスキャン完了の
+  処理が何を呼ぼうと、導出元のフラグ（ホバー/設定画面/ユーザー一時停止）が
+  変わらない限り再生は始まらないことを構造的に保証する。`Slideshow.tsx` は同じ
+  `isPlaying` を受け取り、`<video>` の `play()`/`pause()` をそこに連動させる。
+- **`get_next_image`/`get_previous_image` の結果を `ImageNavigationResult` で
+  区別する**（バックエンド側は§3参照）。フロントは `'No more images'` 等の文字列
+  比較をせず `kind` で分岐し、`found`/`emptyPlaylist`/`loadFailed`/
+  `rootUnavailable`/`noHistory` それぞれに応じた画面/通知を出す。
+- **同時実行ガード＋リクエストID**: `useSlideshow` 内の `inFlightRef`（同時実行を
+  防ぐ）と `requestIdRef`（万一ガードをすり抜けても古い応答を破棄する保険）の
+  二重の仕組みで、キーリピートやタイマーと手動操作の重なりによる二重カウント・
+  応答順逆転を防ぐ。キーボードの `keydown` も `e.repeat` を無視する。
+- **タイマーは実表示開始（`<img onLoad>`）を起点に `setTimeout` + 残り時間保持**:
+  IPC応答時点を起点にするとトランジション/デコード時間が表示時間から引かれ、
+  一時停止→再開で残り時間を捨てて0から再開してしまっていた。プログレスバーは
+  60fpsの `setInterval`ポーリングをやめ、CSS transition（`transform: scaleX(...)`）
+  に「アンカー%→100%へのtransition時間」の2値だけを渡してブラウザに補間させる
+  （`OverlayUI` 側の描画）。
+- **表示回数の取り消しAPI（`undo_display_count`）**: バックエンドはファイルの
+  存在とキャッシュ変換の成功までしか確認できず、WebViewでの実際のデコード/描画
+  失敗（壊れたファイル内容等）までは検知できない。`<img>`/`<video>` の `onError`
+  で「既に加算済みの表示回数を取り消してから次へ進む」方式にした（加算そのものを
+  表示成功後に遅延させる設計にしなかったのは、既存の `should_count`（履歴なぞり中は
+  加算しない等）のロジックと実装済みテストを一切変更せずに済むため）。
 
 ## 7. テスト
 

@@ -794,6 +794,20 @@ impl Database {
         Ok(())
     }
 
+    /// 画像の表示回数を1減らす（#65: `get_next_image`/`get_previous_image` は
+    /// ファイル存在・キャッシュ変換の成功だけを確認して加算するが、フロント側の
+    /// `<img>`/`<video>` の実際のデコード/描画がそれでも失敗する（壊れた
+    /// ファイル内容等）ケースがある。そのケースでは既に加算済みのカウントを
+    /// フロントの `onError` から取り消す「確定後の取り消しAPI」として使う。
+    /// 行が無い/既に0の場合は何もしない（0未満にはならない）。
+    pub fn decrement_display_count(&self, path: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE image_stats SET display_count = MAX(display_count - 1, 0) WHERE path = ?1",
+            [path],
+        )?;
+        Ok(())
+    }
+
     /// 画像統計を取得
     pub fn get_image_stats(&self, path: &str) -> Result<(i32, Option<String>)> {
         let mut stmt = self

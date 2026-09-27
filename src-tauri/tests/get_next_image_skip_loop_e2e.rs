@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use sss_lib::cache_worker::CacheWorker;
-use sss_lib::commands::image::{get_next_image, get_previous_image};
+use sss_lib::commands::image::{get_next_image, get_previous_image, ImageNavigationResult};
 use sss_lib::commands::AppState;
 use sss_lib::database::Database;
 use sss_lib::playlist::Playlist;
@@ -74,7 +74,10 @@ fn get_next_image_does_not_advance_when_directory_root_is_missing() {
     let result = tauri::async_runtime::block_on(get_next_image(state.clone()))
         .expect("get_next_imageはエラーにならないはず");
 
-    assert!(result.is_none(), "ルート不在なら画像は返らないはず");
+    assert!(
+        matches!(result, ImageNavigationResult::RootUnavailable),
+        "ルート不在ならRootUnavailableを返すはず"
+    );
     {
         let playlist_lock = state.playlist.lock().unwrap();
         let playlist = playlist_lock.as_ref().unwrap();
@@ -116,7 +119,7 @@ fn get_next_image_stays_at_same_position_across_repeated_calls_while_root_missin
 
     for _ in 0..5 {
         let result = tauri::async_runtime::block_on(get_next_image(state.clone())).unwrap();
-        assert!(result.is_none());
+        assert!(matches!(result, ImageNavigationResult::RootUnavailable));
     }
 
     let playlist_lock = state.playlist.lock().unwrap();
@@ -158,7 +161,10 @@ fn get_next_image_skips_consecutive_missing_files_and_returns_first_existing() {
     let result = tauri::async_runtime::block_on(get_next_image(state.clone()))
         .expect("get_next_imageはエラーにならないはず");
 
-    let info = result.expect("3件目は実在するので画像が返るはず");
+    let info = match result {
+        ImageNavigationResult::Found(info) => info,
+        other => panic!("3件目は実在するので画像が返るはず: {other:?}"),
+    };
     assert_eq!(info.path, existing);
 
     {
@@ -207,7 +213,10 @@ fn get_next_image_gives_up_after_max_missing_file_skips() {
     let state = app.state::<AppState>();
 
     let result = tauri::async_runtime::block_on(get_next_image(state.clone())).unwrap();
-    assert!(result.is_none(), "全件消失しているのでNoneのはず");
+    assert!(
+        matches!(result, ImageNavigationResult::LoadFailed),
+        "全件消失しているのでLoadFailedのはず"
+    );
 
     let playlist_lock = state.playlist.lock().unwrap();
     assert_eq!(
@@ -253,7 +262,10 @@ fn get_previous_image_skips_missing_file_in_history_and_returns_older_existing_o
 
     let result = tauri::async_runtime::block_on(get_previous_image(state.clone()))
         .expect("get_previous_imageはエラーにならないはず");
-    let info = result.expect("f2は消えているがf1が実在するので画像が返るはず");
+    let info = match result {
+        ImageNavigationResult::Found(info) => info,
+        other => panic!("f2は消えているがf1が実在するので画像が返るはず: {other:?}"),
+    };
     assert_eq!(info.path, f1);
 
     let playlist_lock = state.playlist.lock().unwrap();
@@ -302,8 +314,8 @@ fn get_next_image_stops_immediately_on_processing_failure_without_retrying() {
     let elapsed = started.elapsed();
 
     assert!(
-        result.is_none(),
-        "キャッシュ変換に失敗したのでNoneが返るはず(goodへは進まない)"
+        matches!(result, ImageNavigationResult::LoadFailed),
+        "キャッシュ変換に失敗したのでLoadFailedが返るはず(goodへは進まない)"
     );
     assert!(
         elapsed < std::time::Duration::from_secs(3),

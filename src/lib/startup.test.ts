@@ -220,7 +220,7 @@ describe('runStartupSequence', () => {
   });
 
   it('background scan failure after successful restore is caught and reported, does not throw', async () => {
-    const bgErrors: unknown[] = [];
+    const dirErrors: unknown[] = [];
     const order: string[] = [];
 
     const deps: StartupDeps = {
@@ -241,7 +241,7 @@ describe('runStartupSequence', () => {
       updatePlaylistInfo: async () => {
         order.push('updatePlaylistInfo');
       },
-      onBackgroundScanError: (err) => bgErrors.push(err),
+      onDirectoryError: (err) => dirErrors.push(err),
     };
 
     await expect(runStartupSequence(deps)).resolves.toBeUndefined();
@@ -251,6 +251,88 @@ describe('runStartupSequence', () => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
-    expect(bgErrors).toHaveLength(1);
+    expect(dirErrors).toHaveLength(1);
+  });
+
+  it('foreground scan failure (restore failed) also reports the reason via onDirectoryError (#65)', async () => {
+    // #65本文コメント: 「起動時自動スキャンで前回ディレクトリが拒否された際の
+    // 理由表示」。以前はcatch節でconsole.errorのみ・呼び出し元には何も伝わらなかった。
+    const dirErrors: unknown[] = [];
+    const order: string[] = [];
+    const failure = new Error('permission denied');
+
+    const deps: StartupDeps = {
+      getSetting: async () => null,
+      getLastDirectoryPath: async () => '/photos',
+      restorePlaylist: async () => false,
+      scanDirectory: async () => {
+        throw failure;
+      },
+      initialize: async () => {
+        order.push('initialize');
+      },
+      listenScanProgress: async () => () => {},
+      setInitStatus: () => {},
+      setRealtimeProgress: () => {},
+      setIsInitialized: (v) => order.push(`setIsInitialized:${v}`),
+      setDisplayInterval: () => {},
+      updatePlaylistInfo: async () => {
+        order.push('updatePlaylistInfo');
+      },
+      onDirectoryError: (err) => dirErrors.push(err),
+    };
+
+    await runStartupSequence(deps);
+
+    expect(order).toEqual(['setIsInitialized:true']);
+    expect(dirErrors).toEqual([failure]);
+  });
+
+  it('marks a directory as configured (setHasDirectory(true)) as soon as a last directory is found, regardless of outcome (#65)', async () => {
+    const calls: boolean[] = [];
+
+    const deps: StartupDeps = {
+      getSetting: async () => null,
+      getLastDirectoryPath: async () => '/photos',
+      restorePlaylist: async () => false,
+      scanDirectory: async () => {
+        throw new Error('boom');
+      },
+      initialize: async () => {},
+      listenScanProgress: async () => () => {},
+      setInitStatus: () => {},
+      setRealtimeProgress: () => {},
+      setIsInitialized: () => {},
+      setDisplayInterval: () => {},
+      updatePlaylistInfo: async () => {},
+      setHasDirectory: (v) => calls.push(v),
+    };
+
+    await runStartupSequence(deps);
+
+    expect(calls).toEqual([true]);
+  });
+
+  it('does not mark a directory as configured when there is no last directory (#65: 「本当に未設定」判定)', async () => {
+    const calls: boolean[] = [];
+
+    const deps: StartupDeps = {
+      getSetting: async () => null,
+      getLastDirectoryPath: async () => null,
+      restorePlaylist: async () => false,
+      scanDirectory: async () => ({ totalFiles: 0 }),
+      initialize: async () => {},
+      listenScanProgress: async () => () => {},
+      setInitStatus: () => {},
+      setRealtimeProgress: () => {},
+      setIsInitialized: () => {},
+      setDisplayInterval: () => {},
+      updatePlaylistInfo: async () => {},
+      setHasDirectory: (v) => calls.push(v),
+    };
+
+    await runStartupSequence(deps);
+
+    expect(calls).toEqual([]);
   });
 });

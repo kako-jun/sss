@@ -150,6 +150,7 @@ pub fn run() {
             commands::scan::restore_playlist,
             commands::image::get_next_image,
             commands::image::get_previous_image,
+            commands::image::undo_display_count,
             commands::file_operations::open_in_explorer,
             commands::stats::get_stats,
             commands::stats::get_playlist_info,

@@ -44,6 +44,39 @@ enum ImageLookup {
     ProcessingFailed,
 }
 
+/// `get_next_image`/`get_previous_image` の公開結果型（#65）。
+///
+/// 旧実装は成功(`Some(ImageInfo)`)以外を全て `Ok(None)` に潰しており、フロントは
+/// それを文字列 `'No more images'` のエラー扱いにして「ようこそ SSS へ」画面へ
+/// 落としていた。これだと「本当に未設定」「読込失敗」「フォルダ接続不可」
+/// 「空プレイリスト」という意味的に別の状態が区別できず、たとえば1枚読込に
+/// 失敗しただけで鑑賞中の全画面が「フォルダを選択」画面に切り替わってしまう
+/// 不具合の原因になっていた。この enum で意味ごとに区別し、フロント
+/// （`useSlideshow`/`App.tsx`）が `'No more images'` 等の文字列比較をせず
+/// `kind` フィールドで分岐できるようにする（tagged enum、`#[serde(tag = "kind",
+/// content = "data")]`。JSON は `{"kind":"found","data":{...ImageInfo}}` /
+/// `{"kind":"emptyPlaylist"}` のような形になる）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum ImageNavigationResult {
+    /// 画像が見つかった。
+    Found(ImageInfo),
+    /// プレイリストが空（除外ルールで全件除外・スキャン対象に画像が1枚も無い等）。
+    /// ディレクトリ自体は設定済みなので「ようこそ／フォルダを選択」とは違う専用の
+    /// 案内をフロントで出す。
+    EmptyPlaylist,
+    /// 実ファイルは存在するがキャッシュ変換の失敗/タイムアウト、または
+    /// `MAX_MISSING_FILE_SKIPS` に到達するまで実在するファイルが見つからなかった。
+    /// フロントは自動で次へ進んでよい（連続失敗回数に上限を設けること）。
+    LoadFailed,
+    /// スキャン対象ディレクトリ自体に今アクセスできない（NAS/USB切断等）。
+    /// フロントは直前の画像を維持し、控えめな再接続待ち通知を出す。
+    RootUnavailable,
+    /// `get_previous_image` で履歴の先頭に達し、これ以上戻れない。エラーではなく
+    /// 単純な境界なので、フロントは何もしない（従来の `Ok(None)` と同じ扱い）。
+    NoHistory,
+}
+
 /// スキャン対象ディレクトリ自体が今アクセス可能かどうかを確認する
 /// （#62レビュー3巡目 T-M1 must）。`AppState.directory_path` が未設定（テスト等）の
 /// 場合はチェック対象が無いので `true`（許可）を返す。
@@ -106,8 +139,13 @@ fn persist_playlist_after_advance(state: &State<AppState>, playlist: &Playlist, 
 /// #62レビュー3巡目 S-b: `ImageLookup::ProcessingFailed`（キャッシュ変換の失敗/
 /// タイムアウト）は `Missing` と違ってループで読み飛ばさず、その場で打ち切る
 /// （詳細は `ImageLookup` のdoc参照）。
+///
+/// #65: 戻り値は `ImageNavigationResult`。ディレクトリ自体が無い場合は
+/// `RootUnavailable`、プレイリストが空なら `EmptyPlaylist`、変換失敗/上限到達は
+/// `LoadFailed` を返す（いずれも `Err` ではなく `Ok` — 呼び出し側の通常の分岐で
+/// 扱える意味のある結果であり、プログラミングエラーではないため）。
 #[tauri::command]
-pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
+pub async fn get_next_image(state: State<'_, AppState>) -> Result<ImageNavigationResult, String> {
     // apply_exif_rotation 設定を取得（デフォルト true）。欠損ファイルのスキップで
     // 何度もadvanceし直しても、この設定自体はループの外で一度読めば十分。
     let apply_rotation = {
@@ -122,7 +160,7 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
     for _ in 0..MAX_MISSING_FILE_SKIPS {
         // T-M1(must): ディレクトリ自体が無いなら、ここでadvanceせず打ち切る。
         if !directory_root_is_accessible(&state) {
-            return Ok(None);
+            return Ok(ImageNavigationResult::RootUnavailable);
         }
 
         let (path_str, should_count, prefetch_paths) = {
@@ -131,15 +169,17 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
                 .as_mut()
                 .ok_or_else(|| "Playlist not initialized".to_string())?;
 
-            // プレイリストが空の場合はエラー
+            // プレイリストが空: ディレクトリ自体は設定済みなので専用の結果を返す
+            // （#65: 「未設定」と「0件」を区別するため、Errではなく通常の結果にする）。
             if playlist.is_empty() {
-                return Err("Playlist is empty".to_string());
+                return Ok(ImageNavigationResult::EmptyPlaylist);
             }
 
             let (image_path, should_count, reshuffled) = playlist.advance();
             let path_str = match image_path {
                 Some(p) => p.clone(),
-                None => return Ok(None),
+                // is_empty() チェック直後のため通常到達しない防御的分岐。
+                None => return Ok(ImageNavigationResult::EmptyPlaylist),
             };
 
             // 5枚先までのパスを取得（先読み用。peek_next_n(0)が次に表示される画像）
@@ -172,20 +212,20 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
                 // 5枚先まで先読みキュー投入（単一ワーカーが直列処理・重複排除・世代管理する）
                 enqueue_prefetch(&state, prefetch_paths, apply_rotation);
 
-                return Ok(Some(info));
+                return Ok(ImageNavigationResult::Found(info));
             }
             ImageLookup::Missing => {
                 // ファイルが存在しない: カウントせず、次のループでさらに advance し直す。
             }
             ImageLookup::ProcessingFailed => {
                 // S-b: キャッシュ変換の失敗/タイムアウトはループで繰り返さず打ち切る。
-                return Ok(None);
+                return Ok(ImageNavigationResult::LoadFailed);
             }
         }
     }
 
-    // 上限に到達（ほとんどのファイルが一斉に消えている等の異常事態）。従来どおり None。
-    Ok(None)
+    // 上限に到達（ほとんどのファイルが一斉に消えている等の異常事態）。
+    Ok(ImageNavigationResult::LoadFailed)
 }
 
 /// 前の画像を取得（カウント増やさない）。
@@ -194,8 +234,13 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<Option<ImageIn
 /// 当たったら `MAX_MISSING_FILE_SKIPS` 回を上限にさらに前へ戻り直す。
 /// #62レビュー3巡目 T-M1/S-b: ディレクトリ自体の消失チェックと
 /// `ImageLookup::ProcessingFailed` の即時打ち切りも `get_next_image` と同様に行う。
+///
+/// #65: 戻り値は `ImageNavigationResult`。履歴の先頭に達して戻れない場合は
+/// `NoHistory`（境界であってエラーではない。従来の `Ok(None)` と同じ意味）。
 #[tauri::command]
-pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<ImageInfo>, String> {
+pub async fn get_previous_image(
+    state: State<'_, AppState>,
+) -> Result<ImageNavigationResult, String> {
     // apply_exif_rotation 設定を取得（デフォルト true）
     let apply_rotation = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
@@ -209,7 +254,7 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
     for _ in 0..MAX_MISSING_FILE_SKIPS {
         // T-M1(must): ディレクトリ自体が無いなら、ここでgo_backせず打ち切る。
         if !directory_root_is_accessible(&state) {
-            return Ok(None);
+            return Ok(ImageNavigationResult::RootUnavailable);
         }
 
         let path_str = {
@@ -218,18 +263,18 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
                 .as_mut()
                 .ok_or_else(|| "Playlist not initialized".to_string())?;
 
-            // プレイリストが空の場合はエラー
+            // プレイリストが空: ディレクトリ自体は設定済みなので専用の結果を返す。
             if playlist.is_empty() {
-                return Err("Playlist is empty".to_string());
+                return Ok(ImageNavigationResult::EmptyPlaylist);
             }
 
             if !playlist.can_go_back() {
-                return Ok(None);
+                return Ok(ImageNavigationResult::NoHistory);
             }
 
             let path = match playlist.go_back() {
                 Some(p) => p.clone(),
-                None => return Ok(None),
+                None => return Ok(ImageNavigationResult::NoHistory),
             };
 
             // 永続化(#62): go_back は next_index を変えないため常に軽量保存でよい。
@@ -241,19 +286,19 @@ pub async fn get_previous_image(state: State<'_, AppState>) -> Result<Option<Ima
 
         // 画像情報を取得（カウントは増やさない）
         match get_image_info_internal(&path_str, &state, apply_rotation).await? {
-            ImageLookup::Found(info) => return Ok(Some(info)),
+            ImageLookup::Found(info) => return Ok(ImageNavigationResult::Found(info)),
             ImageLookup::Missing => {
                 // ファイルが存在しない: 次のループでさらに go_back し直す
-                // （履歴の先頭に達したら can_go_back() が false になり Ok(None) で終わる）。
+                // （履歴の先頭に達したら can_go_back() が false になり NoHistory で終わる）。
             }
             ImageLookup::ProcessingFailed => {
                 // S-b: キャッシュ変換の失敗/タイムアウトはループで繰り返さず打ち切る。
-                return Ok(None);
+                return Ok(ImageNavigationResult::LoadFailed);
             }
         }
     }
 
-    Ok(None)
+    Ok(ImageNavigationResult::LoadFailed)
 }
 
 /// 画像情報を取得（内部ヘルパー関数）
@@ -397,6 +442,21 @@ async fn get_image_info_internal(
         display_count,
         last_displayed,
     }))
+}
+
+/// フロントの `<img>`/`<video>` が `onError` になった場合に、既に
+/// `get_next_image`/`get_previous_image` が加算した表示回数を取り消す（#65）。
+///
+/// バックエンドはファイルの存在とキャッシュ変換の成功までしか確認できず、
+/// 実際にWebViewがデコード/描画できるかまでは分からない。取り消し方式にしたのは、
+/// 「表示成功後に確定加算する」方式（加算そのものを`confirm_display`のような
+/// 別コマンドへ後ろ倒しする設計）に比べて、既存の`should_count`（履歴なぞり中は
+/// 加算しない等）のロジックとその実装済みテストを一切変更せずに済むため
+/// （変更範囲を#65のフロント問題に閉じる目的、詳細は#65報告参照）。
+#[tauri::command]
+pub async fn undo_display_count(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    db.decrement_display_count(&path).map_err(|e| e.to_string())
 }
 
 /// 先読み対象パスをキャッシュ要否判定した上でワーカーへまとめて投入する。

@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use sss_lib::cache_worker::CacheWorker;
-use sss_lib::commands::image::get_next_image;
+use sss_lib::commands::image::{get_next_image, ImageNavigationResult};
 use sss_lib::commands::AppState;
 use sss_lib::database::Database;
 use sss_lib::playlist::Playlist;
@@ -76,8 +76,8 @@ fn get_next_image_does_not_increment_display_count_for_missing_file() {
 
     let info = result.expect("get_next_image はエラーにならないはず");
     assert!(
-        info.is_none(),
-        "存在しないファイルなので ImageInfo は None を返すはず"
+        matches!(info, ImageNavigationResult::LoadFailed),
+        "存在しないファイルしか無いので LoadFailed を返すはず（#65: 旧 None 相当）"
     );
 
     let state = app.state::<AppState>();

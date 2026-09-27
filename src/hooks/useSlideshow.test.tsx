@@ -5,8 +5,8 @@ import { renderHook, act } from '@testing-library/react';
 // Mock the tauri bridge so the hook is exercised without a backend. The
 // equal-random "next" selection logic lives entirely in Rust (playlist.rs) and
 // is covered by cargo tests; from the hook's point of view getNextImage simply
-// returns whatever image the backend hands back, so we pin the hook's *state
-// machine* (loading flags, play/pause, error handling, auto-advance timer)
+// returns whatever ImageNavigationResult the backend hands back, so we pin the
+// hook's *state machine* (loading flags, notices, concurrency guard, timer)
 // rather than the randomness.
 const getNextImage = vi.fn();
 const getPreviousImage = vi.fn();
@@ -17,7 +17,7 @@ vi.mock('../lib/tauri', () => ({
 }));
 
 import { useSlideshow } from './useSlideshow';
-import type { ImageInfo } from '../types';
+import type { ImageInfo, ImageNavigationResult } from '../types';
 
 function makeImage(path: string, isVideo = false): ImageInfo {
   return {
@@ -33,67 +33,115 @@ function makeImage(path: string, isVideo = false): ImageInfo {
   };
 }
 
+function found(path: string, isVideo = false): ImageNavigationResult {
+  return { kind: 'found', data: makeImage(path, isVideo) };
+}
+
 beforeEach(() => {
   getNextImage.mockReset();
   getPreviousImage.mockReset();
 });
 
 describe('useSlideshow initial state', () => {
-  it('starts paused, not loading, no image, no error, progress 0', () => {
+  it('starts with no image, no notice, not loading, progress 0/0', () => {
     const { result } = renderHook(() => useSlideshow());
     expect(result.current.currentImage).toBeNull();
-    expect(result.current.isPlaying).toBe(false);
     expect(result.current.isLoading).toBe(false);
-    expect(result.current.error).toBeNull();
-    expect(result.current.progress).toBe(0);
+    expect(result.current.notice).toBeNull();
+    expect(result.current.progressPercent).toBe(0);
+    expect(result.current.progressDurationMs).toBe(0);
   });
 });
 
-describe('loadNextImage', () => {
-  it('sets currentImage from the backend result', async () => {
-    getNextImage.mockResolvedValue(makeImage('/a.jpg'));
+describe('loadNextImage: ImageNavigationResult branching (#65)', () => {
+  it('sets currentImage on a "found" result and clears any notice', async () => {
+    getNextImage.mockResolvedValue(found('/a.jpg'));
     const { result } = renderHook(() => useSlideshow());
     await act(async () => {
       await result.current.loadNextImage();
     });
     expect(result.current.currentImage?.path).toBe('/a.jpg');
-    expect(result.current.error).toBeNull();
+    expect(result.current.notice).toBeNull();
     expect(result.current.isLoading).toBe(false);
   });
 
-  it('sets "No more images" error when backend returns null', async () => {
-    getNextImage.mockResolvedValue(null);
+  it('sets an emptyPlaylist notice and clears currentImage on "emptyPlaylist"', async () => {
+    getNextImage.mockResolvedValue({ kind: 'emptyPlaylist' } satisfies ImageNavigationResult);
     const { result } = renderHook(() => useSlideshow());
     await act(async () => {
       await result.current.loadNextImage();
     });
     expect(result.current.currentImage).toBeNull();
-    expect(result.current.error).toBe('No more images');
+    expect(result.current.notice).toEqual({ kind: 'emptyPlaylist' });
   });
 
-  it('captures the error message when backend rejects with an Error', async () => {
+  it('keeps the previous image and sets a rootUnavailable notice on "rootUnavailable"', async () => {
+    getNextImage.mockResolvedValueOnce(found('/first.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+
+    getNextImage.mockResolvedValueOnce({
+      kind: 'rootUnavailable',
+    } satisfies ImageNavigationResult);
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+
+    // #65問題: フォルダ接続不可時は直前の画像を維持する（消さない）。
+    expect(result.current.currentImage?.path).toBe('/first.jpg');
+    expect(result.current.notice).toEqual({ kind: 'rootUnavailable' });
+  });
+
+  it('auto-retries on "loadFailed" until it finds an image (auto-advance, #62/#63コメント由来)', async () => {
+    getNextImage
+      .mockResolvedValueOnce({ kind: 'loadFailed' } satisfies ImageNavigationResult)
+      .mockResolvedValueOnce({ kind: 'loadFailed' } satisfies ImageNavigationResult)
+      .mockResolvedValueOnce(found('/third.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(getNextImage).toHaveBeenCalledTimes(3);
+    expect(result.current.currentImage?.path).toBe('/third.jpg');
+    expect(result.current.notice).toBeNull();
+  });
+
+  it('gives up with a loadFailedGaveUp notice after the consecutive-failure cap', async () => {
+    getNextImage.mockResolvedValue({ kind: 'loadFailed' } satisfies ImageNavigationResult);
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.notice).toEqual({ kind: 'loadFailedGaveUp' });
+    // 無制限には再試行しない（呼び出し回数に上限があること）
+    expect(getNextImage.mock.calls.length).toBeGreaterThan(1);
+    expect(getNextImage.mock.calls.length).toBeLessThan(50);
+  });
+
+  it('captures the error message via String(err) on rejection (not instanceof-Error branching, 問題9)', async () => {
+    getNextImage.mockRejectedValue('plain string reason');
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.notice).toEqual({ kind: 'error', message: 'plain string reason' });
+  });
+
+  it('captures Error rejections via String(err) too', async () => {
     getNextImage.mockRejectedValue(new Error('disk gone'));
     const { result } = renderHook(() => useSlideshow());
     await act(async () => {
       await result.current.loadNextImage();
     });
-    expect(result.current.error).toBe('disk gone');
-    expect(result.current.isLoading).toBe(false);
-  });
-
-  it('falls back to "Failed to load image" when rejection is not an Error', async () => {
-    getNextImage.mockRejectedValue('plain string');
-    const { result } = renderHook(() => useSlideshow());
-    await act(async () => {
-      await result.current.loadNextImage();
-    });
-    expect(result.current.error).toBe('Failed to load image');
+    expect(result.current.notice).toEqual({ kind: 'error', message: 'Error: disk gone' });
   });
 });
 
 describe('loadPreviousImage', () => {
-  it('sets currentImage when backend returns an image', async () => {
-    getPreviousImage.mockResolvedValue(makeImage('/prev.jpg'));
+  it('sets currentImage when backend returns "found"', async () => {
+    getPreviousImage.mockResolvedValue(found('/prev.jpg'));
     const { result } = renderHook(() => useSlideshow());
     await act(async () => {
       await result.current.loadPreviousImage();
@@ -101,126 +149,177 @@ describe('loadPreviousImage', () => {
     expect(result.current.currentImage?.path).toBe('/prev.jpg');
   });
 
-  it('does NOT set an error when backend returns null (history boundary)', async () => {
-    getPreviousImage.mockResolvedValue(null);
+  it('does nothing (no notice, no currentImage change) on "noHistory" (history boundary)', async () => {
+    getPreviousImage.mockResolvedValue({ kind: 'noHistory' } satisfies ImageNavigationResult);
     const { result } = renderHook(() => useSlideshow());
     await act(async () => {
       await result.current.loadPreviousImage();
     });
-    // characterization: unlike loadNextImage, the previous path is silent on null
-    expect(result.current.error).toBeNull();
+    expect(result.current.notice).toBeNull();
     expect(result.current.currentImage).toBeNull();
-  });
-
-  it('captures the error message when backend rejects', async () => {
-    getPreviousImage.mockRejectedValue(new Error('prev boom'));
-    const { result } = renderHook(() => useSlideshow());
-    await act(async () => {
-      await result.current.loadPreviousImage();
-    });
-    expect(result.current.error).toBe('prev boom');
   });
 });
 
-describe('play / pause', () => {
-  it('play sets isPlaying true, pause sets it false', () => {
+describe('concurrency guard + request id (#65 問題3)', () => {
+  it('ignores an overlapping loadNextImage call while one is already in flight', async () => {
+    let resolveFirst!: (v: ImageNavigationResult) => void;
+    getNextImage.mockImplementationOnce(
+      () =>
+        new Promise<ImageNavigationResult>((res) => {
+          resolveFirst = res;
+        }),
+    );
     const { result } = renderHook(() => useSlideshow());
-    act(() => result.current.play());
-    expect(result.current.isPlaying).toBe(true);
-    act(() => result.current.pause());
-    expect(result.current.isPlaying).toBe(false);
+
+    let firstDone = false;
+    const firstCall = act(async () => {
+      await result.current.loadNextImage().then(() => {
+        firstDone = true;
+      });
+    });
+
+    // 1件目がまだ解決していない間に2件目を呼んでも、バックエンドは1回しか叩かれない。
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(getNextImage).toHaveBeenCalledTimes(1);
+    expect(firstDone).toBe(false);
+
+    resolveFirst(found('/only.jpg'));
+    await firstCall;
+    expect(result.current.currentImage?.path).toBe('/only.jpg');
+  });
+
+  it('the concurrency guard also blocks loadPreviousImage while loadNextImage is in flight', async () => {
+    let resolveFirst!: (v: ImageNavigationResult) => void;
+    getNextImage.mockImplementationOnce(
+      () =>
+        new Promise<ImageNavigationResult>((res) => {
+          resolveFirst = res;
+        }),
+    );
+    const { result } = renderHook(() => useSlideshow());
+
+    const firstCall = act(async () => {
+      await result.current.loadNextImage();
+    });
+
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    // in-flightの next が終わるまで previous は叩かれない（問題3: 手動操作の重なりで
+    // 見ていない画像がカウントされる/応答順逆転を防ぐガード）。
+    expect(getPreviousImage).not.toHaveBeenCalled();
+
+    resolveFirst(found('/next.jpg'));
+    await firstCall;
+    expect(result.current.currentImage?.path).toBe('/next.jpg');
   });
 });
 
 describe('initialize', () => {
-  it('loads the first image and auto-plays by default', async () => {
-    getNextImage.mockResolvedValue(makeImage('/first.jpg'));
+  it('loads the first image (autoplay is decided by the caller-supplied isPlaying, not here)', async () => {
+    getNextImage.mockResolvedValue(found('/first.jpg'));
     const { result } = renderHook(() => useSlideshow());
     await act(async () => {
       await result.current.initialize();
     });
     expect(result.current.currentImage?.path).toBe('/first.jpg');
-    expect(result.current.isPlaying).toBe(true);
-  });
-
-  it('loads the first image but stays paused when autoPlay is false', async () => {
-    getNextImage.mockResolvedValue(makeImage('/first.jpg'));
-    const { result } = renderHook(() => useSlideshow());
-    await act(async () => {
-      await result.current.initialize(false);
-    });
-    expect(result.current.currentImage?.path).toBe('/first.jpg');
-    expect(result.current.isPlaying).toBe(false);
   });
 });
 
-describe('handleVideoEnded', () => {
-  it('advances to the next image only while playing', async () => {
-    getNextImage.mockResolvedValue(makeImage('/next.jpg'));
-    const { result } = renderHook(() => useSlideshow());
-
-    // not playing -> no advance
-    await act(async () => {
-      result.current.handleVideoEnded();
-    });
-    expect(getNextImage).not.toHaveBeenCalled();
-
-    act(() => result.current.play());
-    await act(async () => {
-      result.current.handleVideoEnded();
-    });
-    expect(getNextImage).toHaveBeenCalledTimes(1);
-  });
-});
-
-// Timer teardown (unmount + clearAllTimers + useRealTimers) is handled globally
-// in src/test/setup.ts so a queued progress-interval callback can never fire
-// after the jsdom env is torn down.
-describe('auto-advance timer', () => {
+describe('handleMediaReady + auto-advance timer (#65 問題6)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
 
-  it('advances after the interval and updates progress while playing an image', async () => {
-    getNextImage.mockResolvedValue(makeImage('/img.jpg', false));
-    const { result } = renderHook(() => useSlideshow(1000));
+  // #65: 表示間隔はclampDisplayIntervalで最低5秒に丸められる（問題7）ため、
+  // ここでは丸められない最小値である5000msを使う。
+  it('does not start the timer until handleMediaReady (img onLoad) fires, even while playing', async () => {
+    getNextImage.mockResolvedValue(found('/img.jpg'));
+    const { result } = renderHook(() => useSlideshow(5000, true));
 
     await act(async () => {
       await result.current.loadNextImage();
     });
     getNextImage.mockClear();
 
-    act(() => result.current.play());
-
-    // progress interval (~16ms) ticks toward 100
+    // 画像はまだ「表示開始」していない(onLoad未発火)ので、intervalが過ぎても進まない。
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(6000);
     });
-    expect(result.current.progress).toBeGreaterThan(0);
-    expect(result.current.progress).toBeLessThanOrEqual(100);
+    expect(getNextImage).not.toHaveBeenCalled();
 
-    // hitting the full interval triggers loadNextImage
+    act(() => result.current.handleMediaReady());
+
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(getNextImage).toHaveBeenCalled();
   });
 
-  it('does NOT start the auto-advance timer for a video (driven by onEnded instead)', async () => {
-    getNextImage.mockResolvedValue(makeImage('/clip.mp4', true));
-    const { result } = renderHook(() => useSlideshow(1000));
+  it('sets progressDurationMs to the remaining time and target 100 once running', async () => {
+    getNextImage.mockResolvedValue(found('/img.jpg'));
+    const { result } = renderHook(() => useSlideshow(5000, true));
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    act(() => result.current.handleMediaReady());
+
+    expect(result.current.progressDurationMs).toBe(5000);
+    expect(result.current.progressPercent).toBe(100);
+  });
+
+  it('freezes progress (duration 0) and remembers the remaining time when isPlaying goes false', async () => {
+    getNextImage.mockResolvedValue(found('/img.jpg'));
+    const { result, rerender } = renderHook(({ playing }) => useSlideshow(5000, playing), {
+      initialProps: { playing: true },
+    });
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    act(() => result.current.handleMediaReady());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    rerender({ playing: false });
+
+    expect(result.current.progressDurationMs).toBe(0);
+    expect(result.current.progressPercent).toBeGreaterThan(0);
+    expect(result.current.progressPercent).toBeLessThan(100);
+
+    getNextImage.mockClear();
+    // 一時停止中はいくら時間が経っても進まない。
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(getNextImage).not.toHaveBeenCalled();
+
+    // 再開すると、残り時間(約3000ms)経過後に進む。
+    rerender({ playing: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500);
+    });
+    expect(getNextImage).toHaveBeenCalled();
+  });
+
+  it('does not start the auto-advance timer for a video (driven by onEnded/Slideshow instead)', async () => {
+    getNextImage.mockResolvedValue(found('/clip.mp4', true));
+    const { result } = renderHook(() => useSlideshow(5000, true));
 
     await act(async () => {
       await result.current.loadNextImage();
     });
     getNextImage.mockClear();
 
-    act(() => result.current.play());
+    // handleMediaReadyは<img>専用。動画では呼ばれない想定だが、呼ばれても無視される。
+    act(() => result.current.handleMediaReady());
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
-    // video path: no timer-driven advance, progress stays reset at 0
     expect(getNextImage).not.toHaveBeenCalled();
-    expect(result.current.progress).toBe(0);
+    expect(result.current.progressPercent).toBe(0);
   });
 });

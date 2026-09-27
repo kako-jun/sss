@@ -19,7 +19,12 @@ export interface StartupDeps {
   getLastDirectoryPath: () => Promise<string | null>;
   restorePlaylist: (directoryPath: string) => Promise<boolean>;
   scanDirectory: (directoryPath: string) => Promise<{ totalFiles: number }>;
-  initialize: (autoPlay?: boolean) => Promise<void>;
+  /**
+   * #65: `isPlaying` はApp側の派生値になったため、ここでは単に最初の画像を
+   * 読み込むだけでよい（`autoPlay` 引数は廃止。再生開始の可否は呼び出し元の
+   * フラグが担う。問題4の根本修正）。
+   */
+  initialize: () => Promise<void>;
   listenScanProgress: (
     cb: (payload: { current: number; total: number }) => void,
   ) => Promise<UnlistenFn>;
@@ -28,8 +33,18 @@ export interface StartupDeps {
   setIsInitialized: (value: boolean) => void;
   setDisplayInterval: (value: number) => void;
   updatePlaylistInfo: () => Promise<void>;
-  /** バックグラウンドスキャン失敗時のフック（テスト用）。省略時は何もしない。 */
-  onBackgroundScanError?: (err: unknown) => void;
+  /**
+   * 前回ディレクトリが確認できた時点で呼ぶ（#65: 「本当に未設定」（ようこそ画面）と
+   * 「設定済みだが今アクセスできない/スキャン失敗」を区別するため）。
+   */
+  setHasDirectory?: (value: boolean) => void;
+  /**
+   * 前回ディレクトリへのスキャンが失敗した（起動時の前景スキャン待ち・復元後の
+   * バックグラウンドスキャンのどちらも含む）ときに理由を伝える（#65本文コメント:
+   * 「起動時自動スキャンで前回ディレクトリが拒否された際の理由表示」）。
+   * 省略時は何もしない（従来どおりconsole.errorのみ）。
+   */
+  onDirectoryError?: (err: unknown) => void;
 }
 
 /** `scanDirectory` を進捗イベント購読つきで実行するヘルパー（前景/背景どちらでも使う）。 */
@@ -61,7 +76,8 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     setIsInitialized,
     setDisplayInterval,
     updatePlaylistInfo,
-    onBackgroundScanError,
+    setHasDirectory,
+    onDirectoryError,
   } = deps;
 
   try {
@@ -81,6 +97,10 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
       return;
     }
 
+    // #65: ディレクトリ自体は設定済みと確定した。以降どんな結果になっても
+    // 「ようこそ（未設定）」画面には戻らない。
+    setHasDirectory?.(true);
+
     setInitStatus('前回の状態を復元しています...');
     let restored = false;
     try {
@@ -92,7 +112,7 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     if (restored) {
       // 復元できたので、スキャン完了を待たずに表示を始める。
       setInitStatus('画像を読み込んでいます...');
-      await initialize(true);
+      await initialize();
       setIsInitialized(true);
       await updatePlaylistInfo();
 
@@ -109,7 +129,7 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
         .then(() => updatePlaylistInfo())
         .catch((err) => {
           console.error('Background scan failed:', err);
-          onBackgroundScanError?.(err);
+          onDirectoryError?.(err);
         });
       return;
     }
@@ -121,12 +141,15 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
       setInitStatus(`スキャン完了: ${progress.totalFiles.toLocaleString()}ファイル検出`);
 
       setInitStatus('画像を読み込んでいます...');
-      await initialize(true);
+      await initialize();
       setIsInitialized(true);
       await updatePlaylistInfo();
     } catch (scanErr) {
       console.error('Failed to scan last directory:', scanErr);
-      // エラーが発生しても初期化を完了させ、設定画面を開けるようにする
+      // #65: 以前はここで理由を握りつぶしていた（「起動時自動スキャンで前回
+      // ディレクトリが拒否された際の理由表示」が本文コメントで要求されていた）。
+      // 初期化自体は完了させ、設定画面を開けるようにしつつ理由を呼び出し元へ渡す。
+      onDirectoryError?.(scanErr);
       setInitStatus('');
       setIsInitialized(true);
     }

@@ -52,3 +52,19 @@ export interface IgnoreRule {
   pattern: string;
   ruleType: 'glob' | 'date';
 }
+
+/**
+ * `get_next_image` / `get_previous_image` の結果（#65）。
+ *
+ * バックエンドの `ImageNavigationResult`（`#[serde(tag = "kind", content = "data",
+ * rename_all = "camelCase")]`）とJSON形状を一致させたタグ付きユニオン。
+ * 旧実装は成功以外を全て `null` に潰し、フロントは文字列 `'No more images'` で
+ * 分岐していたが、これにより「本当に未設定」「読込失敗」「フォルダ接続不可」
+ * 「空プレイリスト」「履歴の先頭（前へで境界）」を型で区別できる。
+ */
+export type ImageNavigationResult =
+  | { kind: 'found'; data: ImageInfo }
+  | { kind: 'emptyPlaylist' }
+  | { kind: 'loadFailed' }
+  | { kind: 'rootUnavailable' }
+  | { kind: 'noHistory' };

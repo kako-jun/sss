@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { IgnoreRule, ImageInfo, RecentImage, ScanProgress, Stats } from '../types';
+import type { IgnoreRule, ImageNavigationResult, RecentImage, ScanProgress, Stats } from '../types';
 
 /**
  * デフォルトのピック先ディレクトリパスを取得
@@ -45,17 +45,33 @@ export async function restorePlaylist(directoryPath: string): Promise<boolean> {
 }
 
 /**
- * 次の画像を取得
+ * 次の画像を取得。
+ *
+ * 戻り値は `ImageNavigationResult`（#65）。旧実装のように成功以外を `null` に
+ * 潰さず、`kind` で意味ごとに分岐できる（バックエンド側の解説は
+ * `src-tauri/src/commands/image.rs` の `ImageNavigationResult` docコメント参照）。
  */
-export async function getNextImage(): Promise<ImageInfo | null> {
-  return await invoke<ImageInfo | null>('get_next_image');
+export async function getNextImage(): Promise<ImageNavigationResult> {
+  return await invoke<ImageNavigationResult>('get_next_image');
 }
 
 /**
  * 前の画像を取得
  */
-export async function getPreviousImage(): Promise<ImageInfo | null> {
-  return await invoke<ImageInfo | null>('get_previous_image');
+export async function getPreviousImage(): Promise<ImageNavigationResult> {
+  return await invoke<ImageNavigationResult>('get_previous_image');
+}
+
+/**
+ * `<img>`/`<video>` の `onError`（WebViewのデコード/描画失敗）で、既に
+ * バックエンドが加算した表示回数を取り消す（#65）。バックエンドはファイルの
+ * 存在とキャッシュ変換の成功までしか確認できず、実際にWebViewが描画できるかは
+ * 確認できないため「加算 → 描画失敗が分かったら取り消す」方式にしている
+ * （加算そのものを表示成功後に遅延させる設計にしなかった理由は
+ * `undo_display_count` のdocコメント参照）。
+ */
+export async function undoDisplayCount(imagePath: string): Promise<void> {
+  await invoke('undo_display_count', { path: imagePath });
 }
 
 /**

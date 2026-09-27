@@ -13,12 +13,15 @@ import {
   restorePlaylist,
   scanDirectory,
   getSetting,
+  undoDisplayCount,
 } from './lib/tauri';
 import { runStartupSequence } from './lib/startup';
 import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
 import { X, Settings as SettingsIcon, Minimize2, Maximize2 } from 'lucide-react';
 import logoBg from './assets/logo-bg.webp';
+import { uiText, noticeMessages } from './lib/messages';
+import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL } from './constants';
 
 function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -28,7 +31,7 @@ function App() {
   const [totalImages, setTotalImages] = useState(0);
   const [canGoBack, setCanGoBack] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
-  const [displayInterval, setDisplayInterval] = useState<number>(10000); // デフォルト10秒
+  const [displayInterval, setDisplayInterval] = useState<number>(DEFAULT_DISPLAY_INTERVAL);
   const [initStatus, setInitStatus] = useState<string>(''); // 初期化状態メッセージ
   const [realtimeProgress, setRealtimeProgress] = useState<{
     current: number;
@@ -37,22 +40,31 @@ function App() {
   const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
   const [isPausedByUser, setIsPausedByUser] = useState(false); // ユーザーが明示的に一時停止したか
   const [isFullscreen, setIsFullscreen] = useState(true); // フルスクリーン状態（起動時の設定値に合わせた初期値）
+  // #65: ディレクトリが一度でも設定されたことがあるか。「本当に未設定」（ようこそ画面）と
+  // 「設定済みだが今アクセスできない/スキャン失敗/空」を区別するために使う。
+  const [hasDirectory, setHasDirectory] = useState(false);
+  // #65: 起動時自動スキャンで前回ディレクトリが拒否された場合の理由（本文コメント由来）。
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
   const { isIdle, setIsHovering } = useMouseIdle(3000);
 
+  // #65 問題4: isPlaying はこのフックの内部状態ではなく、ここで導出した派生値にする。
+  // 設定画面を開いている/オーバーレイにホバー中/ユーザーが明示的に一時停止した、の
+  // いずれかであれば止まる。initialize()やスキャン完了処理が何を呼ぼうと、この式が
+  // 変わらない限り再生は始まらない（「設定画面で再スキャンすると裏で進む」の根絶）。
+  const isPlaying = isInitialized && !isPausedByUser && !isOverlayHovered && !isSettingsOpen;
+
   const {
     currentImage,
-    isPlaying,
     isLoading,
-    error,
-    progress,
-    play,
-    pause,
+    notice,
+    progressPercent,
+    progressDurationMs,
     loadNextImage,
     loadPreviousImage,
     initialize,
-    handleVideoEnded,
-  } = useSlideshow(displayInterval); // 設定値を使用
+    handleMediaReady,
+  } = useSlideshow(displayInterval, isPlaying);
 
   // プレイリスト情報を更新
   const updatePlaylistInfo = async () => {
@@ -127,8 +139,12 @@ function App() {
         setInitStatus,
         setRealtimeProgress,
         setIsInitialized,
-        setDisplayInterval,
+        setDisplayInterval: (ms) => setDisplayInterval(clampDisplayInterval(ms)),
         updatePlaylistInfo,
+        setHasDirectory,
+        onDirectoryError: (err) => {
+          setDirectoryError(err instanceof Error ? err.message : String(err));
+        },
       });
     }, 0);
 
@@ -137,49 +153,45 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 画像が変わったらプレイリスト情報を更新
+  // 画像が変わったらプレイリスト情報を更新。復帰できたので古いディレクトリエラーは消す。
   useEffect(() => {
     if (currentImage) {
       updatePlaylistInfo();
+      setDirectoryError(null);
     }
   }, [currentImage]);
-
-  // オーバーレイホバーと設定画面で自動一時停止/再開
-  // isPlaying を deps に含めない（play/pause が isPlaying を変更するため無限ループになる）
-  const isPlayingRef = useRef(isPlaying);
-  isPlayingRef.current = isPlaying;
-
-  useEffect(() => {
-    if (isPausedByUser) {
-      // ユーザーが明示的に一時停止 → 何もしない
-      if (isPlayingRef.current) {
-        pause();
-      }
-    } else if (isOverlayHovered || isSettingsOpen) {
-      // オーバーレイにマウスオーバーまたは設定画面表示 → 一時停止
-      if (isPlayingRef.current) {
-        pause();
-      }
-    } else {
-      // オーバーレイから離れた かつ 設定画面が閉じている → 自動再開
-      if (!isPlayingRef.current && isInitialized) {
-        play();
-      }
-    }
-  }, [isOverlayHovered, isSettingsOpen, isPausedByUser, isInitialized, pause, play]);
 
   const handlePrevious = async () => {
     await loadPreviousImage();
   };
 
   const handleNext = async () => {
-    // すぐに次の画像を読み込む
     await loadNextImage();
+  };
+
+  // #65 問題5: 除外成功で即座に次へ進み、プレイリスト情報（位置/総数）も
+  // 最新化する（除外済みの画像を表示し続けない）。
+  const handleExcluded = async () => {
+    await loadNextImage();
+    await updatePlaylistInfo();
+  };
+
+  // #65 問題8: `<img>`/`<video>` のonErrorはバックエンドが既に加算した表示回数を
+  // 取り消してから即座に次へ進む（「どちらにしたか」は取り消しAPI方式。理由は
+  // `undo_display_count` のdocコメント参照）。
+  const handleMediaError = (path: string) => {
+    void undoDisplayCount(path).catch((err) => {
+      console.error('Failed to undo display count:', err);
+    });
+    void loadNextImage();
   };
 
   // キーボードショートカット
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
+      // #65: キーリピート(押しっぱなし)による多重発火を無視する（問題3関連）。
+      if (e.repeat) return;
+
       // ESCキーでアプリ終了
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -217,7 +229,6 @@ function App() {
   }, [canGoBack, isSettingsOpen]);
 
   const openSettings = (tab: TabType = 'scan') => {
-    pause();
     setSettingsInitialTab(tab);
     setSettingsKey((k) => k + 1);
     setIsSettingsOpen(true);
@@ -256,66 +267,42 @@ function App() {
   };
 
   const handleScanComplete = async () => {
-    // スキャン完了後にプレイリストを初期化
-    await initialize(true);
+    // 手動スキャンなのでディレクトリは確定済み。
+    setHasDirectory(true);
+    setDirectoryError(null);
+    await initialize();
     setIsInitialized(true);
     // 設定画面は閉じない（ユーザーが結果を確認できるように）
     await updatePlaylistInfo();
   };
 
   const handleIntervalChange = (newInterval: number) => {
-    setDisplayInterval(newInterval);
+    setDisplayInterval(clampDisplayInterval(newInterval));
   };
 
-  // エラー表示
-  if (error && !isSettingsOpen) {
-    return (
-      <div className="w-screen h-screen bg-black overflow-hidden relative">
-        {/* 背景ロゴ */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-2" />
-        </div>
+  // #65: 「ようこそ」画面は本当に未設定（ディレクトリが一度も設定されていない）の
+  // 時だけ出す。設定済みだが空/接続不可/読込失敗の場合は専用の案内にする
+  // （問題1: 消えたファイル1枚でようこそ画面に落ちる、の根絶）。
+  const emptyStateContent = (() => {
+    if (!hasDirectory) {
+      return { title: uiText.welcomeTitle, subtitle: uiText.welcomeSubtitle };
+    }
+    if (notice?.kind === 'emptyPlaylist') {
+      return { title: uiText.emptyPlaylistTitle, subtitle: uiText.emptyPlaylistSubtitle };
+    }
+    if (notice?.kind === 'rootUnavailable') {
+      return { title: noticeMessages.rootUnavailable, subtitle: '' };
+    }
+    if (notice?.kind === 'loadFailedGaveUp') {
+      return { title: noticeMessages.loadFailedGaveUp, subtitle: '' };
+    }
+    if (notice?.kind === 'error') {
+      return { title: 'エラーが発生しました', subtitle: notice.message };
+    }
+    return null; // 読込中（初回表示待ち）。ローディング画面はisInitializedの分岐が別途担当。
+  })();
 
-        {/* 終了ボタン（右上） */}
-        <button
-          onClick={() => exit(0)}
-          className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
-          title="ESCで終了"
-        >
-          <X size={18} />
-          <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-            ESCで終了
-          </span>
-        </button>
-
-        <div className="w-screen h-screen flex items-center justify-center relative z-10">
-          <div className="text-white/70 text-lg text-center">
-            {error === 'No more images' ? (
-              <>
-                <div className="text-white/60 text-xl mb-2">ようこそ SSS へ</div>
-                <div className="text-white/30 text-sm mb-6">
-                  写真フォルダを選択してスライドショーを始めましょう
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="mb-4">エラーが発生しました</div>
-                <div className="text-red-400/80 mb-6 text-sm">{error}</div>
-              </>
-            )}
-            <button
-              onClick={handleSettings}
-              className="px-5 py-2 bg-white/8 hover:bg-white/15 border border-white/10 rounded text-white/60 hover:text-white/80 transition-colors text-sm"
-            >
-              {error === 'No more images' ? 'フォルダを選択' : '設定を開く'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // 初期化前
+  // 初期化前（起動シーケンス自体が終わっていない）
   if (!isInitialized && !isSettingsOpen) {
     return (
       <div className="w-screen h-screen bg-black overflow-hidden relative">
@@ -328,17 +315,17 @@ function App() {
         <button
           onClick={() => exit(0)}
           className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
-          title="ESCで終了"
+          title={uiText.exitTooltip}
         >
           <X size={18} />
           <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-            ESCで終了
+            {uiText.exitTooltip}
           </span>
         </button>
 
         <div className="w-screen h-screen flex items-center justify-center relative z-10">
           <div className="text-white/50 text-center">
-            <div className="text-lg mb-4">{initStatus || 'プレイリストを読み込んでいます...'}</div>
+            <div className="text-lg mb-4">{initStatus || uiText.loadingPlaylist}</div>
 
             {/* リアルタイム進捗表示 */}
             {realtimeProgress && (
@@ -348,7 +335,7 @@ function App() {
               </div>
             )}
 
-            <div className="text-white/25 text-xs">しばらくお待ちください</div>
+            <div className="text-white/25 text-xs">{uiText.pleaseWait}</div>
           </div>
         </div>
       </div>
@@ -358,38 +345,59 @@ function App() {
   return (
     <div className="w-screen h-screen bg-black overflow-hidden">
       {/* スライドショー */}
-      <Slideshow image={currentImage} isLoading={isLoading} onVideoEnded={handleVideoEnded} />
+      <Slideshow
+        image={currentImage}
+        isPlaying={isPlaying}
+        onMediaReady={handleMediaReady}
+        onAdvance={loadNextImage}
+        onMediaError={handleMediaError}
+      />
 
       {/* 終了ボタン（右上） */}
       <button
         onClick={() => exit(0)}
         className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
-        title="ESCで終了"
+        title={uiText.exitTooltip}
       >
         <X size={18} />
         <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-          ESCで終了
+          {uiText.exitTooltip}
         </span>
       </button>
 
-      {/* 画像がない場合のウェルカム画面 */}
-      {!currentImage && !isLoading && !isSettingsOpen && (
+      {/* 画像がない場合の案内画面（ようこそ/空/接続不可/読込失敗）。#65問題1・5・9 */}
+      {!currentImage && !isLoading && !isSettingsOpen && emptyStateContent && (
         <div className="fixed inset-0 flex items-center justify-center z-40">
-          <div className="text-center">
-            <div className="text-white/60 text-xl mb-2">ようこそ SSS へ</div>
-            <div className="text-white/30 text-sm mb-6">
-              写真フォルダを選択してスライドショーを始めましょう
-            </div>
+          <div className="text-center max-w-md px-6">
+            <div className="text-white/60 text-xl mb-2">{emptyStateContent.title}</div>
+            {emptyStateContent.subtitle && (
+              <div className="text-white/30 text-sm mb-6">{emptyStateContent.subtitle}</div>
+            )}
+            {directoryError && (
+              <div className="text-red-400/80 text-xs mb-6">
+                {noticeMessages.startupDirectoryRejected(directoryError)}
+              </div>
+            )}
             <button
               onClick={handleSettings}
               className="flex items-center gap-2 px-5 py-2 bg-white/8 hover:bg-white/15 border border-white/10 text-white/50 hover:text-white/80 rounded transition-colors mx-auto text-sm"
             >
               <SettingsIcon size={16} />
-              フォルダを選択
+              {hasDirectory ? uiText.openSettings : uiText.selectFolder}
             </button>
           </div>
         </div>
       )}
+
+      {/* 控えめな通知（鑑賞中の画像は維持したまま）: フォルダ接続不可・連続読込失敗 */}
+      {currentImage &&
+        (notice?.kind === 'rootUnavailable' || notice?.kind === 'loadFailedGaveUp') && (
+          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 bg-black/80 text-white/50 text-xs px-3 py-2 rounded border border-white/10 whitespace-nowrap">
+            {notice.kind === 'rootUnavailable'
+              ? noticeMessages.rootUnavailable
+              : noticeMessages.loadFailedGaveUp}
+          </div>
+        )}
 
       {/* ウィンドウモード切り替え（右上） */}
       <button
@@ -428,7 +436,8 @@ function App() {
           canGoBack={canGoBack}
           currentPosition={currentPosition}
           totalImages={totalImages}
-          progress={progress}
+          progress={progressPercent}
+          progressDurationMs={progressDurationMs}
           isPlaying={isPlaying}
           onPrevious={handlePrevious}
           onNext={handleNext}
@@ -436,6 +445,7 @@ function App() {
           onMouseEnter={handleOverlayMouseEnter}
           onMouseLeave={handleOverlayMouseLeave}
           onTogglePause={handleTogglePause}
+          onExcluded={handleExcluded}
         />
       </div>
 
