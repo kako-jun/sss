@@ -45,6 +45,7 @@ const requiredProps = {
   currentPosition: 1,
   totalImages: 10,
   progress: 0,
+  progressDurationMs: 0,
   isPlaying: true,
   onPrevious: noop,
   onNext: noop,
@@ -87,6 +88,36 @@ describe('OverlayUI exclude status message (#61 レビュー nit)', () => {
         '除外パターン追加: 除外パターン追加: *.tmp (変更を反映するには再スキャンしてください)',
       ),
     ).toBeNull();
+  });
+});
+
+describe('OverlayUI exclude advances immediately (#65 問題5)', () => {
+  it('calls onExcluded after a successful exclude so the caller can advance + refresh playlist info', async () => {
+    excludeImage.mockResolvedValue('除外パターン追加: *.tmp');
+    const onExcluded = vi.fn();
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} onExcluded={onExcluded} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    fireEvent.click(screen.getByText('ファイルを除外'));
+
+    await screen.findByText('除外パターン追加: *.tmp');
+    expect(onExcluded).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT call onExcluded when the exclude request fails', async () => {
+    excludeImage.mockRejectedValue(new Error('boom'));
+    const onExcluded = vi.fn();
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} onExcluded={onExcluded} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    fireEvent.click(screen.getByText('ファイルを除外'));
+
+    await screen.findByText('エラー: 除外失敗');
+    expect(onExcluded).not.toHaveBeenCalled();
   });
 });
 

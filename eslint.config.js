@@ -36,6 +36,7 @@ export default [
         HTMLImageElement: 'readonly',
         HTMLVideoElement: 'readonly',
         HTMLDivElement: 'readonly',
+        HTMLInputElement: 'readonly',
         confirm: 'readonly',
         React: 'readonly',
       },
@@ -60,6 +61,8 @@ export default [
     },
   },
   {
-    ignores: ['dist', 'node_modules', 'src-tauri'],
+    // e2e/ は playwright-core を使う Node スクリプト＋ブラウザへ注入する素の
+    // JSで、srcのReact/TS向けESLint設定（globals・rules）の対象外（#65レビュー）。
+    ignores: ['dist', 'node_modules', 'src-tauri', 'e2e'],
   },
 ];

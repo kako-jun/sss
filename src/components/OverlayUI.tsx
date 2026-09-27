@@ -22,7 +22,13 @@ interface OverlayUIProps {
   canGoBack: boolean;
   currentPosition: number;
   totalImages: number;
-  progress: number; // 0-100のプログレス値
+  progress: number; // 0-100のプログレス値（アンカー%。durationが0ならこの位置で静止）
+  /**
+   * `progress` からのCSS transition時間(ms)。0なら即座にその位置へ固定表示する
+   * （一時停止/新規メディア読込直後）、>0なら「アンカー→100%」への遷移をブラウザに
+   * 補間させる（#65 問題6: 60fpsのJSポーリングを撤去し、setState回数を削る）。
+   */
+  progressDurationMs: number;
   isPlaying: boolean; // 再生中かどうか
   onPrevious: () => void;
   onNext: () => void;
@@ -30,6 +36,12 @@ interface OverlayUIProps {
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onTogglePause: () => void;
+  /**
+   * 除外が成功した後に呼ぶ（#65 問題5: 除外後も除外画像を表示し続け、
+   * 位置/総数が古いままになる不具合の修正）。呼び出し側で「次へ進む」と
+   * 「プレイリスト情報の再取得」の両方を行う想定。
+   */
+  onExcluded?: () => void;
 }
 
 export function OverlayUI({
@@ -38,6 +50,7 @@ export function OverlayUI({
   currentPosition,
   totalImages,
   progress,
+  progressDurationMs,
   isPlaying,
   onPrevious,
   onNext,
@@ -45,6 +58,7 @@ export function OverlayUI({
   onMouseEnter,
   onMouseLeave,
   onTogglePause,
+  onExcluded,
 }: OverlayUIProps) {
   const [isOpeningDirectory, setIsOpeningDirectory] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -90,6 +104,9 @@ export function OverlayUI({
       const message = await excludeImage(image.path, type);
       setStatusMessage(message);
       setTimeout(() => setStatusMessage(''), 3000);
+      // #65 問題5: 除外した画像を表示し続けず、即座に次へ進んでプレイリスト
+      // 情報（位置/総数）も最新化する。
+      onExcluded?.();
     } catch (err) {
       console.error('Failed to exclude image:', err);
       setStatusMessage('エラー: 除外失敗');
@@ -162,11 +179,16 @@ export function OverlayUI({
         </div>
       )}
 
-      {/* プログレスバー（バーの上端） */}
-      <div className="h-px bg-white/10">
+      {/* プログレスバー（バーの上端）。#65 問題6: 60fpsのJS setIntervalポーリングを
+          廃止し、CSS transition(transform scaleX)にブラウザ側の補間を任せる。 */}
+      <div className="h-px bg-white/10 overflow-hidden">
         <div
-          className="h-full bg-white/40 transition-all duration-300"
-          style={{ width: `${progress}%` }}
+          className="h-full w-full bg-white/40 origin-left"
+          style={{
+            transform: `scaleX(${Math.max(0, Math.min(100, progress)) / 100})`,
+            transition:
+              progressDurationMs > 0 ? `transform ${progressDurationMs}ms linear` : 'none',
+          }}
         />
       </div>
 

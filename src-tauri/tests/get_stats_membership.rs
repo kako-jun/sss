@@ -58,6 +58,7 @@ fn displayed_images_only_counts_current_playlist_members_not_all_files_under_dir
         cache_worker: CacheWorker::spawn(cache_dir),
         _keep_awake: None,
         scan_in_progress: std::sync::atomic::AtomicBool::new(false),
+        last_incremented_display: Mutex::new(None),
     });
 
     let state = app.state::<AppState>();

@@ -19,6 +19,13 @@ pub struct AppState {
     /// `scan_directory` の二重実行防止フラグ（#61レビュー nit）。
     /// `commands::scan::ScanGuard` が `compare_exchange` で操作する。
     pub scan_in_progress: AtomicBool,
+    /// 直近に`increment_display_count`を実際に呼んだパス（#65レビューS1）。
+    /// `undo_display_count`（`<img>`/`<video>`の`onError`から呼ばれる）は、
+    /// フロントが渡す`path`がこれと一致した時だけ1回減らしてクリアする。
+    /// `get_previous_image`（表示回数を増やさない）や履歴なぞり中の`advance`
+    /// （`should_count=false`）はここを更新しないため、それらの経路で
+    /// `onError`が起きても無関係な過去の加算を誤って減らすことがない。
+    pub last_incremented_display: Mutex<Option<String>>,
 }
 
 /// スキャン進捗情報

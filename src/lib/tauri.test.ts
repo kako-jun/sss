@@ -15,7 +15,14 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 }));
 
 import * as tauri from './tauri';
-import type { ImageInfo, ScanProgress, Stats, RecentImage, IgnoreRule } from '../types';
+import type {
+  ImageInfo,
+  ImageNavigationResult,
+  ScanProgress,
+  Stats,
+  RecentImage,
+  IgnoreRule,
+} from '../types';
 
 beforeEach(() => {
   invoke.mockReset();
@@ -52,7 +59,12 @@ describe('tauri command wrappers', () => {
     expect(result).toBe(true);
   });
 
-  it('getNextImage invokes get_next_image and returns ImageInfo', async () => {
+  // #65: get_next_image/get_previous_imageの戻り値はタグ付きImageNavigationResult
+  // （{kind, data?}）になった。旧実装は成功時にImageInfoを直接返し、それ以外を
+  // 生のnullに潰していたが、バックエンドはもうImageInfoやnullを単体では返さない
+  // （必ず`kind`でラップされる）ため、wrapperの「そのまま素通しする」特性を
+  // 実際に届く形（タグ付きオブジェクト）でピン留めする。
+  it('getNextImage invokes get_next_image and returns the found ImageNavigationResult as-is', async () => {
     const image: ImageInfo = {
       path: '/a.jpg',
       optimizedPath: null,
@@ -64,22 +76,33 @@ describe('tauri command wrappers', () => {
       displayCount: 0,
       lastDisplayed: null,
     };
-    invoke.mockResolvedValue(image);
+    const found: ImageNavigationResult = { kind: 'found', data: image };
+    invoke.mockResolvedValue(found);
     const result = await tauri.getNextImage();
     expect(invoke).toHaveBeenCalledWith('get_next_image');
-    expect(result).toEqual(image);
+    expect(result).toEqual(found);
   });
 
-  it('getNextImage passes through a null result (end-of-playlist)', async () => {
-    invoke.mockResolvedValue(null);
+  it('getNextImage passes through a non-found ImageNavigationResult as-is (e.g. emptyPlaylist)', async () => {
+    const empty: ImageNavigationResult = { kind: 'emptyPlaylist' };
+    invoke.mockResolvedValue(empty);
     const result = await tauri.getNextImage();
-    expect(result).toBeNull();
+    expect(result).toEqual(empty);
   });
 
-  it('getPreviousImage invokes get_previous_image', async () => {
-    invoke.mockResolvedValue(null);
-    await tauri.getPreviousImage();
+  it('getPreviousImage invokes get_previous_image and passes through a "noHistory" result', async () => {
+    const noHistory: ImageNavigationResult = { kind: 'noHistory' };
+    invoke.mockResolvedValue(noHistory);
+    const result = await tauri.getPreviousImage();
     expect(invoke).toHaveBeenCalledWith('get_previous_image');
+    expect(result).toEqual(noHistory);
+  });
+
+  it('undoDisplayCount invokes undo_display_count with path and returns nothing (#65)', async () => {
+    invoke.mockResolvedValue(undefined);
+    const result = await tauri.undoDisplayCount('/a.jpg');
+    expect(invoke).toHaveBeenCalledWith('undo_display_count', { path: '/a.jpg' });
+    expect(result).toBeUndefined();
   });
 
   it('openInExplorer passes imagePath', async () => {

@@ -77,6 +77,7 @@ fn excluding_a_file_then_advancing_then_restarting_does_not_resurrect_it() {
         cache_worker: CacheWorker::spawn(cache_dir),
         _keep_awake: None,
         scan_in_progress: std::sync::atomic::AtomicBool::new(false),
+        last_incremented_display: Mutex::new(None),
     });
 
     let state = app.state::<AppState>();

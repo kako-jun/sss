@@ -794,6 +794,20 @@ impl Database {
         Ok(())
     }
 
+    /// 画像の表示回数を1減らす（#65: `get_next_image`/`get_previous_image` は
+    /// ファイル存在・キャッシュ変換の成功だけを確認して加算するが、フロント側の
+    /// `<img>`/`<video>` の実際のデコード/描画がそれでも失敗する（壊れた
+    /// ファイル内容等）ケースがある。そのケースでは既に加算済みのカウントを
+    /// フロントの `onError` から取り消す「確定後の取り消しAPI」として使う。
+    /// 行が無い/既に0の場合は何もしない（0未満にはならない）。
+    pub fn decrement_display_count(&self, path: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE image_stats SET display_count = MAX(display_count - 1, 0) WHERE path = ?1",
+            [path],
+        )?;
+        Ok(())
+    }
+
     /// 画像統計を取得
     pub fn get_image_stats(&self, path: &str) -> Result<(i32, Option<String>)> {
         let mut stmt = self
@@ -1813,6 +1827,69 @@ mod tests {
         db.increment_display_count("/p/a.jpg").unwrap();
         let (count, _) = db.get_image_stats("/p/a.jpg").unwrap();
         assert_eq!(count, 2, "2回目は加算されるはず");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `decrement_display_count`（#65: `undo_display_count` コマンドの実体）は
+    /// 表示回数を1減らし、`last_displayed` 等の行自体は変更しない。
+    #[test]
+    fn decrement_display_count_subtracts_one_and_keeps_last_displayed() {
+        let path = temp_db_path("decrement_display_count_basic");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.increment_display_count("/p/a.jpg").unwrap();
+        let (count, last_after_increments) = db.get_image_stats("/p/a.jpg").unwrap();
+        assert_eq!(count, 2, "前提: 2回加算しておく");
+
+        db.decrement_display_count("/p/a.jpg").unwrap();
+        let (count, last) = db.get_image_stats("/p/a.jpg").unwrap();
+        assert_eq!(count, 1, "1回取り消すと2→1になるはず");
+        assert_eq!(
+            last, last_after_increments,
+            "decrementはlast_displayedを変更しないはず"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `decrement_display_count` は0未満にならない（境界: display_count=0 で
+    /// 呼んでも0のまま）。フロントの`onError`が二重発火しても壊れないための保証。
+    #[test]
+    fn decrement_display_count_does_not_go_below_zero() {
+        let path = temp_db_path("decrement_display_count_floor");
+        let db = Database::new(path.clone()).unwrap();
+
+        db.increment_display_count("/p/a.jpg").unwrap();
+        db.decrement_display_count("/p/a.jpg").unwrap();
+        let (count, _) = db.get_image_stats("/p/a.jpg").unwrap();
+        assert_eq!(count, 0, "1→0になるはず");
+
+        // 既に0の状態でもう一度取り消す（境界: 0未満にならない）。
+        db.decrement_display_count("/p/a.jpg").unwrap();
+        let (count, _) = db.get_image_stats("/p/a.jpg").unwrap();
+        assert_eq!(count, 0, "0からさらに取り消しても0未満にならないはず");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `decrement_display_count` は `image_stats` に行が存在しないパスに対しては
+    /// 何もしない（UPDATEの対象行が0件でもErrにならない。行を新規作成もしない）。
+    #[test]
+    fn decrement_display_count_on_unknown_path_is_a_noop_not_an_error() {
+        let path = temp_db_path("decrement_display_count_unknown");
+        let db = Database::new(path.clone()).unwrap();
+
+        let result = db.decrement_display_count("/p/never_seen.jpg");
+        assert!(result.is_ok(), "未登録パスへの取り消しはErrにならないはず");
+
+        let (count, last) = db.get_image_stats("/p/never_seen.jpg").unwrap();
+        assert_eq!(
+            (count, last),
+            (0, None),
+            "行が新規作成されず(0, None)のままのはず"
+        );
 
         let _ = std::fs::remove_file(&path);
     }
