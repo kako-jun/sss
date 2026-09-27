@@ -168,7 +168,7 @@ describe('Slideshow media lifecycle (#65)', () => {
     expect(playSpy).not.toHaveBeenCalled();
   });
 
-  it('does not carry over a stale pending-ended flag to a different video switched to while still paused', () => {
+  it('does not carry over a stale pending-ended flag to a different video switched to while still paused', async () => {
     // 一時停止中に動画Aが終了(pending=true)→ユーザーが手動で別の動画Bへ切り替えた
     // →Bを再開、という順序でBが即座に(誤って)次へ進んでしまわないことを確認する。
     const onAdvance = vi.fn();
@@ -182,6 +182,9 @@ describe('Slideshow media lifecycle (#65)', () => {
 
     // まだ一時停止中のまま、別の動画へ切り替わった(next操作の結果を模す)
     rerender(<Slideshow image={videoB} isPlaying={false} onAdvance={onAdvance} />);
+    // #65レビュー3巡目nit: play()/pause()は「今のmediaKeyの要素」だけが対象なので、
+    // AnimatePresenceの退場アニメーションが終わりvideoBが実マウントされるまで待つ。
+    await waitForExitAnimation();
 
     // ここでBを再開しても、Aの終了予約を引き継いで即次へ進んだりしない
     rerender(<Slideshow image={videoB} isPlaying={true} onAdvance={onAdvance} />);
@@ -346,5 +349,26 @@ describe('Slideshow does not replay the exiting video on mediaKey change alone (
     // 古いクロージャのmediaKeyは既に最新ではないため、二重にonAdvanceが
     // 呼ばれてはいけない（呼ばれると1枚飛ばしてしまう）。
     expect(onAdvance).not.toHaveBeenCalled();
+  });
+
+  it('does not call play()/pause() on the exiting (stale) video when isPlaying toggles during the exit window (#65レビュー3巡目nit: data-media-key guard)', () => {
+    const videoA = makeImage({ isVideo: true, path: '/videos/a.mp4' });
+    const videoB = makeImage({ isVideo: true, path: '/videos/b.mp4' });
+    const { rerender } = render(<Slideshow image={videoA} displayToken={0} isPlaying={true} />);
+
+    // videoBへ切り替える(退場アニメーション中はまだ古いvideoAがDOM上に残る)。
+    rerender(<Slideshow image={videoB} displayToken={1} isPlaying={true} />);
+    playSpy.mockClear();
+    pauseSpy.mockClear();
+
+    // 退場中に一時停止→再開を素早く切り替える。
+    rerender(<Slideshow image={videoB} displayToken={1} isPlaying={false} />);
+    rerender(<Slideshow image={videoB} displayToken={1} isPlaying={true} />);
+
+    // videoRefはまだ古い(videoA)要素を指したままのはずで、その要素の
+    // data-media-keyは最新のmediaKey(videoB)と一致しないため、
+    // play()/pause()どちらも古い要素に対して呼ばれてはいけない。
+    expect(playSpy).not.toHaveBeenCalled();
+    expect(pauseSpy).not.toHaveBeenCalled();
   });
 });
