@@ -26,6 +26,10 @@ export const uiText = {
   emptyPlaylistSubtitle:
     '除外ルールで全て除外されているか、フォルダに対象ファイルがありません。設定から確認してください。',
   exitTooltip: 'ESCで終了',
+  // #65レビュー: 起動時の前景スキャン（restorePlaylist失敗→scanDirectory待ち）が
+  // 失敗した場合の案内タイトル。ディレクトリ自体は設定済みなので「ようこそ」とは
+  // 区別する。理由の詳細は noticeMessages.startupDirectoryRejected を別行で表示する。
+  directoryUnreachableTitle: '前回のフォルダを読めません',
 } as const;
 
 /**

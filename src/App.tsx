@@ -299,8 +299,41 @@ function App() {
     if (notice?.kind === 'error') {
       return { title: 'エラーが発生しました', subtitle: notice.message };
     }
+    // #65レビュー修正: restorePlaylist失敗→前景scanDirectory自体が失敗した場合、
+    // initialize()（＝useSlideshowの最初のgetNextImage）が一度も呼ばれないため
+    // notice はずっと null のまま。旧実装はこの分岐が無く emptyStateContent が
+    // null になり、案内画面自体が描画されず directoryError も表示されなかった
+    // （テスト担当が発見）。hasDirectory は既に true（前回ディレクトリはあった）
+    // なので「ようこそ」ではなく専用の案内にする。
+    if (directoryError) {
+      return { title: uiText.directoryUnreachableTitle, subtitle: '' };
+    }
     return null; // 読込中（初回表示待ち）。ローディング画面はisInitializedの分岐が別途担当。
   })();
+
+  // #65レビュー修正: 復元成功後のバックグラウンドスキャン失敗は、既に最初の画像を
+  // 表示できている（currentImage != null）ため上の全画面案内は出さない。写真を
+  // 邪魔しない控えめな通知（下部トースト、数秒で自動的に消える）で理由を出す。
+  // notice（rootUnavailable/loadFailedGaveUp）優先度を最優先にし、無ければ
+  // directoryError を出す（同時に出て重なるのを防ぐ）。
+  const bottomNotice: string | null =
+    notice?.kind === 'rootUnavailable'
+      ? noticeMessages.rootUnavailable
+      : notice?.kind === 'loadFailedGaveUp'
+        ? noticeMessages.loadFailedGaveUp
+        : directoryError
+          ? noticeMessages.startupDirectoryRejected(directoryError)
+          : null;
+
+  // directoryError による下部トーストだけは数秒で自動的に消す（notice由来の通知は
+  // 次の正常な画像取得時にnoticeがnullへ戻るため対象外。上の全画面案内側は
+  // currentImageが無い間は自動で消さず、ユーザーが設定を開いて解決するまで残す）。
+  useEffect(() => {
+    if (!directoryError || !currentImage) return;
+    const timer = window.setTimeout(() => setDirectoryError(null), 6000);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directoryError]);
 
   // 初期化前（起動シーケンス自体が終わっていない）
   if (!isInitialized && !isSettingsOpen) {
@@ -389,15 +422,13 @@ function App() {
         </div>
       )}
 
-      {/* 控えめな通知（鑑賞中の画像は維持したまま）: フォルダ接続不可・連続読込失敗 */}
-      {currentImage &&
-        (notice?.kind === 'rootUnavailable' || notice?.kind === 'loadFailedGaveUp') && (
-          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 bg-black/80 text-white/50 text-xs px-3 py-2 rounded border border-white/10 whitespace-nowrap">
-            {notice.kind === 'rootUnavailable'
-              ? noticeMessages.rootUnavailable
-              : noticeMessages.loadFailedGaveUp}
-          </div>
-        )}
+      {/* 控えめな通知（鑑賞中の画像は維持したまま）: フォルダ接続不可・連続読込失敗・
+          復元後のバックグラウンドスキャン失敗（#65レビュー修正） */}
+      {currentImage && bottomNotice && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 bg-black/80 text-white/50 text-xs px-3 py-2 rounded border border-white/10 whitespace-nowrap">
+          {bottomNotice}
+        </div>
+      )}
 
       {/* ウィンドウモード切り替え（右上） */}
       <button

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 
 // #65: App.tsx が「hasDirectory + notice.kind」から選ぶ案内画面（ようこそ/空/
 // 接続不可/読込失敗/エラー、uiText・noticeMessages）と、キーリピート(e.repeat)の
@@ -51,6 +51,9 @@ vi.mock('@tauri-apps/api/window', () => ({
 const invoke = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...a: unknown[]) => invoke(...a),
+  // Slideshowが`found`な画像を描画する際に呼ぶ。jsdomには実装が無く、呼ぶと
+  // window.__TAURI_INTERNALS__が無いとして例外になるため素通しモックに差し替える。
+  convertFileSrc: (path: string) => `asset://localhost/${path}`,
 }));
 
 const exit = vi.fn();
@@ -179,6 +182,99 @@ describe('App empty-state notice display (#65 問題1・9: ようこそ/空/接�
       expect(screen.queryByText('ようこそ SSS へ')).toBeNull();
       expect(screen.queryByText('表示できる写真がありません')).toBeNull();
     });
+  });
+});
+
+describe('App directoryError notice (#65レビュー: 起動時スキャン失敗理由がどの経路でも表示されないバグ)', () => {
+  it('shows the dedicated "前回のフォルダを読めません" full-screen notice with the reason when the foreground scan itself fails (restorePlaylist=false)', async () => {
+    // restorePlaylist=falseだとinitialize()（=最初のgetNextImage）が一度も呼ばれず
+    // notice はnullのまま。旧実装はemptyStateContentのif連鎖が全部外れてnullになり、
+    // directoryErrorのdiv自体がその内側にあるため描画されなかった（テスト担当が発見）。
+    getLastDirectoryPath.mockResolvedValue('/photos');
+    restorePlaylist.mockResolvedValue(false);
+    scanDirectory.mockRejectedValue(new Error('permission denied'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('前回のフォルダを読めません')).toBeTruthy();
+    });
+    expect(
+      screen.getByText('前回のフォルダに接続できませんでした: permission denied'),
+    ).toBeTruthy();
+    // ディレクトリは設定済み（前回パスがあった）なので「ようこそ」ではない。
+    expect(screen.queryByText('ようこそ SSS へ')).toBeNull();
+    // 起動失敗直後でも設定を開けること（フォルダを選び直せる）。
+    expect(screen.getByText('設定を開く')).toBeTruthy();
+  });
+
+  it('does not clear currentImage or show the full-screen notice when the background scan fails after a successful restore; shows a bottom toast instead', async () => {
+    useRestoredStartupPath();
+    scanDirectory.mockRejectedValue(new Error('nas offline'));
+    getNextImage.mockResolvedValue({
+      kind: 'found',
+      data: {
+        path: '/photos/a.jpg',
+        optimizedPath: null,
+        isVideo: false,
+        width: 10,
+        height: 10,
+        fileSize: 1,
+        exif: null,
+        displayCount: 0,
+        lastDisplayed: null,
+      },
+    });
+    render(<App />);
+
+    // 復元成功パスは即座に最初の画像を表示する。
+    await waitFor(() => {
+      expect(screen.queryByText('ようこそ SSS へ')).toBeNull();
+      expect(screen.queryByText('前回のフォルダを読めません')).toBeNull();
+    });
+
+    // バックグラウンドスキャンの失敗が伝播すると、写真を隠さず控えめなトーストで
+    // 理由を出す（旧実装はcurrentImageが非nullだと外側の!currentImage条件で
+    // directoryErrorの表示自体が一切出なかった＝テスト担当が発見したバグ）。
+    await waitFor(() => {
+      expect(screen.getByText('前回のフォルダに接続できませんでした: nas offline')).toBeTruthy();
+    });
+    // 全画面の案内(タイトル)は出ない＝写真を邪魔しない。
+    expect(screen.queryByText('前回のフォルダを読めません')).toBeNull();
+  });
+
+  it('auto-dismisses the background-scan-failure toast after a few seconds', async () => {
+    // shouldAdvanceTime: 実時間の経過に合わせてフェイク時計も自動で進むモード。
+    // 起動シーケンス(setTimeout(0)+複数awaitの連鎖)やwaitFor自身のポーリングは
+    // 通常どおり実時間で動きつつ、最後の6秒待ちだけ vi.advanceTimersByTimeAsync で
+    // 早送りできる（実時間6秒待つ低速テストにしないため）。
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    useRestoredStartupPath();
+    scanDirectory.mockRejectedValue(new Error('nas offline'));
+    getNextImage.mockResolvedValue({
+      kind: 'found',
+      data: {
+        path: '/photos/a.jpg',
+        optimizedPath: null,
+        isVideo: false,
+        width: 10,
+        height: 10,
+        fileSize: 1,
+        exif: null,
+        displayCount: 0,
+        lastDisplayed: null,
+      },
+    });
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('前回のフォルダに接続できませんでした: nas offline')).toBeTruthy();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+
+    expect(screen.queryByText('前回のフォルダに接続できませんでした: nas offline')).toBeNull();
   });
 });
 
