@@ -123,18 +123,21 @@ fn persist_playlist_after_advance(state: &State<AppState>, playlist: &Playlist, 
 /// スコープを切り、await の前に確実にドロップさせる（#60 レビュー2巡目
 /// should(2) で `get_image_info_internal` を async 化した際に必要になった）。
 ///
-/// #62レビュー2巡目 N-S1: 実ファイルが消えている画像に当たった場合、`Ok(None)` を
-/// 即座に返す（＝フロントは「No more images」のエラー画面にフォールバックする）
-/// 旧実装は、1件消えただけでスライドショーが止まって見えてしまっていた。
+/// #62レビュー2巡目 N-S1（#65でエラー種別が`ImageNavigationResult`化される前の
+/// 経緯）: 実ファイルが消えている画像に当たった場合、1件消えただけでスライド
+/// ショーが止まって見えてしまう（旧実装は`Ok(None)`を即座に返し、フロントは
+/// 「No more images」のエラー画面にフォールバックしていた）不具合を直すため、
 /// `MAX_MISSING_FILE_SKIPS` 回を上限に内部で次へ進み直し、最初に実在する画像が
-/// 見つかったものだけを返す。表示回数はその実在する画像1件にだけ加算する
-/// （欠損ファイルの分は加算しない、従来どおり）。
+/// 見つかったものだけを返すようにした。表示回数はその実在する画像1件にだけ加算する
+/// （欠損ファイルの分は加算しない、従来どおり）。上限に到達した場合の戻り値は
+/// `#65`以降 `ImageNavigationResult::LoadFailed`（旧`Ok(None)`）。
 ///
 /// #62レビュー3巡目 T-M1(must): ループの各反復の前に、対象ディレクトリ自体が
-/// アクセス可能かを確認する。無ければ（advance すら行わず）即座に `Ok(None)` を
-/// 返す。個々のファイルの消失（`ImageLookup::Missing`）とは別に、ディレクトリ
-/// 自体の消失は「ほぼ全件が必ず見つからない」状態を意味するため、通常のスキップ
-/// ループに任せると毎回上限（20件）ぶん無駄に `advance`+保存してしまう。
+/// アクセス可能かを確認する。無ければ（advance すら行わず）即座に返す
+/// （`#65`以降 `ImageNavigationResult::RootUnavailable`、旧`Ok(None)`）。個々の
+/// ファイルの消失（`ImageLookup::Missing`）とは別に、ディレクトリ自体の消失は
+/// 「ほぼ全件が必ず見つからない」状態を意味するため、通常のスキップループに
+/// 任せると毎回上限（20件）ぶん無駄に `advance`+保存してしまう。
 ///
 /// #62レビュー3巡目 S-b: `ImageLookup::ProcessingFailed`（キャッシュ変換の失敗/
 /// タイムアウト）は `Missing` と違ってループで読み飛ばさず、その場で打ち切る
@@ -207,6 +210,13 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<ImageNavigatio
                 if should_count {
                     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
                     let _ = db.increment_display_count(&path_str);
+                    drop(db);
+                    // #65レビューS1: 「直近に実際に加算したパス」を記録する。
+                    // `undo_display_count`はこれと一致した時だけ取り消す。
+                    *state
+                        .last_incremented_display
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()) = Some(path_str.clone());
                 }
 
                 // 5枚先まで先読みキュー投入（単一ワーカーが直列処理・重複排除・世代管理する）
@@ -453,8 +463,26 @@ async fn get_image_info_internal(
 /// 別コマンドへ後ろ倒しする設計）に比べて、既存の`should_count`（履歴なぞり中は
 /// 加算しない等）のロジックとその実装済みテストを一切変更せずに済むため
 /// （変更範囲を#65のフロント問題に閉じる目的、詳細は#65報告参照）。
+///
+/// #65レビューS1: `path`は`AppState.last_incremented_display`（直近に実際に
+/// `increment_display_count`したパス）と一致した時だけ1回減らし、一致したら
+/// 直後にクリアする（同じ`onError`が万一2回届いても2回目は不一致になり無視される。
+/// 意図しない多重取り消しの防止）。`get_previous_image`（表示回数を増やさない）や
+/// 履歴なぞり中の`advance`（`should_count=false`）は`last_incremented_display`を
+/// 更新しないため、それらの経路の`onError`が無関係な過去の加算を誤って
+/// 減らすことはない。不一致（既に次の画像へ進んでいた等）の場合は何もしない。
 #[tauri::command]
 pub async fn undo_display_count(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let mut last = state
+        .last_incremented_display
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if last.as_deref() != Some(path.as_str()) {
+        return Ok(());
+    }
+    *last = None;
+    drop(last);
+
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     db.decrement_display_count(&path).map_err(|e| e.to_string())
 }

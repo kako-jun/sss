@@ -69,6 +69,7 @@ fn get_next_image_does_not_increment_display_count_for_missing_file() {
         cache_worker: CacheWorker::spawn(cache_dir),
         _keep_awake: None,
         scan_in_progress: std::sync::atomic::AtomicBool::new(false),
+        last_incremented_display: Mutex::new(None),
     });
 
     let state = app.state::<AppState>();

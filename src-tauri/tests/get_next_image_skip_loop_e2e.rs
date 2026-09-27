@@ -50,6 +50,7 @@ fn build_app(
         cache_worker: CacheWorker::spawn(cache_dir),
         _keep_awake: None,
         scan_in_progress: std::sync::atomic::AtomicBool::new(false),
+        last_incremented_display: Mutex::new(None),
     });
     app
 }

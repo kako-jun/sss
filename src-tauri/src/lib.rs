@@ -141,6 +141,7 @@ pub fn run() {
                 cache_worker,
                 _keep_awake: keep_awake,
                 scan_in_progress: std::sync::atomic::AtomicBool::new(false),
+                last_incremented_display: Mutex::new(None),
             });
 
             Ok(())
