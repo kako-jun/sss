@@ -51,6 +51,11 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
   const [currentImage, setCurrentImage] = useState<ImageInfo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [notice, setNotice] = useState<SlideshowNotice | null>(null);
+  // #65レビューM2: `found`を受け取るたびに1増える世代番号。1件だけのプレイリスト
+  // 等で同じpathが連続で返ると、Slideshow側のkey/srcが変わらず<img onLoad>/
+  // <video onEnded>が再発火しない（タイマーが張られない・動画が永久に止まる）
+  // 不具合の修正に使う（`Slideshow`が`key={path + displayToken}`にする）。
+  const [displayToken, setDisplayToken] = useState(0);
 
   // プログレスバー用の2値。バーの見た目は呼び出し側がCSS transitionで表現する:
   //   transition: progressDurationMs > 0 ? `transform ${progressDurationMs}ms linear` : 'none'
@@ -62,7 +67,16 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
   const [progressDurationMs, setProgressDurationMs] = useState(0);
 
   const inFlightRef = useRef(false);
+  // 同時実行ガード（inFlightRef）が既に「1度に1回しか呼ばせない」を保証しているため、
+  // 通常運用ではrequestIdによる「古い応答の破棄」が実際に発火することはほぼ無い
+  // （#65レビューnit: 二重の仕組みであることを明記）。それでも残しているのは、
+  // 万一inFlightRefのガードをすり抜けるコード変更が将来入っても後着の古い応答を
+  // 確実に無視できるようにするための保険。
   const requestIdRef = useRef(0);
+  // 直近に呼んだ方向（#65レビュー質問決定: 「前へ」の途中でonErrorになった場合は
+  // loadPreviousImageでさらに戻る、前進中は次へ進む）。`continueInLastDirection`が
+  // 自動再試行(error/rootUnavailable)とonError時の続行の両方から使う。
+  const lastDirectionRef = useRef<'next' | 'previous'>('next');
 
   const isCurrentVideo = currentImage?.isVideo ?? false;
   const isCurrentVideoRef = useRef(isCurrentVideo);
@@ -75,6 +89,14 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
   intervalRef.current = safeInterval;
 
   const remainingMsRef = useRef(safeInterval);
+  // 「今表示中のメディアのタイマーが実際に基準にしている間隔」のスナップショット
+  // （#65レビューnit）。`intervalRef`は設定変更で即座に書き換わるが、表示間隔の
+  // 変更は次のメディアから反映する方針（このファイル末尾のコメント参照）のため、
+  // 一時停止%の計算はこのスナップショット基準で行う必要がある。`intervalRef`を
+  // そのまま使うと、再生中に間隔を変えてから一時停止した時、
+  // `remainingMsRef`（旧intervalで計算済み）と`intervalRef.current`（新interval）が
+  // 食い違い、100%を超えたり負になったりするおかしな%になっていた。
+  const activeIntervalRef = useRef(safeInterval);
   const timerStartRef = useRef(0);
   const timeoutRef = useRef<number | undefined>(undefined);
 
@@ -92,7 +114,9 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
     const elapsed = Date.now() - timerStartRef.current;
     clearAdvanceTimer();
     remainingMsRef.current = Math.max(0, remainingMsRef.current - elapsed);
-    const total = intervalRef.current;
+    // #65レビューnit: intervalRef.current（再生中に変更されうる「次に使う値」）
+    // ではなく、今のタイマーが実際に基準にしていたactiveIntervalRefを使う。
+    const total = activeIntervalRef.current;
     const frozenPercent =
       total > 0 ? Math.min(100, ((total - remainingMsRef.current) / total) * 100) : 100;
     setProgressDurationMs(0);
@@ -120,6 +144,7 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
   const resetTimerForNewMedia = useCallback(() => {
     clearAdvanceTimer();
     remainingMsRef.current = intervalRef.current;
+    activeIntervalRef.current = intervalRef.current;
     setProgressDurationMs(0);
     setProgressPercent(0);
   }, [clearAdvanceTimer]);
@@ -131,6 +156,7 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
   const handleMediaReady = useCallback(() => {
     if (isCurrentVideoRef.current) return;
     remainingMsRef.current = intervalRef.current;
+    activeIntervalRef.current = intervalRef.current;
     setProgressDurationMs(0);
     setProgressPercent(0);
     if (isPlayingRef.current) {
@@ -140,15 +166,17 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
     }
   }, [startAdvanceTimer]);
 
-  // loadNextImage は下で定義するが、handleMediaReady/effect からも参照したいため
-  // ref経由で先に穴を用意しておく（TDZを避ける）。
+  // loadNextImage/loadPreviousImage は下で定義するが、handleMediaReady/effect
+  // からも参照したいため ref経由で先に穴を用意しておく（TDZを避ける）。
   const loadNextImageRef = useRef<() => Promise<void>>(async () => {});
+  const loadPreviousImageRef = useRef<() => Promise<void>>(async () => {});
 
   const applyNextResult = useCallback(
     (result: ImageNavigationResult): 'stop' | 'retry' => {
       switch (result.kind) {
         case 'found':
           setCurrentImage(result.data);
+          setDisplayToken((t) => t + 1);
           setNotice(null);
           resetTimerForNewMedia();
           return 'stop';
@@ -172,6 +200,7 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
 
   const loadNextImage = useCallback(async () => {
     if (inFlightRef.current) return; // 同時実行ガード（問題3）
+    lastDirectionRef.current = 'next';
     inFlightRef.current = true;
     const myId = ++requestIdRef.current; // 古い応答破棄用
     setIsLoading(true);
@@ -208,6 +237,7 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
 
   const loadPreviousImage = useCallback(async () => {
     if (inFlightRef.current) return;
+    lastDirectionRef.current = 'previous';
     inFlightRef.current = true;
     const myId = ++requestIdRef.current;
     setIsLoading(true);
@@ -227,6 +257,7 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
         switch (result.kind) {
           case 'found':
             setCurrentImage(result.data);
+            setDisplayToken((t) => t + 1);
             setNotice(null);
             resetTimerForNewMedia();
             return;
@@ -254,6 +285,23 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
       if (myId === requestIdRef.current) setIsLoading(false);
     }
   }, [resetTimerForNewMedia]);
+
+  loadPreviousImageRef.current = loadPreviousImage;
+
+  /**
+   * `<img>`/`<video>` の `onError` や、`error`/`rootUnavailable` 通知後の自動
+   * 再試行から呼ぶ（#65レビュー質問決定）。直近に呼んだ方向（`lastDirectionRef`）を
+   * 引き継いで続行する: 「前へ」で戻っている途中に `onError` になった場合は
+   * `loadPreviousImage` でさらに戻り、通常の前進中（初期値含む）は `loadNextImage`
+   * で次へ進む。
+   */
+  const continueInLastDirection = useCallback(async () => {
+    if (lastDirectionRef.current === 'previous') {
+      await loadPreviousImageRef.current();
+    } else {
+      await loadNextImageRef.current();
+    }
+  }, []);
 
   /**
    * 初回画像読み込み。#65: 以前は `autoPlay` 引数で内部の `isPlaying` を
@@ -289,14 +337,29 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
     return () => clearAdvanceTimer();
   }, [clearAdvanceTimer]);
 
+  // #65レビューS3/S4: 一時的な通信断（`error`）やフォルダ接続不可
+  // （`rootUnavailable`）は、ユーザー操作を待たず表示間隔ごとに自動で
+  // 再試行する（`rootUnavailable`の文言「再接続をお待ちください…」を実挙動に
+  // 一致させる）。直近の方向（`continueInLastDirection`）で続行し、まだ同じ
+  // 状態が続いていれば次のnoticeが新しいタイマーをまた張る形で繰り返す。
+  useEffect(() => {
+    if (notice?.kind !== 'error' && notice?.kind !== 'rootUnavailable') return;
+    const timer = window.setTimeout(() => {
+      void continueInLastDirection();
+    }, intervalRef.current);
+    return () => window.clearTimeout(timer);
+  }, [notice, continueInLastDirection]);
+
   return {
     currentImage,
+    displayToken,
     isLoading,
     notice,
     progressPercent,
     progressDurationMs,
     loadNextImage,
     loadPreviousImage,
+    continueInLastDirection,
     initialize,
     handleMediaReady,
   };

@@ -522,3 +522,225 @@ describe('handleMediaReady + auto-advance timer (#65 問題6)', () => {
     expect(result.current.progressPercent).toBe(0);
   });
 });
+
+describe('displayToken (#65レビューM2)', () => {
+  it('increments on every found result, even when the path repeats (single-item playlist)', async () => {
+    getNextImage.mockResolvedValue(found('/only.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    const first = result.current.displayToken;
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    const second = result.current.displayToken;
+
+    expect(result.current.currentImage?.path).toBe('/only.jpg');
+    expect(second).toBe(first + 1);
+  });
+
+  it('also increments on loadPreviousImage found results', async () => {
+    getPreviousImage.mockResolvedValue(found('/prev.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    const before = result.current.displayToken;
+
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+
+    expect(result.current.displayToken).toBe(before + 1);
+  });
+
+  it('does not increment when the result is not "found" (emptyPlaylist/rootUnavailable/noHistory)', async () => {
+    getNextImage.mockResolvedValue({ kind: 'emptyPlaylist' } satisfies ImageNavigationResult);
+    const { result } = renderHook(() => useSlideshow());
+    const before = result.current.displayToken;
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+
+    expect(result.current.displayToken).toBe(before);
+  });
+});
+
+describe('continueInLastDirection (#65レビュー質問決定: onErrorは進行方向を引き継ぐ)', () => {
+  it('defaults to next (forward) direction before any navigation has happened', async () => {
+    getNextImage.mockResolvedValue(found('/a.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+
+    await act(async () => {
+      await result.current.continueInLastDirection();
+    });
+
+    expect(getNextImage).toHaveBeenCalledTimes(1);
+    expect(getPreviousImage).not.toHaveBeenCalled();
+  });
+
+  it('continues backward (loadPreviousImage) after the most recent navigation was "previous" (onError while going back)', async () => {
+    getNextImage.mockResolvedValue(found('/a.jpg'));
+    getPreviousImage.mockResolvedValue(found('/prev.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    getNextImage.mockClear();
+    getPreviousImage.mockClear();
+
+    // 「前へ」で戻ったばかりの画像がonErrorになったシナリオ:
+    // continueInLastDirectionはさらに前へ戻る（次へ、ではない）。
+    await act(async () => {
+      await result.current.continueInLastDirection();
+    });
+
+    expect(getPreviousImage).toHaveBeenCalledTimes(1);
+    expect(getNextImage).not.toHaveBeenCalled();
+  });
+
+  it('continues forward (loadNextImage) after the most recent navigation was "next"', async () => {
+    getNextImage.mockResolvedValue(found('/a.jpg'));
+    getPreviousImage.mockResolvedValue(found('/prev.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    getNextImage.mockClear();
+    getPreviousImage.mockClear();
+
+    await act(async () => {
+      await result.current.continueInLastDirection();
+    });
+
+    expect(getNextImage).toHaveBeenCalledTimes(1);
+    expect(getPreviousImage).not.toHaveBeenCalled();
+  });
+});
+
+describe('auto-retry on error/rootUnavailable notices (#65レビューS3/S4)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  it('retries automatically after `interval` ms when an invoke rejection sets an error notice (S3)', async () => {
+    getNextImage.mockRejectedValueOnce('temporary glitch');
+    const { result } = renderHook(() => useSlideshow(5000, true));
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.notice).toEqual({ kind: 'error', message: 'temporary glitch' });
+    getNextImage.mockClear();
+    getNextImage.mockResolvedValue(found('/recovered.jpg'));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(getNextImage).toHaveBeenCalledTimes(1);
+    expect(result.current.currentImage?.path).toBe('/recovered.jpg');
+    expect(result.current.notice).toBeNull();
+  });
+
+  it('retries automatically after `interval` ms while rootUnavailable persists, and stops once the notice clears (S4: 文言を実挙動に一致させる)', async () => {
+    getNextImage
+      .mockResolvedValueOnce({ kind: 'rootUnavailable' } satisfies ImageNavigationResult)
+      .mockResolvedValueOnce({ kind: 'rootUnavailable' } satisfies ImageNavigationResult)
+      .mockResolvedValue(found('/reconnected.jpg'));
+    const { result } = renderHook(() => useSlideshow(5000, true));
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.notice).toEqual({ kind: 'rootUnavailable' });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(getNextImage).toHaveBeenCalledTimes(2);
+    expect(result.current.notice).toEqual({ kind: 'rootUnavailable' });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(getNextImage).toHaveBeenCalledTimes(3);
+    expect(result.current.currentImage?.path).toBe('/reconnected.jpg');
+    expect(result.current.notice).toBeNull();
+
+    // 復帰後はもう自動再試行しない。
+    getNextImage.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(getNextImage).not.toHaveBeenCalled();
+  });
+
+  it('retries in the previous direction when rootUnavailable happened while going back', async () => {
+    getNextImage.mockResolvedValue(found('/a.jpg'));
+    getPreviousImage
+      .mockResolvedValueOnce({ kind: 'rootUnavailable' } satisfies ImageNavigationResult)
+      .mockResolvedValue(found('/prev.jpg'));
+    const { result } = renderHook(() => useSlideshow(5000, true));
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    expect(result.current.notice).toEqual({ kind: 'rootUnavailable' });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(getPreviousImage).toHaveBeenCalledTimes(2);
+    expect(result.current.currentImage?.path).toBe('/prev.jpg');
+  });
+});
+
+describe('pause percentage uses the interval active when the timer started (#65レビューnit)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  it('stays within [0,100] and reflects the OLD interval when displayInterval changes mid-display then pauses', async () => {
+    getNextImage.mockResolvedValue(found('/img.jpg'));
+    const { result, rerender } = renderHook(
+      ({ interval, playing }) => useSlideshow(interval, playing),
+      { initialProps: { interval: 10000, playing: true } },
+    );
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    act(() => result.current.handleMediaReady());
+
+    // 10秒間隔で3秒経過（30%）。
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    // 再生中に間隔を5秒へ変更（このメディアの残り時間には影響しない設計）。
+    rerender({ interval: 5000, playing: true });
+
+    // 一時停止: 新しいintervalRef(5000)を分母にすると
+    // ((5000-7000)/5000)*100 = -40 のようなおかしな値になっていたのが不具合。
+    // 実際にタイマーが基準にしていた10000msを分母にした約30%になるはず。
+    rerender({ interval: 5000, playing: false });
+
+    expect(result.current.progressPercent).toBeGreaterThanOrEqual(0);
+    expect(result.current.progressPercent).toBeLessThanOrEqual(100);
+    expect(result.current.progressPercent).toBeGreaterThan(20);
+    expect(result.current.progressPercent).toBeLessThan(40);
+  });
+});

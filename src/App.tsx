@@ -56,12 +56,14 @@ function App() {
 
   const {
     currentImage,
+    displayToken,
     isLoading,
     notice,
     progressPercent,
     progressDurationMs,
     loadNextImage,
     loadPreviousImage,
+    continueInLastDirection,
     initialize,
     handleMediaReady,
   } = useSlideshow(displayInterval, isPlaying);
@@ -171,19 +173,26 @@ function App() {
 
   // #65 問題5: 除外成功で即座に次へ進み、プレイリスト情報（位置/総数）も
   // 最新化する（除外済みの画像を表示し続けない）。
+  // #65レビューnit: updatePlaylistInfoはここで明示的に呼ばない。loadNextImage が
+  // currentImage を更新すれば、下の「画像が変わったら」effectが自動的に呼ぶため
+  // （ここでも呼ぶと同じ呼び出しが重複していた）。除外の結果emptyPlaylistになった
+  // 場合はcurrentImageがnullのままなのでeffect側は呼ばないが、表示するものが無い
+  // 以上position/totalの更新は不要。
   const handleExcluded = async () => {
     await loadNextImage();
-    await updatePlaylistInfo();
   };
 
   // #65 問題8: `<img>`/`<video>` のonErrorはバックエンドが既に加算した表示回数を
   // 取り消してから即座に次へ進む（「どちらにしたか」は取り消しAPI方式。理由は
   // `undo_display_count` のdocコメント参照）。
+  // #65レビュー質問決定: 「前へ」で戻っている途中にonErrorになった場合は
+  // loadPreviousImageでさらに戻る、前進中（既定含む）は次へ進む
+  // （continueInLastDirectionが直近の方向を引き継ぐ）。
   const handleMediaError = (path: string) => {
     void undoDisplayCount(path).catch((err) => {
       console.error('Failed to undo display count:', err);
     });
-    void loadNextImage();
+    void continueInLastDirection();
   };
 
   // キーボードショートカット
@@ -306,7 +315,10 @@ function App() {
     // （テスト担当が発見）。hasDirectory は既に true（前回ディレクトリはあった）
     // なので「ようこそ」ではなく専用の案内にする。
     if (directoryError) {
-      return { title: uiText.directoryUnreachableTitle, subtitle: '' };
+      return {
+        title: uiText.directoryUnreachableTitle,
+        subtitle: uiText.directoryUnreachableSubtitle,
+      };
     }
     return null; // 読込中（初回表示待ち）。ローディング画面はisInitializedの分岐が別途担当。
   })();
@@ -314,16 +326,20 @@ function App() {
   // #65レビュー修正: 復元成功後のバックグラウンドスキャン失敗は、既に最初の画像を
   // 表示できている（currentImage != null）ため上の全画面案内は出さない。写真を
   // 邪魔しない控えめな通知（下部トースト、数秒で自動的に消える）で理由を出す。
-  // notice（rootUnavailable/loadFailedGaveUp）優先度を最優先にし、無ければ
+  // notice（rootUnavailable/loadFailedGaveUp/error）優先度を最優先にし、無ければ
   // directoryError を出す（同時に出て重なるのを防ぐ）。
+  // #65レビューS3: 鑑賞中に invoke の reject（error通知）が起きた場合も同じ
+  // トーストで見せる（useSlideshow側が表示間隔ごとに自動再試行する）。
   const bottomNotice: string | null =
     notice?.kind === 'rootUnavailable'
       ? noticeMessages.rootUnavailable
       : notice?.kind === 'loadFailedGaveUp'
         ? noticeMessages.loadFailedGaveUp
-        : directoryError
-          ? noticeMessages.startupDirectoryRejected(directoryError)
-          : null;
+        : notice?.kind === 'error'
+          ? notice.message
+          : directoryError
+            ? noticeMessages.startupDirectoryRejected(directoryError)
+            : null;
 
   // directoryError による下部トーストだけは数秒で自動的に消す（notice由来の通知は
   // 次の正常な画像取得時にnoticeがnullへ戻るため対象外。上の全画面案内側は
@@ -380,6 +396,7 @@ function App() {
       {/* スライドショー */}
       <Slideshow
         image={currentImage}
+        displayToken={displayToken}
         isPlaying={isPlaying}
         onMediaReady={handleMediaReady}
         onAdvance={loadNextImage}
@@ -407,7 +424,10 @@ function App() {
               <div className="text-white/30 text-sm mb-6">{emptyStateContent.subtitle}</div>
             )}
             {directoryError && (
-              <div className="text-red-400/80 text-xs mb-6">
+              <div
+                className="text-red-400/80 font-mono text-xs mb-6 truncate max-w-[90vw] mx-auto"
+                title={noticeMessages.startupDirectoryRejected(directoryError)}
+              >
                 {noticeMessages.startupDirectoryRejected(directoryError)}
               </div>
             )}
@@ -425,7 +445,10 @@ function App() {
       {/* 控えめな通知（鑑賞中の画像は維持したまま）: フォルダ接続不可・連続読込失敗・
           復元後のバックグラウンドスキャン失敗（#65レビュー修正） */}
       {currentImage && bottomNotice && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 bg-black/80 text-white/50 text-xs px-3 py-2 rounded border border-white/10 whitespace-nowrap">
+        <div
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 bg-black/80 text-white/50 text-xs px-3 py-2 rounded border border-white/10 max-w-[90vw] truncate"
+          title={bottomNotice}
+        >
           {bottomNotice}
         </div>
       )}

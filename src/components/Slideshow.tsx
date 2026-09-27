@@ -6,6 +6,14 @@ import logoBg from '../assets/logo-bg.webp';
 
 interface SlideshowProps {
   image: ImageInfo | null;
+  /**
+   * `found` を受け取るたびに1ずつ増える世代番号（#65レビューM2）。1件だけの
+   * プレイリスト等で同じ `path` が連続で返ると、`key`/`src` が変わらず
+   * `<img onLoad>`/`<video onEnded>` が再発火しない（＝タイマーが張られない・
+   * 動画が永久に止まる）。`key={path + displayToken}` にして必ず新しい
+   * DOM要素として作り直させることで、ブラウザに毎回フレッシュに読み込ませる。
+   */
+  displayToken?: number;
   /** 再生中かどうか（#65: `App.tsx` が導出する派生値）。動画の再生/一時停止に連動させる。 */
   isPlaying?: boolean;
   /** 画像の実表示開始（`<img onLoad>`）を通知する。タイマー起点に使う（#65 問題6）。 */
@@ -18,6 +26,7 @@ interface SlideshowProps {
 
 export function Slideshow({
   image,
+  displayToken = 0,
   isPlaying = false,
   onMediaReady,
   onAdvance,
@@ -30,12 +39,17 @@ export function Slideshow({
   // 永久に同じ最終フレームで止まっていた不具合の修正。
   const pendingEndedRef = useRef(false);
 
+  // #65レビューM2: 同じpathが連続で返っても(1件プレイリスト等)、displayTokenは
+  // 必ず新しい値になるのでkeyが変わり、DOM要素ごと作り直される。
+  const mediaKey = `${image?.path ?? ''}::${displayToken}`;
+
   // メディアが切り替わったら、直前のメディアの「一時停止中に終了した」予約を
   // 持ち越さない（一時停止中に手動でnext/prevして別のメディアに切り替えた場合、
-  // 古い予約が新しいメディアの再開時に誤発火するのを防ぐ）。
+  // 古い予約が新しいメディアの再開時に誤発火するのを防ぐ）。同じpathの連続表示
+  // （displayTokenだけが変わる）でも同様にリセットする。
   useEffect(() => {
     pendingEndedRef.current = false;
-  }, [image?.path]);
+  }, [mediaKey]);
 
   useEffect(() => {
     // 画像のみの場合はvideoRefがnullなので何もしない。
@@ -60,7 +74,7 @@ export function Slideshow({
     } else {
       video.pause();
     }
-  }, [isPlaying, onAdvance, image?.path]);
+  }, [isPlaying, onAdvance, mediaKey]);
 
   if (!image) {
     return <div className="w-screen h-screen bg-black" />;
@@ -81,7 +95,7 @@ export function Slideshow({
         {image.isVideo ? (
           // 動画の場合。再生/一時停止は isPlaying prop に完全連動させる（上のeffect）。
           <motion.video
-            key={image.path}
+            key={mediaKey}
             ref={videoRef}
             src={srcUrl}
             initial={{ opacity: 0 }}
@@ -93,6 +107,14 @@ export function Slideshow({
               willChange: 'opacity',
             }}
             muted
+            // #65レビューM1: AnimatePresence mode="wait" は前の要素の退場アニメーション
+            // (500ms)が終わるまで新しい<video>を実際にはマウントしない。isPlayingの
+            // 変化を見る上のeffectは「pathが変わった瞬間」にも発火するが、その時点では
+            // videoRefがまだ古い（退場中の）要素を指しているか空で、新要素へのplay()が
+            // 一度も呼ばれないまま止まってしまっていた（画像→動画、動画→動画の2本目）。
+            // autoPlayはブラウザ/WebViewが実際に要素をDOMへ挿入した瞬間に評価される
+            // ため、このタイミング問題を回避できる。
+            autoPlay={isPlaying}
             onEnded={() => {
               if (isPlaying) {
                 onAdvance?.();
@@ -119,7 +141,7 @@ export function Slideshow({
           // キャッシュを返す（image_processor::plan_cache_file/requires_synchronous_cache）
           // ため、原本を返さない限りfrom-imageが誤って回転させることはない。
           <motion.img
-            key={image.path}
+            key={mediaKey}
             src={srcUrl}
             // #65問題8: フルパスのalt文字列が読込失敗時に1間隔ぶんそのまま表示されて
             // いた（altテキストはブロードキャストされる代替表示のため）。写真が主役の

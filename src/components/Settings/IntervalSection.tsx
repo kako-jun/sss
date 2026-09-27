@@ -22,6 +22,9 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
   const [numberText, setNumberText] = useState<string>(String(DEFAULT_DISPLAY_INTERVAL / 1000));
 
   const saveTimeoutRef = useRef<number | undefined>(undefined);
+  // #65レビューS5: debounce中の保存先（ms）を覚えておき、unmount時に破棄せず
+  // flushできるようにする。
+  const pendingMsRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     getSetting('display_interval')
@@ -36,8 +39,18 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
 
   useEffect(() => {
     return () => {
+      // #65レビューS5: debounce中の保存を「捨てる」のではなく「即座に確定させる」。
+      // 以前はclearTimeoutするだけで、スライダーを動かした直後に設定画面を閉じる
+      // （このコンポーネントがunmountする）と、まだ発火していないdebounce保存が
+      // 静かに消え、DBには古い値が残ったままになっていた。
       if (saveTimeoutRef.current !== undefined) {
         window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = undefined;
+        if (pendingMsRef.current !== undefined) {
+          saveSetting('display_interval', pendingMsRef.current.toString()).catch((err) => {
+            console.error('Failed to flush pending display interval on unmount:', err);
+          });
+        }
       }
     };
   }, []);
@@ -46,8 +59,10 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
     if (saveTimeoutRef.current !== undefined) {
       window.clearTimeout(saveTimeoutRef.current);
     }
+    pendingMsRef.current = ms;
     saveTimeoutRef.current = window.setTimeout(() => {
       saveTimeoutRef.current = undefined;
+      pendingMsRef.current = undefined;
       saveSetting('display_interval', ms.toString()).catch((err) => {
         console.error('Failed to save display interval:', err);
       });
@@ -59,6 +74,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
       window.clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = undefined;
     }
+    pendingMsRef.current = undefined;
     saveSetting('display_interval', ms.toString()).catch((err) => {
       console.error('Failed to save display interval:', err);
     });

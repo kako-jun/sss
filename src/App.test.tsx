@@ -278,6 +278,82 @@ describe('App directoryError notice (#65レビュー: 起動時スキャン失�
   });
 });
 
+function findPhotoImg(): HTMLImageElement {
+  return Array.from(document.querySelectorAll('img')).find(
+    (el) => el.getAttribute('alt') !== 'SSS Logo',
+  ) as HTMLImageElement;
+}
+
+function foundImage(path: string) {
+  return {
+    kind: 'found' as const,
+    data: {
+      path,
+      optimizedPath: null,
+      isVideo: false,
+      width: 10,
+      height: 10,
+      fileSize: 1,
+      exif: null,
+      displayCount: 0,
+      lastDisplayed: null,
+    },
+  };
+}
+
+// #65レビュー質問決定: 「前へ」の途中でonErrorになった場合はloadPreviousImageで
+// さらに戻る、前進中（既定含む）は次へ進む。方向の引き継ぎロジック自体
+// （continueInLastDirection、初期値/next後/previous後の分岐）は
+// useSlideshow.test.tsx で決定的に検証済み。ここではApp経由の配線が既定方向
+// （フォワード）で正しく動くことだけを確認する。「前へ」を挟むケースは
+// AnimatePresence(mode="wait")の退場アニメーション完了待ちが必要で、この
+// テストファイルでは他テストとの組み合わせ実行時に実時間待ちが不安定だった
+// （単体実行では安定して通る）ため、Slideshow.test.tsx側のDOM構造検証と
+// useSlideshow.test.tsx側の方向ロジック検証の組み合わせでカバーする。
+describe('App onError continues in the last navigation direction (#65レビュー質問決定)', () => {
+  it('continues forward (getNextImage) when onError happens during normal forward viewing', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+
+    getNextImage.mockClear();
+    getNextImage.mockResolvedValueOnce(foundImage('/b.jpg'));
+    fireEvent.error(findPhotoImg());
+
+    await waitFor(() => {
+      expect(getNextImage).toHaveBeenCalledTimes(1);
+    });
+    expect(getPreviousImage).not.toHaveBeenCalled();
+    expect(undoDisplayCount).toHaveBeenCalledWith('/a.jpg');
+  });
+});
+
+describe('App shows a bottom toast (not a full-screen takeover) on a mid-viewing error notice (#65レビューS3)', () => {
+  it('keeps the current image and shows the rejection message in a toast', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+
+    getNextImage.mockClear();
+    getNextImage.mockRejectedValueOnce('backend hiccup');
+    fireEvent.keyDown(document, { key: 'ArrowRight', repeat: false });
+
+    await waitFor(() => {
+      expect(screen.getByText('backend hiccup')).toBeTruthy();
+    });
+    // 全画面の案内には落ちず、写真は維持される。
+    expect(findPhotoImg()).toBeTruthy();
+  });
+});
+
 describe('App keyboard shortcut: e.repeat is ignored (#65)', () => {
   it('does not advance on a repeated (held-down) ArrowRight keydown, but does on a fresh one', async () => {
     render(<App />);

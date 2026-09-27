@@ -128,4 +128,35 @@ describe('IntervalSection slider (#65 問題7: 毎ステップDB書込しない)
     expect(onIntervalChange).toHaveBeenCalledWith(15000);
     expect(range.value).toBe('15');
   });
+
+  it('flushes a still-pending debounced save on unmount instead of discarding it (#65レビューS5)', () => {
+    const { unmount } = render(<IntervalSection />);
+    const range = slider();
+
+    fireEvent.change(range, { target: { value: '45' } });
+    // debounce(400ms)が発火する前に設定画面を閉じた(=unmount)想定。
+    expect(saveSetting).not.toHaveBeenCalled();
+
+    unmount();
+
+    // 以前はclearTimeoutするだけで、この保留中の保存が静かに失われていた。
+    expect(saveSetting).toHaveBeenCalledTimes(1);
+    expect(saveSetting).toHaveBeenCalledWith('display_interval', '45000');
+  });
+
+  it('does not double-save on unmount when nothing is pending (already committed)', async () => {
+    const { unmount } = render(<IntervalSection />);
+    const range = slider();
+
+    fireEvent.change(range, { target: { value: '45' } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(saveSetting).toHaveBeenCalledTimes(1);
+    saveSetting.mockClear();
+
+    unmount();
+
+    expect(saveSetting).not.toHaveBeenCalled();
+  });
 });

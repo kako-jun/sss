@@ -30,6 +30,9 @@ export const uiText = {
   // 失敗した場合の案内タイトル。ディレクトリ自体は設定済みなので「ようこそ」とは
   // 区別する。理由の詳細は noticeMessages.startupDirectoryRejected を別行で表示する。
   directoryUnreachableTitle: '前回のフォルダを読めません',
+  // #65レビューnit: 「読めません」だけでは次に何をすればいいか分からないため、
+  // 取れる行動を明示する。
+  directoryUnreachableSubtitle: '接続を確認するか、設定から別のフォルダを選んでください',
 } as const;
 
 /**
