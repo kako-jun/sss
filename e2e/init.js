@@ -20,12 +20,21 @@
 
   // #65レビューM2: 1件だけのプレイリストで同じpathが連続で返るケース（'one'）。
   // #65レビューM1: 画像→動画→動画のように退場アニメーションを挟む連続遷移（'i2v_vv'）。
+  // #65レビュー2巡目S8: 一時停止中に動画へ移っても再生されない/再開後に再生される
+  // ことを検証する（'pausevid'）。壊れた画像でonErrorが実際に発火し、undoが
+  // 呼ばれて次へ進むことを検証する（'broken'、'/p/broken.png'はデコード不能な
+  // 壊れたPNGバイト列で実ブラウザに本物のonErrorを起こさせる）。
   const seqs = {
     slides: ['/p/a.png', '/p/b.png'],
     i2v_vv: ['/p/a.png', '/p/v.webm', '/p/v2.webm', '/p/a.png'],
     one: ['/p/a.png'],
     toast: ['/p/a.png'],
     unreach: ['/p/a.png'],
+    pausevid: ['/p/a.png', '/p/v.webm', '/p/b.png'],
+    broken: ['/p/broken.png', '/p/b.png', '/p/a.png'],
+    // #65レビュー2巡目S8: 動画のみを連続させ、退場中の古い動画要素が
+    // play()で再生し直されないことを画像の待ち時間なしに検証する。
+    vv: ['/p/v.webm', '/p/v2.webm'],
   };
   media['/p/v2.webm'] = media['/p/v.webm'];
 
@@ -80,6 +89,17 @@
           return { totalFiles: (seqs[sc] || seqs.slides).length };
         case 'get_next_image': {
           if (sc === 'empty') return { kind: 'emptyPlaylist' };
+          if (sc === 'root') {
+            // #65レビューS4/S9: rootUnavailableが自動再試行で回復するまでの経路。
+            // 1回目=見つかる(a)、2〜3回目=rootUnavailable、4回目以降=見つかる(b)。
+            // 一時停止中はuseSlideshow側が再試行effectを止めているはずなので、
+            // このカウンタは「実際にget_next_imageが呼ばれた回数」だけが進む。
+            window.__rc = (window.__rc || 0) + 1;
+            if (window.__rc >= 2 && window.__rc <= 3) return { kind: 'rootUnavailable' };
+            const p = window.__rc === 1 ? '/p/a.png' : '/p/b.png';
+            window.__e2eCurrentPath = p;
+            return { kind: 'found', data: info(p) };
+          }
           const s = seqs[sc] || seqs.slides;
           idx = (idx + 1) % s.length;
           // e2e/run.js が「今どの論理パスが表示されているか」を、DOMのsrc

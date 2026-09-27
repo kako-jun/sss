@@ -24,6 +24,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import http from 'node:http';
+import net from 'node:net';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, '..');
@@ -31,17 +32,54 @@ const PORT = 1420;
 const BASE_URL = `http://localhost:${PORT}`;
 const INIT_SCRIPT = path.join(__dirname, 'init.js');
 
-/** vite dev サーバーが応答するまで待つ。 */
-function waitForServer(url, timeoutMs) {
+/**
+ * ポートが既に使用中かどうかを、実際にbindを試みて確認する（#65レビュー2巡目）。
+ * README で謳っている「先に別のdevサーバーが動いていると起動に失敗する」を、
+ * vite起動→タイムアウト待ちという遠回りではなく、起動前に即座に検出する。
+ */
+function isPortInUse(port) {
+  return new Promise((resolve) => {
+    const tester = net
+      .createServer()
+      .once('error', () => resolve(true))
+      .once('listening', () => tester.close(() => resolve(false)))
+      .listen(port, '127.0.0.1');
+  });
+}
+
+/**
+ * vite dev サーバーが応答するまで待つ。子プロセスがその前に終了した場合は
+ * タイムアウトを待たず即座にreject する（#65レビュー2巡目: 以前はポート使用中で
+ * viteが即終了してもタイムアウトの15秒をまるごと無駄に待っていた）。
+ */
+function waitForServer(url, timeoutMs, viteProcess) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const onExit = (code, signal) => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`vite dev サーバーが起動前に終了した (code=${code}, signal=${signal})`));
+    };
+    viteProcess.once('exit', onExit);
+    viteProcess.once('error', onExit);
+
     const attempt = () => {
+      if (settled) return;
       const req = http.get(url, (res) => {
         res.resume();
+        if (settled) return;
+        settled = true;
+        viteProcess.off('exit', onExit);
+        viteProcess.off('error', onExit);
         resolve();
       });
       req.on('error', () => {
+        if (settled) return;
         if (Date.now() > deadline) {
+          settled = true;
+          viteProcess.off('exit', onExit);
+          viteProcess.off('error', onExit);
           reject(new Error(`vite dev サーバーが ${timeoutMs}ms 以内に起動しなかった: ${url}`));
           return;
         }
@@ -104,6 +142,24 @@ async function findPhotoImgDisplay(page) {
     if (!img) return null;
     return { display: getComputedStyle(img).display, src: img.src.slice(0, 40) };
   });
+}
+
+/**
+ * ボタンをJS経由で直接クリックする（実マウント移動を伴わない）。
+ * `page.click()`はホバーも実施するため、OverlayUI内のボタンをクリックすると
+ * `isOverlayHovered`も同時にtrueになり、`isPausedByUser`単体の効果を検証しにくい。
+ * `.click()`はCSSのpointer-events/実ホバー状態と無関係にclickイベントを発火できる。
+ */
+async function clickButtonByTitle(page, title) {
+  await page.evaluate((t) => {
+    const btn = document.querySelector(`button[title="${t}"]`);
+    if (!btn) throw new Error(`button[title="${t}"] が見つからない`);
+    btn.click();
+  }, title);
+}
+
+async function countCalls(page, cmd) {
+  return page.evaluate((c) => window.__e2eLog.filter((l) => l[1] === c).length, cmd);
 }
 
 const scenarios = [
@@ -210,9 +266,179 @@ const scenarios = [
       };
     },
   },
+  {
+    // #65レビュー2巡目: 一時停止中に動画へ移っても再生されない（autoPlayが
+    // isPlaying=falseで評価される）、再開すると再生され、終了後は次へ進む。
+    name: 'paused video does not autoplay; resumes on unpause and advances on end',
+    hash: 'pausevid',
+    async run(page) {
+      await page.waitForTimeout(1200); // 最初の画像(a)の表示を待つ
+      await clickButtonByTitle(page, '一時停止');
+      await page.keyboard.press('ArrowRight'); // 動画へ手動で進む(一時停止中でも進める)
+      await page.waitForTimeout(900);
+
+      const whilePaused = await page.evaluate(() => {
+        const v = document.querySelector('video');
+        return v ? { paused: v.paused, t: +v.currentTime.toFixed(2) } : null;
+      });
+      // 一時停止中はvideoが再生されていない(autoPlay={false})はず。
+      // 少し待っても currentTime が進んでいないことも確認する。
+      await page.waitForTimeout(500);
+      const stillPaused = await page.evaluate(() => {
+        const v = document.querySelector('video');
+        return v ? { paused: v.paused, t: +v.currentTime.toFixed(2) } : null;
+      });
+      const notPlayingWhilePaused =
+        !!whilePaused &&
+        whilePaused.paused === true &&
+        !!stillPaused &&
+        stillPaused.paused === true &&
+        stillPaused.t <= whilePaused.t + 0.05;
+
+      const nextsBeforeResume = await countCalls(page, 'get_next_image');
+      await clickButtonByTitle(page, '再生');
+      await page.waitForTimeout(600);
+      const afterResume = await page.evaluate(() => {
+        const v = document.querySelector('video');
+        return v ? { paused: v.paused } : null;
+      });
+      const playingAfterResume = !!afterResume && afterResume.paused === false;
+
+      // 動画が終了して次(b.png)へ進むまで待つ。
+      const deadline = Date.now() + 8000;
+      let advanced = false;
+      while (Date.now() < deadline) {
+        const nexts = await countCalls(page, 'get_next_image');
+        if (nexts > nextsBeforeResume) {
+          advanced = true;
+          break;
+        }
+        await page.waitForTimeout(300);
+      }
+
+      return {
+        pass: notPlayingWhilePaused && playingAfterResume && advanced,
+        detail: `whilePaused=${JSON.stringify(whilePaused)} stillPaused=${JSON.stringify(stillPaused)} afterResume=${JSON.stringify(afterResume)} advanced=${advanced}`,
+      };
+    },
+  },
+  {
+    // #65レビュー2巡目S9(must): 一時停止中はrootUnavailableの自動再試行が
+    // 裏で進まない。再開すると表示間隔ごとの再試行が効いて最終的に回復する。
+    name: 'rootUnavailable does not auto-retry while paused, retries after resume (S4/S9)',
+    hash: 'root',
+    async run(page) {
+      await page.waitForTimeout(1200); // 1回目: found(a)
+      await clickButtonByTitle(page, '一時停止');
+      await page.keyboard.press('ArrowRight'); // 2回目: rootUnavailable
+      await page.waitForTimeout(800);
+
+      const nextsWhilePaused = await countCalls(page, 'get_next_image');
+      // display_interval=5秒。一時停止中はこの間ずっと再試行が起きないはず。
+      await page.waitForTimeout(6000);
+      const nextsAfterWaitingPaused = await countCalls(page, 'get_next_image');
+      const noRetryWhilePaused = nextsAfterWaitingPaused === nextsWhilePaused;
+
+      // 直前の画像(a)を維持しているはず(rootUnavailableは画像を消さない)。
+      const photoWhilePaused = await findPhotoImgDisplay(page);
+
+      await clickButtonByTitle(page, '再生');
+      const deadline = Date.now() + 12000;
+      let recovered = false;
+      while (Date.now() < deadline) {
+        const found = await isVisible(page, '前回のフォルダを読めません');
+        const nexts = await countCalls(page, 'get_next_image');
+        if (!found && nexts >= nextsAfterWaitingPaused + 2) {
+          recovered = true;
+          break;
+        }
+        await page.waitForTimeout(500);
+      }
+
+      return {
+        pass: noRetryWhilePaused && !!photoWhilePaused && recovered,
+        detail: `noRetryWhilePaused=${noRetryWhilePaused} photoWhilePaused=${JSON.stringify(photoWhilePaused)} recovered=${recovered}`,
+      };
+    },
+  },
+  {
+    // #65レビュー2巡目: 壊れた画像(実ブラウザで本物のonErrorが起きるデータURI)は
+    // undo_display_countが呼ばれてから即座に次へ進む。
+    name: 'a broken image fires a real onError, calls undo, and advances',
+    hash: 'broken',
+    async run(page) {
+      const deadline = Date.now() + 8000;
+      let pass = false;
+      let lastDetail = '';
+      while (Date.now() < deadline) {
+        const undoCalls = await countCalls(page, 'undo_display_count');
+        const nexts = await countCalls(page, 'get_next_image');
+        lastDetail = `undoCalls=${undoCalls} nexts=${nexts}`;
+        if (undoCalls >= 1 && nexts >= 2) {
+          pass = true;
+          break;
+        }
+        await page.waitForTimeout(300);
+      }
+      return { pass, detail: lastDetail };
+    },
+  },
+  {
+    // #65レビュー2巡目S8(must): 動画→動画の遷移で、退場中の古い動画要素が
+    // play()で先頭から再生し直されない（＝短い動画でonEndedが二重発火して
+    // 1枚飛ばすことがない）。同一DOM要素をJSのexpandoプロパティでタグ付けし、
+    // 「ended済みだった同一要素が、少し後にended=falseかつcurrentTime≈0で
+    // 再び観測される」という再生し直しの兆候が無いことを高頻度サンプリングで
+    // 確認する。
+    name: 'video→video: the old (exiting) video element is not replayed from the start (S8)',
+    hash: 'vv',
+    async run(page) {
+      let prevEndedSameElement = false;
+      let regression = null;
+      const seenPaths = new Set();
+      const deadline = Date.now() + 6000;
+      while (Date.now() < deadline && !regression) {
+        const sample = await page.evaluate(() => {
+          const v = document.querySelector('video');
+          if (!v) return null;
+          const isNewElement = !v.__e2eTagged;
+          v.__e2eTagged = true;
+          return {
+            path: window.__e2eCurrentPath,
+            t: +v.currentTime.toFixed(3),
+            ended: v.ended,
+            isNewElement,
+          };
+        });
+        if (sample) {
+          seenPaths.add(sample.path);
+          if (sample.isNewElement) {
+            prevEndedSameElement = false;
+          } else if (prevEndedSameElement && !sample.ended && sample.t < 0.1) {
+            regression = sample;
+          }
+          prevEndedSameElement = sample.ended;
+        }
+        await page.waitForTimeout(30);
+      }
+      const bothVideosSeen = seenPaths.has('/p/v.webm') && seenPaths.has('/p/v2.webm');
+      return {
+        pass: !regression && bothVideosSeen,
+        detail: regression
+          ? `古い動画要素が再生し直された兆候: ${JSON.stringify(regression)}`
+          : `bothVideosSeen=${bothVideosSeen} seenPaths=${[...seenPaths].join(',')}`,
+      };
+    },
+  },
 ];
 
 async function main() {
+  if (await isPortInUse(PORT)) {
+    throw new Error(
+      `ポート ${PORT} は既に使用中（別の dev サーバーが動いている可能性）。先に閉じてから実行してください。`,
+    );
+  }
+
   console.log(`[e2e] vite dev サーバーを起動中 (port ${PORT})...`);
   const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
     cwd: projectRoot,
@@ -238,7 +464,7 @@ async function main() {
 
   try {
     try {
-      await waitForServer(BASE_URL, 15000);
+      await waitForServer(BASE_URL, 15000, vite);
     } catch (err) {
       console.error(viteOutput);
       throw err;
