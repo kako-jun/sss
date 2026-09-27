@@ -509,9 +509,14 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 ## CI/CD
 
-- **CI**: `.github/workflows/ci.yml` — push/PR to main triggers `cargo fmt --check` / `cargo clippy` / `cargo check` + `npm run build`
-- **Release**: `.github/workflows/release.yml` — manual dispatch or tag `v*`, 3-OS matrix (macOS/Linux/Windows), tauri-action
+- **CI**: `.github/workflows/ci.yml` — push/PR to main で3ジョブ実行
+  - `check`（ubuntu-22.04）: `npm run lint` / `npm run format:check` / `npm run build` / `npm test`（vitest）/ `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test`
+  - `cross-platform`（windows-latest / macos-latest）: `cargo clippy --all-targets` / `cargo test`。`#[cfg(windows)]`/`#[cfg(target_os = "macos")]` 配下のコード・実機限定テストは ubuntu だけでは一度もコンパイルされないため（#63 で発覚した Windows 固有バグの反省）
+  - `audit`: `rustsec/audit-check` で Rust 依存関係の既知脆弱性を検査
+  - `npm run e2e` は CI に含めない（実ブラウザ/実ファイル前提のため手動実行）
+- **Release**: `.github/workflows/release.yml` — 手動 dispatch。`validate` ジョブで入力 version と `tauri.conf.json`/`Cargo.toml`/`package.json` の version 一致チェック（不一致で fail）、`npm test`/`cargo test` 実行、CHANGELOG.md に対応する `[version]` 節がなければ fail。通過後に3-OS matrix（macOS/Linux/Windows）で `tauri-action` がビルドし、release note は CHANGELOG.md の該当節へのリンク。**成果物は署名なし**（macOS Gatekeeper/Windows SmartScreen の回避手順は README に追記予定、#71）
 - **Pre-commit**: Husky + lint-staged (`eslint --fix` + `prettier` for TS/JS, `prettier` for JSON/CSS/MD) + `cargo fmt`
+- **CHANGELOG.md**: Keep a Changelog 形式。v1.0.0 以降の変更を記録。**#80 以降、コード変更を伴う PR は自分の変更を `[Unreleased]` セクションに追記する**
 
 ## TODO: 仕様変更・機能追加
 

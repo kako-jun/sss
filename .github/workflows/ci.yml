@@ -21,6 +21,12 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
       - name: Build frontend
         run: npm run build
 
@@ -48,12 +54,67 @@ jobs:
 
       - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy -- -D warnings
-
-      - name: Cargo check
-        working-directory: src-tauri
-        run: cargo check
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Cargo test
         working-directory: src-tauri
         run: cargo test
+
+  # ubuntu の clippy/test だけでは cfg(windows) / cfg(target_os = "macos") 配下の
+  # コードが一度もコンパイルされず、そこに潜む不具合（#63 で見つかった Windows 固有の
+  # LIKE エスケープ漏れ等）を検出できない。OS 固有分岐と #[cfg(windows)] 実機限定
+  # テスト（asset_scope.rs）を実際にコンパイル・実行する。
+  cross-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        # tauri_build::build() が起動時に frontendDist (../dist) の実在を検証するため、
+        # Rust 側のビルド・テストの前提としてフロントエンドのビルドが必要
+        run: npm run build
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test
+
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Audit Rust dependencies
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
