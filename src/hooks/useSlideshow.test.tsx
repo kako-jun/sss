@@ -158,6 +158,129 @@ describe('loadPreviousImage', () => {
     expect(result.current.notice).toBeNull();
     expect(result.current.currentImage).toBeNull();
   });
+
+  // #65: loadPreviousImage は loadNextImage の applyNextResult を再利用せず、
+  // ImageNavigationResult の分岐を独自実装している（noHistoryだけが違う）。
+  // found/noHistory以外の分岐が対称に抜け落ちていたため追加する（観点の欠落防止）。
+  it('keeps the previous image and sets a rootUnavailable notice on "rootUnavailable"', async () => {
+    getPreviousImage.mockResolvedValueOnce(found('/first.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+
+    getPreviousImage.mockResolvedValueOnce({
+      kind: 'rootUnavailable',
+    } satisfies ImageNavigationResult);
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+
+    expect(result.current.currentImage?.path).toBe('/first.jpg');
+    expect(result.current.notice).toEqual({ kind: 'rootUnavailable' });
+  });
+
+  it('sets an emptyPlaylist notice and clears currentImage on "emptyPlaylist"', async () => {
+    getPreviousImage.mockResolvedValue({ kind: 'emptyPlaylist' } satisfies ImageNavigationResult);
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    expect(result.current.currentImage).toBeNull();
+    expect(result.current.notice).toEqual({ kind: 'emptyPlaylist' });
+  });
+
+  it('auto-retries on "loadFailed" until it finds an image', async () => {
+    getPreviousImage
+      .mockResolvedValueOnce({ kind: 'loadFailed' } satisfies ImageNavigationResult)
+      .mockResolvedValueOnce({ kind: 'loadFailed' } satisfies ImageNavigationResult)
+      .mockResolvedValueOnce(found('/older.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    expect(getPreviousImage).toHaveBeenCalledTimes(3);
+    expect(result.current.currentImage?.path).toBe('/older.jpg');
+    expect(result.current.notice).toBeNull();
+  });
+
+  it('gives up with a loadFailedGaveUp notice after the consecutive-failure cap', async () => {
+    getPreviousImage.mockResolvedValue({ kind: 'loadFailed' } satisfies ImageNavigationResult);
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    expect(result.current.notice).toEqual({ kind: 'loadFailedGaveUp' });
+    expect(getPreviousImage.mock.calls.length).toBeGreaterThan(1);
+    expect(getPreviousImage.mock.calls.length).toBeLessThan(50);
+  });
+
+  it('captures rejections via String(err), independently from loadNextImage', async () => {
+    getPreviousImage.mockRejectedValue(new Error('disk gone'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    expect(result.current.notice).toEqual({ kind: 'error', message: 'Error: disk gone' });
+  });
+});
+
+// 決定表: 「読込失敗の連続上限-1／上限／上限+1」を next/previous 両方で明示的に
+// ピン留めする。#65実装の MAX_CONSECUTIVE_LOAD_FAILURES は5（フックのプライベート
+// 定数でエクスポートされていないため実測値を直書きする。変わったらこのテストが
+// 赤くなって気付ける）。
+describe('loadNextImage/loadPreviousImage: consecutive-failure cap boundary (上限-1/上限/上限+1)', () => {
+  const MAX = 5;
+
+  it('loadNextImage: cap-1 (4) failures then success does NOT give up (calls exactly 5 times)', async () => {
+    for (let i = 0; i < MAX - 1; i++) {
+      getNextImage.mockResolvedValueOnce({ kind: 'loadFailed' } satisfies ImageNavigationResult);
+    }
+    getNextImage.mockResolvedValueOnce(found('/saved-at-last-try.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(getNextImage).toHaveBeenCalledTimes(MAX);
+    expect(result.current.currentImage?.path).toBe('/saved-at-last-try.jpg');
+    expect(result.current.notice).toBeNull();
+  });
+
+  it('loadNextImage: exactly cap (5) consecutive failures gives up after exactly 5 calls', async () => {
+    getNextImage.mockResolvedValue({ kind: 'loadFailed' } satisfies ImageNavigationResult);
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(getNextImage).toHaveBeenCalledTimes(MAX);
+    expect(result.current.notice).toEqual({ kind: 'loadFailedGaveUp' });
+  });
+
+  it('loadPreviousImage: cap-1 (4) failures then success does NOT give up (calls exactly 5 times)', async () => {
+    for (let i = 0; i < MAX - 1; i++) {
+      getPreviousImage.mockResolvedValueOnce({
+        kind: 'loadFailed',
+      } satisfies ImageNavigationResult);
+    }
+    getPreviousImage.mockResolvedValueOnce(found('/saved-at-last-try.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    expect(getPreviousImage).toHaveBeenCalledTimes(MAX);
+    expect(result.current.currentImage?.path).toBe('/saved-at-last-try.jpg');
+    expect(result.current.notice).toBeNull();
+  });
+
+  it('loadPreviousImage: exactly cap (5) consecutive failures gives up after exactly 5 calls', async () => {
+    getPreviousImage.mockResolvedValue({ kind: 'loadFailed' } satisfies ImageNavigationResult);
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    expect(getPreviousImage).toHaveBeenCalledTimes(MAX);
+    expect(result.current.notice).toEqual({ kind: 'loadFailedGaveUp' });
+  });
 });
 
 describe('concurrency guard + request id (#65 問題3)', () => {
@@ -214,6 +337,82 @@ describe('concurrency guard + request id (#65 問題3)', () => {
     resolveFirst(found('/next.jpg'));
     await firstCall;
     expect(result.current.currentImage?.path).toBe('/next.jpg');
+  });
+
+  // 対称性: 逆方向（previousがin-flightの間のnext）と、同方向の連打（previousの
+  // 二重呼び出し）も同じガードで防がれることを確認する（決定表の欠落分）。
+  it('blocks an overlapping loadNextImage call while loadPreviousImage is in flight (reverse direction)', async () => {
+    let resolveFirst!: (v: ImageNavigationResult) => void;
+    getPreviousImage.mockImplementationOnce(
+      () =>
+        new Promise<ImageNavigationResult>((res) => {
+          resolveFirst = res;
+        }),
+    );
+    const { result } = renderHook(() => useSlideshow());
+
+    const firstCall = act(async () => {
+      await result.current.loadPreviousImage();
+    });
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(getNextImage).not.toHaveBeenCalled();
+
+    resolveFirst(found('/prev.jpg'));
+    await firstCall;
+    expect(result.current.currentImage?.path).toBe('/prev.jpg');
+  });
+
+  it('ignores an overlapping loadPreviousImage call while another loadPreviousImage is already in flight', async () => {
+    let resolveFirst!: (v: ImageNavigationResult) => void;
+    getPreviousImage.mockImplementationOnce(
+      () =>
+        new Promise<ImageNavigationResult>((res) => {
+          resolveFirst = res;
+        }),
+    );
+    const { result } = renderHook(() => useSlideshow());
+
+    const firstCall = act(async () => {
+      await result.current.loadPreviousImage();
+    });
+
+    await act(async () => {
+      await result.current.loadPreviousImage();
+    });
+    expect(getPreviousImage).toHaveBeenCalledTimes(1);
+
+    resolveFirst(found('/prev-only.jpg'));
+    await firstCall;
+    expect(result.current.currentImage?.path).toBe('/prev-only.jpg');
+  });
+});
+
+describe('unmount cleanup (#65)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  it('clears the pending advance timer on unmount so it never fires afterwards', async () => {
+    getNextImage.mockResolvedValue(found('/img.jpg'));
+    const { result, unmount } = renderHook(() => useSlideshow(5000, true));
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    act(() => result.current.handleMediaReady());
+    getNextImage.mockClear();
+
+    unmount();
+
+    // アンマウント後にタイマーが生きていれば、ここでgetNextImageが呼ばれてしまう
+    // （デタッチされたフックインスタンスの状態を更新しようとして警告も出うる）。
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(getNextImage).not.toHaveBeenCalled();
   });
 });
 
