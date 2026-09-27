@@ -1,6 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { IgnoreRule, ImageNavigationResult, RecentImage, ScanProgress, Stats } from '../types';
+import type {
+  ExcludeOutcome,
+  IgnoreRule,
+  ImageNavigationResult,
+  RecentImage,
+  ScanProgress,
+  Stats,
+} from '../types';
+import { t } from './i18n';
 
 /**
  * デフォルトのピック先ディレクトリパスを取得
@@ -16,7 +24,7 @@ export async function selectDirectory(): Promise<string | null> {
   const selected = await open({
     directory: true,
     multiple: false,
-    title: 'Select Photo Directory',
+    title: t('selectDirectoryDialogTitle'),
   });
 
   if (typeof selected === 'string') {
@@ -125,12 +133,15 @@ export async function pickImage(imagePath: string): Promise<string> {
 
 /**
  * 除外：画像をDBの除外ルールに追加
+ *
+ * #80: 戻り値は構造化データ（`ExcludeOutcome`）。表示文言の組み立ては
+ * 呼び出し側（フロント辞書）が行う。
  */
 export async function excludeImage(
   imagePath: string,
   excludeType: 'date' | 'file' | 'directory',
-): Promise<string> {
-  return await invoke<string>('exclude_image', { imagePath, excludeType });
+): Promise<ExcludeOutcome> {
+  return await invoke<ExcludeOutcome>('exclude_image', { imagePath, excludeType });
 }
 
 /**

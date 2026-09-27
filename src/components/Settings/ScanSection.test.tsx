@@ -4,8 +4,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // #73: scan_directory が asset scope の安全性チェックで拒否されると Err(String) を返す
 // ようになった。Tauri コマンドの Err(String) は Error インスタンスではなく素の文字列で
-// reject されるため（handleScan の catch 参照）、その文字列がそのままエラー表示に
-// 使われることをピン留めする。
+// reject されるため（handleScan の catch 参照）。
+// #80: バックエンドはユーザー向け文言でなくエラーコード（例: "directoryUnsafe"）を
+// 返すようになった。フロントは `resolveScanErrorMessage` でロケールに応じた文言へ
+// 変換して表示する（未知のコードはそのまま表示するフォールバックのみピン留めする）。
 const scanDirectory = vi.fn();
 const getLastDirectoryPath = vi.fn();
 const selectDirectory = vi.fn();
@@ -47,17 +49,27 @@ async function clickScanOnceDirectoryLoaded() {
 }
 
 describe('ScanSection scan error display', () => {
-  it('shows the rejected string reason as-is when scan_directory rejects with a plain string', async () => {
+  it('translates the "directoryUnsafe" error code and interpolates the attempted directory', async () => {
     // Rust側 commands::scan::scan_directory が sanitize_allow_dir で拒否した際に
-    // 返す Err(String) を模した、実際のメッセージ文言そのもの。
-    const rejectionReason =
-      'Cannot use this directory for security reasons (e.g. a system drive root): C:\\';
-    scanDirectory.mockRejectedValue(rejectionReason);
+    // 返す Err(String) を模した実際のエラーコード（#80）。
+    scanDirectory.mockRejectedValue('directoryUnsafe');
 
     await clickScanOnceDirectoryLoaded();
 
     await waitFor(() => {
-      expect(screen.getByText(rejectionReason)).toBeTruthy();
+      expect(
+        screen.getByText('セキュリティ上の理由でこのフォルダは使用できません: /photos/existing'),
+      ).toBeTruthy();
+    });
+  });
+
+  it('falls back to showing an unknown code as-is when scan_directory rejects with a plain string', async () => {
+    scanDirectory.mockRejectedValue('some future unrecognized code');
+
+    await clickScanOnceDirectoryLoaded();
+
+    await waitFor(() => {
+      expect(screen.getByText('some future unrecognized code')).toBeTruthy();
     });
   });
 
@@ -68,7 +80,7 @@ describe('ScanSection scan error display', () => {
     await clickScanOnceDirectoryLoaded();
 
     await waitFor(() => {
-      expect(screen.getByText('Failed to scan directory')).toBeTruthy();
+      expect(screen.getByText('フォルダのスキャンに失敗しました')).toBeTruthy();
     });
   });
 

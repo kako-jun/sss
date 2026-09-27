@@ -16,6 +16,7 @@ import type { ImageInfo } from '../types';
 import { openInExplorer, pickImage, excludeImage } from '../lib/tauri';
 import { useState, useMemo } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { useT } from '../lib/i18n';
 
 interface OverlayUIProps {
   image: ImageInfo | null;
@@ -64,6 +65,7 @@ export function OverlayUI({
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showExcludeSubmenu, setShowExcludeSubmenu] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const t = useT();
 
   const handleOpenDirectory = async () => {
     if (!image) return;
@@ -84,11 +86,11 @@ export function OverlayUI({
 
     try {
       const destPath = await pickImage(image.path);
-      setStatusMessage(`コピー完了: ${destPath}`);
+      setStatusMessage(t('pickCopyDone', { path: destPath }));
       setTimeout(() => setStatusMessage(''), 3000);
     } catch (err) {
       console.error('Failed to share image:', err);
-      setStatusMessage('エラー: コピー失敗');
+      setStatusMessage(t('pickCopyFailed'));
       setTimeout(() => setStatusMessage(''), 3000);
     }
     setShowMoreMenu(false);
@@ -98,18 +100,22 @@ export function OverlayUI({
     if (!image) return;
 
     try {
-      // #61レビュー nit: excludeImage の戻り値は既に「除外パターン追加: ...」を含む
-      // 完成済みメッセージ（バックエンド側で組み立て済み）。ここで再度プレフィックスを
-      // 付けると「除外パターン追加: 除外パターン追加: ...」の二重表示になっていた。
-      const message = await excludeImage(image.path, type);
-      setStatusMessage(message);
+      // #80: excludeImage は構造化データ（pattern/needsRescan）を返す。文言は
+      // フロント辞書側で組み立てる（旧実装はバックエンドが組み立て済みの日本語
+      // 文字列をそのまま表示しており、言語切替に追従できなかった）。
+      const { pattern, needsRescan } = await excludeImage(image.path, type);
+      setStatusMessage(
+        needsRescan
+          ? t('excludeAddedNeedsRescan', { pattern })
+          : t('excludeAddedFile', { pattern }),
+      );
       setTimeout(() => setStatusMessage(''), 3000);
       // #65 問題5: 除外した画像を表示し続けず、即座に次へ進んでプレイリスト
       // 情報（位置/総数）も最新化する。
       onExcluded?.();
     } catch (err) {
       console.error('Failed to exclude image:', err);
-      setStatusMessage('エラー: 除外失敗');
+      setStatusMessage(t('excludeFailed'));
       setTimeout(() => setStatusMessage(''), 3000);
     }
     setShowExcludeSubmenu(false);
@@ -228,7 +234,7 @@ export function OverlayUI({
               </button>
             ) : (
               <div className="w-full h-14 bg-black/20 rounded border border-white/5 flex items-center justify-center">
-                <span className="text-white/15 text-xs">位置情報なし</span>
+                <span className="text-white/15 text-xs">{t('noLocationInfo')}</span>
               </div>
             )}
           </div>
@@ -245,7 +251,7 @@ export function OverlayUI({
                 </div>
               </>
             ) : (
-              <div className="text-white/15 text-xs">日時不明</div>
+              <div className="text-white/15 text-xs">{t('noDateTime')}</div>
             )}
           </div>
 
@@ -282,7 +288,7 @@ export function OverlayUI({
                 setShowExcludeSubmenu(false);
               }}
               className="p-2 rounded transition-colors text-white/30 hover:text-white/60 hover:bg-white/5"
-              title="メニュー"
+              title={t('menuTooltip')}
             >
               <Ellipsis size={18} />
             </button>
@@ -298,7 +304,7 @@ export function OverlayUI({
                     className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/50 hover:text-white/80 transition-colors flex items-center gap-2"
                   >
                     <FolderOpen size={14} />
-                    ファイルマネージャーで開く
+                    {t('openInFileManager')}
                   </button>
 
                   <button
@@ -309,7 +315,7 @@ export function OverlayUI({
                     className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/50 hover:text-white/80 transition-colors flex items-center gap-2"
                   >
                     <HandGrab size={14} />
-                    ピックを見る
+                    {t('viewPicks')}
                   </button>
 
                   {/* 除外サブメニュー */}
@@ -319,7 +325,7 @@ export function OverlayUI({
                       className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/50 hover:text-white/80 transition-colors flex items-center gap-2"
                     >
                       <Ban size={14} />
-                      除外
+                      {t('excludeMenuLabel')}
                       <ChevronRight size={12} className="ml-auto" />
                     </button>
                     {showExcludeSubmenu && (
@@ -328,19 +334,19 @@ export function OverlayUI({
                           onClick={() => handleExclude('date')}
                           className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/50 hover:text-white/80 transition-colors"
                         >
-                          撮影日付で除外
+                          {t('excludeByDate')}
                         </button>
                         <button
                           onClick={() => handleExclude('directory')}
                           className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/50 hover:text-white/80 transition-colors"
                         >
-                          ディレクトリを除外
+                          {t('excludeByDirectory')}
                         </button>
                         <button
                           onClick={() => handleExclude('file')}
                           className="w-full p-2 rounded hover:bg-white/8 text-left text-sm text-white/50 hover:text-white/80 transition-colors"
                         >
-                          ファイルを除外
+                          {t('excludeByFile')}
                         </button>
                       </div>
                     )}
@@ -355,7 +361,7 @@ export function OverlayUI({
             <button
               onClick={handlePick}
               className="p-2 rounded transition-colors text-white/30 hover:text-white/60 hover:bg-white/5"
-              title="ピック（コピー）"
+              title={t('pickTooltip')}
             >
               <HandGrab size={18} />
             </button>
@@ -371,7 +377,7 @@ export function OverlayUI({
                   ? 'text-white/40 hover:text-white/70 hover:bg-white/5'
                   : 'text-white/15 cursor-not-allowed'
               }`}
-              title="前へ (←)"
+              title={t('previousTooltip')}
             >
               <ChevronLeft size={18} />
             </button>
@@ -382,7 +388,7 @@ export function OverlayUI({
             <button
               onClick={onTogglePause}
               className="p-2 rounded transition-colors text-white/40 hover:text-white/70 hover:bg-white/5"
-              title={isPlaying ? '一時停止' : '再生'}
+              title={isPlaying ? t('pauseTooltip') : t('playTooltip')}
             >
               {isPlaying ? <Pause size={18} /> : <Play size={18} />}
             </button>
@@ -393,7 +399,7 @@ export function OverlayUI({
             <button
               onClick={onNext}
               className="p-2 rounded transition-colors text-white/40 hover:text-white/70 hover:bg-white/5"
-              title="次へ (→)"
+              title={t('nextTooltip')}
             >
               <ChevronRight size={18} />
             </button>

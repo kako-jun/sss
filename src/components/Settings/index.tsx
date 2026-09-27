@@ -5,12 +5,14 @@ import { ScanSection } from './ScanSection';
 import { IntervalSection } from './IntervalSection';
 import { SettingsSection } from './SettingsSection';
 import { ShareDirectorySection } from './ShareDirectorySection';
+import { LanguageSection } from './LanguageSection';
 import { ExcludeRulesSection } from './ExcludeRulesSection';
 import { PickSection } from './PickSection';
 import { HistorySection } from './HistorySection';
 import { GraphSection } from './GraphSection';
 import { InfoSection } from './InfoSection';
 import { MODAL_ANIMATION_DURATION } from '../../constants';
+import { useT } from '../../lib/i18n';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -31,6 +33,7 @@ export function Settings({
 }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'scan');
   const [statsKey, setStatsKey] = useState(0); // 統計グラフの強制再マウント用
+  const t = useT();
 
   if (!isOpen) return null;
 
@@ -52,7 +55,7 @@ export function Settings({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-medium text-white/70">設定</h2>
+          <h2 className="text-lg font-medium text-white/70">{t('settingsTitle')}</h2>
           <button onClick={onClose} className="p-1.5 hover:bg-white/8 rounded transition-colors">
             <X className="w-5 h-5 text-white/30 hover:text-white/60" />
           </button>
@@ -68,7 +71,7 @@ export function Settings({
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            入力
+            {t('tabScan')}
           </button>
           <button
             onClick={() => setActiveTab('options')}
@@ -78,7 +81,7 @@ export function Settings({
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            オプション
+            {t('tabOptions')}
           </button>
           <button
             onClick={() => setActiveTab('exclude')}
@@ -88,7 +91,7 @@ export function Settings({
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            除外ルール
+            {t('tabExclude')}
           </button>
           <button
             onClick={() => setActiveTab('pick')}
@@ -98,7 +101,7 @@ export function Settings({
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            ピック
+            {t('tabPick')}
           </button>
           <button
             onClick={() => setActiveTab('history')}
@@ -108,7 +111,7 @@ export function Settings({
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            履歴
+            {t('tabHistory')}
           </button>
           <button
             onClick={() => {
@@ -121,7 +124,7 @@ export function Settings({
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            統計グラフ
+            {t('tabStats')}
           </button>
           <button
             onClick={() => setActiveTab('info')}
@@ -131,7 +134,7 @@ export function Settings({
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            情報
+            {t('tabInfo')}
           </button>
         </div>
 
@@ -143,6 +146,7 @@ export function Settings({
               <IntervalSection onIntervalChange={onIntervalChange} />
               <SettingsSection />
               <ShareDirectorySection />
+              <LanguageSection />
             </div>
           )}
           {activeTab === 'exclude' && (

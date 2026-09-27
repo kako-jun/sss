@@ -150,8 +150,9 @@
 - **起動時自動スキャンで前回ディレクトリが拒否された場合**: 理由をようこそ/
   案内画面に表示する（以前は`console.error`のみで握りつぶしていた）
 
-文言は `src/lib/messages.ts` にキー→文言のフラットな辞書として集約（i18n本体は
-別Issue #80で ja/en に分割する前提の構造）。
+文言は `src/lib/i18n/dictionaries/{ja,en}.ts` にキー→文言のフラットな辞書として
+集約し、`t(key, params?)`（`src/lib/i18n/t.ts`）で参照する（#80。旧
+`src/lib/messages.ts` の `uiText`/`noticeMessages` はこの辞書に統合され削除済み）。
 
 #### 設定画面
 
@@ -159,6 +160,15 @@
 - スキャン実行ボタン
 - スキャン結果表示（追加/更新/削除ファイル数、総ファイル数）
 - 統計情報表示
+
+### 8. 国際化（i18n、#80）
+
+- **辞書**: `src/lib/i18n/dictionaries/{ja,en}.ts`。キー→文言のフラットなオブジェクト（ネストしない）。`{param}`形式のプレースホルダは `t(key, params?)`（`src/lib/i18n/t.ts`）が置換する
+- **★ 新しい文言を追加する時のルール（必ず守る）**: UIに新しい文言を書くときは、コンポーネントに直書きせず必ず `ja.ts`/`en.ts` の**両方に同じキーを同時に追加**してから `t()` で参照する。片方だけ追加した状態でコミットしない（`src/lib/i18n/messages.test.ts` がキー集合の不一致・未使用キー・直書き日本語を検出して落ちる）
+- **言語決定**: `app_settings.language`（`'ja'|'en'|'auto'`、既定 `auto`）→ `auto` は `navigator.language`（`ja`で始まればja、それ以外en）。`src/lib/i18n/store.ts` の `initLocale()`/`setLanguageSetting()` が管理し、`useT()`/`useLocale()`（`useSyncExternalStore`）でReactコンポーネントに配線する。設定画面の言語切替（オプションタブ、`LanguageSection.tsx`）は即座に反映される
+- **バックエンドのユーザー向けエラー**: Rust側は文言でなくエラーコード（`Result<_, String>` のErrに `"directoryNotFound"` や `"invalidPattern:{detail}"` のようなコード文字列）を返す。フロントは `src/lib/i18n/errors.ts` の `resolveScanErrorMessage`/`resolveAddPatternErrorMessage`/`resolveResetAllDataErrorMessage` でロケールに応じた文言へ変換する。ログ専用（`console.error`/`eprintln!`）の文言は英語のままでよく、コード化の対象外
+- **日付は言語によらず常に `YYYY-MM-DD`**（ISO、スラッシュ不可）。数値の桁区切りは `toLocaleString()` など言語に応じて変えてよい
+- **ウィンドウタイトル・`<html lang>`・ダイアログtitle**もロケールに追従する（`App.tsx`のロケール変更effect、`selectDirectory()`の`t('selectDirectoryDialogTitle')`）
 
 ## データベーススキーマ
 

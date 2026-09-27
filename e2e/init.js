@@ -83,12 +83,18 @@
         case 'scan_directory':
           if (sc === 'unreach') {
             await new Promise((r) => setTimeout(r, 100));
-            throw '前回のフォルダが見つかりません: /Volumes/VeryLongNetworkVolumeName/photos/2024/nested/deep/path/that/keeps/going/for/truncate/testing';
+            // #80: 実際のバックエンドはユーザー向け文言でなくエラーコードで返す
+            // （`commands::scan::scan_directory`）。フロントは
+            // `resolveScanErrorMessage` でロケールに応じた文言へ変換する。
+            throw 'directoryNotFound';
           }
           if (sc === 'toast') {
             // restore成功後、少し遅れて背景スキャンが失敗する（#65レビューS3/S4想定経路）。
+            // #80: 既知コードに含まれない任意の文字列（想定外の内部エラー）でも
+            // フォールバックでそのまま表示できることを確認する意図で、あえて
+            // 未知の文字列のままにする。
             await new Promise((r) => setTimeout(r, 500));
-            throw 'NASへの接続が切断されました';
+            throw 'NAS connection lost';
           }
           return { totalFiles: (seqs[sc] || seqs.slides).length };
         case 'get_next_image': {

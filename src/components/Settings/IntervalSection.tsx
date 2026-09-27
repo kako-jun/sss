@@ -6,6 +6,7 @@ import {
   MAX_DISPLAY_INTERVAL,
   clampDisplayInterval,
 } from '../../constants';
+import { useT } from '../../lib/i18n';
 
 interface IntervalSectionProps {
   onIntervalChange?: (interval: number) => void;
@@ -15,6 +16,7 @@ interface IntervalSectionProps {
 const SAVE_DEBOUNCE_MS = 400;
 
 export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
+  const t = useT();
   const [displayInterval, setDisplayInterval] = useState<number>(DEFAULT_DISPLAY_INTERVAL);
   // 数値入力欄の生テキスト。表示中の値(秒)の確定値とは別に持つことで、
   // 「一度クリアしたら即5に置換される」（#65 問題7）ような入力中の押し付けをしない。
@@ -111,7 +113,9 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">表示間隔</h3>
+      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
+        {t('displayIntervalTitle')}
+      </h3>
       <div className="flex items-center gap-4">
         <input
           type="range"
@@ -136,7 +140,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
             }}
             className="w-14 px-2 py-1 bg-black/40 text-white/60 rounded border border-white/8 text-center text-sm focus:outline-none focus:border-white/20"
           />
-          <span className="text-white/30 text-sm">秒</span>
+          <span className="text-white/30 text-sm">{t('secondsUnit', { value: '' })}</span>
         </div>
       </div>
     </div>

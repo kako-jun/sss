@@ -68,13 +68,11 @@ beforeEach(() => {
   excludeImage.mockReset();
 });
 
-describe('OverlayUI exclude status message (#61 レビュー nit)', () => {
-  it('shows the backend message verbatim instead of double-prefixing "除外パターン追加:"', async () => {
-    // バックエンドは既に「除外パターン追加: ...」を含む完成済みメッセージを返す。
-    // フロント側で再度プレフィックスを足すと二重表示になっていた。
-    excludeImage.mockResolvedValue(
-      '除外パターン追加: *.tmp (変更を反映するには再スキャンしてください)',
-    );
+describe('OverlayUI exclude status message (#61レビューnit, #80)', () => {
+  it('builds the "needs rescan" message from the structured backend result (pattern + needsRescan)', async () => {
+    // #80: バックエンドは完成済み文言でなく構造化データ({pattern, needsRescan})を
+    // 返す。フロント辞書側が文言を組み立てる（二重表示の再発防止も兼ねる）。
+    excludeImage.mockResolvedValue({ pattern: '*.tmp', needsRescan: true });
     const image = makeImage();
     render(<OverlayUI image={image} {...requiredProps} />);
 
@@ -83,17 +81,12 @@ describe('OverlayUI exclude status message (#61 レビュー nit)', () => {
     fireEvent.click(screen.getByText('ファイルを除外'));
 
     await screen.findByText('除外パターン追加: *.tmp (変更を反映するには再スキャンしてください)');
-    expect(
-      screen.queryByText(
-        '除外パターン追加: 除外パターン追加: *.tmp (変更を反映するには再スキャンしてください)',
-      ),
-    ).toBeNull();
   });
 });
 
 describe('OverlayUI exclude advances immediately (#65 問題5)', () => {
   it('calls onExcluded after a successful exclude so the caller can advance + refresh playlist info', async () => {
-    excludeImage.mockResolvedValue('除外パターン追加: *.tmp');
+    excludeImage.mockResolvedValue({ pattern: '*.tmp', needsRescan: false });
     const onExcluded = vi.fn();
     const image = makeImage();
     render(<OverlayUI image={image} {...requiredProps} onExcluded={onExcluded} />);

@@ -1,0 +1,168 @@
+# sss - Smart Slide Show
+
+_[日本語版はこちら](README.md)_
+
+A slideshow app that shows 100,000+ photos fairly.
+
+## Features
+
+- **Complete-equality random display**: every photo is shown once before any repeat
+- **Fast incremental scanning**: only changed files are detected on startup
+- **4K optimized**: automatic resizing and caching for high-resolution displays
+- **Tauri protocol image loading**: efficient, cross-platform file loading
+- **5-image prefetch cache**: smooth transitions (single-threaded, works on weak CPUs too)
+- **Display stats**: tracks and shows display count and last-shown time
+- **EXIF info display**: shows date taken and GPS coordinates
+- **.sssignore**: gitignore-style exclude rules (placed in your home directory)
+- **Screensaver suppression**: keeps the display always on
+- **Cross-platform**: Windows/Linux/macOS
+- **Japanese/English UI**: follows the OS locale automatically, with a manual switch in Settings → Options
+
+## Installation
+
+### Requirements
+
+- Node.js (v18+)
+- Rust (via rustup)
+
+### Setup
+
+```bash
+# Install dependencies
+npm install
+
+# Start the dev server
+npm run tauri:dev
+
+# Build
+npm run tauri:build
+```
+
+## Usage
+
+### First launch
+
+1. The settings screen appears when you start the app
+2. Pick a photo folder with the "Select Folder" button
+3. Start scanning with the "Scan" button
+4. The slideshow starts automatically once the scan finishes
+
+### Basic controls
+
+#### Mouse
+
+- **Move the mouse**: shows the UI and pauses the slideshow automatically
+- **Click outside the overlay**: hides the UI immediately and resumes
+- **Previous button**: goes back to the previous photo/video (from history, does not increase its display count)
+- **Next button**: advances immediately
+- **Open button**: opens the file manager with the current file selected
+- **Settings button**: opens the settings screen
+
+#### Keyboard shortcuts
+
+- **ESC**: quit the app
+- **Left arrow**: go to the previous photo/video
+- **Right arrow**: go to the next photo/video
+
+### .sssignore
+
+Create a `.sssignore` file in your home directory (Windows: `%USERPROFILE%`, Unix: `$HOME`) to exclude specific photos.
+
+```gitignore
+# Exclude specific dates
+**/2023-05-15/**
+**/2024-01-*/**
+
+# Exclude specific folders
+**/private/**
+**/work/**
+
+# File patterns
+*_draft.*
+screenshot_*.png
+```
+
+## Tech Stack
+
+### Backend (Rust)
+
+- **Tauri v2**: desktop app framework (latest, mobile-ready)
+- **rusqlite v0.32**: SQLite database
+- **rayon v1**: parallel processing
+- **image v0.25**: image processing (4K resizing)
+- **kamadak-exif v0.6**: EXIF reading
+- **md5 v0.7**: cache filename hashing
+- **globset v0.4**: `.sssignore` pattern matching
+- **keepawake v0.4**: screensaver suppression
+
+### Frontend (React)
+
+- **React 19**: UI library
+- **TypeScript**: type safety
+- **Vite v7**: fast build tool
+- **Framer Motion**: animation
+- **TailwindCSS v3**: styling
+- **Lucide React**: icons
+
+## Overlay UI info
+
+Shown when you move the mouse:
+
+- 📁 File path (full path)
+- 🖼️ Image size (width x height)
+- 💾 File size
+- 📅 Date taken (from EXIF, images only)
+- 📍 GPS coordinates (EXIF: latitude/longitude, images only)
+- 📊 Playlist position (e.g. 1,234 / 100,000)
+- 🔢 Display count
+- 🕒 Last shown time (ISO 8601)
+
+## Performance
+
+- First scan (100k photos): < 30s
+- Incremental scan (100 changed files): < 3s
+- Startup to slideshow start: < 5s (with incremental scan)
+- Image transition: < 100ms
+- Memory usage: < 500MB
+
+These are targets. For measured benchmarks (`src-tauri/tests/scan_reflection_throughput.rs` / `db_reflection_throughput.rs`, both `#[ignore]`), see `docs/architecture.md` section 6 ("差分スキャン", Japanese only).
+
+## Running as a signage display
+
+For always-on use, we recommend letting the OS manage auto-start/stop:
+
+### Windows: Task Scheduler
+
+- Start at 8:00, stop at 22:00
+- Keeps working after a PC restart
+
+### Linux: cron / systemd timer
+
+- Set start/stop times with cron
+
+### macOS: launchd
+
+- Configure start/stop times with a plist file
+
+See `CLAUDE.md` (Japanese) for details.
+
+## Related tools
+
+### Pairing with photo-returns
+
+[photo-returns](https://github.com/kako-jun/photo-returns) organizes photos and videos from your camera or phone into a `YYYY/YYYYMM/YYYYMMDD` folder structure based on EXIF metadata.
+
+**Recommended flow:**
+
+1. Use **photo-returns** to organize photos from your camera/phone into date-based folders
+2. Use **sss** to enjoy the organized folder as a slideshow
+
+sss (which gives every photo a fair turn) and photo-returns (which keeps photos easy to find) work well together.
+
+## License
+
+MIT
+
+## Author
+
+kako-jun

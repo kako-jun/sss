@@ -1,5 +1,28 @@
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import { setLanguageSetting } from '../lib/i18n/store';
+
+// #80: navigator.language をテスト全体でja固定にする（jsdom既定は'en-US'。CI環境の
+// OSロケールにも依存させない）。既存テストの多くは日本語UIをそのまま前提にしており、
+// 明示的にjaへ固定することで#80のi18n導入前と同じ既定挙動を保つ。英語ロケールを
+// 検証したいテストは各テスト内で個別に上書きする（例: App.test.tsx の
+// 「App i18n (#80): language setting resolution」）。
+// nodeテスト環境（jsdomでないファイル）にもNode組み込みのnavigatorが存在しうるが、
+// language プロパティが無い/読み取り専用の場合もあるため失敗しても無視する。
+if (typeof navigator !== 'undefined') {
+  try {
+    Object.defineProperty(navigator, 'language', { value: 'ja-JP', configurable: true });
+  } catch {
+    // node環境でnavigator.languageが上書きできない場合は無視（i18nのロケール判定は
+    // jsdom環境のコンポーネントテストでのみ検証する）。
+  }
+}
+
+// #80: テスト間でロケール状態が漏れないよう、各テストの前に'auto'へ戻す
+// （navigator.languageの既定は上のja-JP固定なので'ja'に解決される）。
+beforeEach(() => {
+  setLanguageSetting('auto');
+});
 
 // Global teardown ordering matters for hooks that schedule recurring timers
 // (useSlideshow runs a ~16ms progress interval). We must unmount every mounted

@@ -481,6 +481,53 @@ const scenarios = [
       };
     },
   },
+  {
+    // #80: 言語決定は app_settings.language ('ja'|'en'|'auto') → auto は
+    // navigator.language（ja*ならja、それ以外en）。`locale: 'en-US'`
+    // （Playwrightのbrowser.newPageオプション）でnavigator.languageを
+    // en-US化し、ようこそ画面が英語で表示されることを確認する
+    // （ディレクトリ未設定=hash 'welcome' の初回起動シナリオを流用）。
+    name: 'English locale (navigator.language=en-US): welcome screen renders in English',
+    hash: 'welcome',
+    locale: 'en-US',
+    async run(page) {
+      await page.waitForTimeout(500);
+      const welcomeVisible = await isVisible(page, 'Welcome to SSS');
+      // 「フォルダを選択」ボタンはアイコン(SVG)とテキストが兄弟要素のため、
+      // isVisible()の葉ノード限定チェックには乗らない。ボタン本文で直接確認する。
+      const selectFolderVisible = await page.evaluate(() =>
+        [...document.querySelectorAll('button')].some((b) =>
+          b.textContent.includes('Select Folder'),
+        ),
+      );
+      const notJapanese = !(await isVisible(page, 'ようこそ SSS へ'));
+      const htmlLang = await page.evaluate(() => document.documentElement.lang);
+      const pass = welcomeVisible && selectFolderVisible && notJapanese && htmlLang === 'en';
+      return {
+        pass,
+        detail: `welcomeVisible=${welcomeVisible} selectFolderVisible=${selectFolderVisible} notJapanese=${notJapanese} htmlLang=${htmlLang}`,
+      };
+    },
+  },
+  {
+    // #80: 英語ロケールでもオーバーレイUI（ウィンドウchrome）の文言が英語になる
+    // ことを確認する（終了ボタンのtitle属性で判定。マウスアイドル判定に左右
+    // されない安定した検証にするためDOM属性を直接見る）。
+    name: 'English locale (navigator.language=en-US): window chrome (exit tooltip) renders in English',
+    hash: 'slides',
+    locale: 'en-US',
+    async run(page) {
+      await page.waitForTimeout(500);
+      const exitTitle = await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find((b) =>
+          (b.title || '').includes('ESC'),
+        );
+        return btn ? btn.title : null;
+      });
+      const pass = exitTitle === 'Press ESC to exit';
+      return { pass, detail: `exitTitle=${JSON.stringify(exitTitle)}` };
+    },
+  },
 ];
 
 async function main() {
@@ -525,7 +572,14 @@ async function main() {
     const results = [];
     try {
       for (const scenario of scenarios) {
-        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+        // #80: navigator.language はホストOS/ブラウザの設定に依存するため、
+        // 明示指定が無い既存シナリオは 'ja-JP' に固定してロケール解決を決定的にする
+        // （app_settings.language 未設定→'auto'→navigator.languageの経路）。
+        // 英語ロケールを検証するシナリオは `locale: 'en-US'` を個別に指定する。
+        const page = await browser.newPage({
+          viewport: { width: 1280, height: 800 },
+          locale: scenario.locale || 'ja-JP',
+        });
         await page.addInitScript({ path: INIT_SCRIPT });
         const consoleErrors = [];
         page.on('console', (m) => {

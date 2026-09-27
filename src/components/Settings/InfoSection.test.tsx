@@ -105,9 +105,10 @@ describe('InfoSection reset button (resetAllData)', () => {
   it('shows a Japanese error message and re-enables the button when resetAllData fails', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    // #64: scan_in_progress中の拒否も含め、バックエンドのエラーは日本語メッセージの
-    // 文字列として reject される（Tauri commandの `Result<_, String>`）。
-    resetAllData.mockRejectedValue('スキャン実行中です。完了までお待ちください。');
+    // #64: scan_in_progress中の拒否も含め、バックエンドのエラーはエラーコードの
+    // 文字列として reject される（Tauri commandの `Result<_, String>`。#80でコード化）。
+    // フロントは `resolveResetAllDataErrorMessage` でロケールに応じた文言へ変換する。
+    resetAllData.mockRejectedValue('scanInProgress');
 
     render(<InfoSection />);
     fireEvent.click(screen.getByText('設定を初期化'));

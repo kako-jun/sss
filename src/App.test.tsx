@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 
 // #65: App.tsx が「hasDirectory + notice.kind」から選ぶ案内画面（ようこそ/空/
@@ -43,6 +43,7 @@ const win = {
   onResized: vi.fn(),
   setFullscreen: vi.fn(),
   setDecorations: vi.fn(),
+  setTitle: vi.fn(),
 };
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => win,
@@ -94,6 +95,7 @@ beforeEach(() => {
   win.onResized.mockReset().mockResolvedValue(() => {});
   win.setFullscreen.mockReset().mockResolvedValue(undefined);
   win.setDecorations.mockReset().mockResolvedValue(undefined);
+  win.setTitle.mockReset().mockResolvedValue(undefined);
 });
 
 /** 「復元成功」経路（restorePlaylist=true）にして initialize() を即座に走らせ、
@@ -407,5 +409,40 @@ describe('App keyboard shortcut: e.repeat is ignored (#65)', () => {
     await waitFor(() => {
       expect(getNextImage).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// #80: 言語決定は app_settings.language ('ja'|'en'|'auto') → auto は
+// navigator.language（ja*ならja、それ以外en）。src/test/setup.tsがnavigator.languageを
+// 'ja-JP'に固定しているため、他のテストは全てja表示を前提にできる。ここでは
+// navigator.languageをen-USへ一時的に上書きして、autoがenへ解決されることと、
+// 明示的な'ja'設定がnavigator.languageより優先されることを確認する。
+describe('App i18n (#80): language setting resolution', () => {
+  afterEach(() => {
+    Object.defineProperty(navigator, 'language', { value: 'ja-JP', configurable: true });
+  });
+
+  it('renders in English when no language is saved (auto) and navigator.language is non-Japanese', async () => {
+    Object.defineProperty(navigator, 'language', { value: 'en-US', configurable: true });
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Welcome to SSS')).toBeTruthy();
+    });
+    expect(screen.getByText('Select Folder')).toBeTruthy();
+    expect(document.documentElement.lang).toBe('en');
+  });
+
+  it('renders in Japanese when the saved language setting is "ja", even if navigator.language is English', async () => {
+    Object.defineProperty(navigator, 'language', { value: 'en-US', configurable: true });
+    getSetting.mockImplementation(async (key: string) => (key === 'language' ? 'ja' : null));
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+    expect(document.documentElement.lang).toBe('ja');
   });
 });

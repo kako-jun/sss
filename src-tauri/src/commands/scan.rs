@@ -39,10 +39,13 @@ pub(crate) struct ScanGuard<'a> {
 
 impl<'a> ScanGuard<'a> {
     /// 既にスキャンが実行中（`flag == true`）なら `Err` を返す。
+    ///
+    /// #80: ユーザー向け文言でなくエラーコード（`scanInProgress`）で返す。
+    /// フロント辞書（`resolveScanErrorMessage`）が表示文言に変換する。
     pub(crate) fn acquire(flag: &'a AtomicBool) -> Result<Self, String> {
         flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map(|_| ScanGuard { flag })
-            .map_err(|_| "スキャン実行中です。完了までお待ちください。".to_string())
+            .map_err(|_| "scanInProgress".to_string())
     }
 }
 
@@ -615,10 +618,11 @@ pub async fn scan_directory(
 
     let directory = PathBuf::from(&directory_path);
 
+    // #80: ユーザー向け文言でなくエラーコードで返す（フロントは呼び出し時点で
+    // 自分が渡した directory_path を知っているため、パス自体をここで文字列に
+    // 埋め込み直す必要はない）。フロント辞書は `resolveScanErrorMessage` で変換する。
     if !directory.is_dir() {
-        return Err(format!(
-            "Directory does not exist or is not a directory: {directory_path}"
-        ));
+        return Err("directoryNotFound".to_string());
     }
 
     // asset scope（convertFileSrc が読み込めるディレクトリ）にスキャン対象を動的に許可する。
@@ -627,11 +631,7 @@ pub async fn scan_directory(
     // （空文字列/相対パスが紛れ込んで意図せず広い scope になる事故を防ぐ、レビュー #73 M1）。
     // 拒否された場合はスキャンしても画像が一切表示できないため、ここで Err を返して
     // UI にエラー理由を伝える（黙って続行し原因不明のまま表示できない、を防ぐ。should1）。
-    let safe_dir = sanitize_allow_dir(&directory).ok_or_else(|| {
-        format!(
-            "Cannot use this directory for security reasons (e.g. a system drive root): {directory_path}"
-        )
-    })?;
+    let safe_dir = sanitize_allow_dir(&directory).ok_or_else(|| "directoryUnsafe".to_string())?;
     if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
         eprintln!(
             "Failed to allow asset scope for {}: {e}",
