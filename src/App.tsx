@@ -188,11 +188,20 @@ function App() {
   // #65レビュー質問決定: 「前へ」で戻っている途中にonErrorになった場合は
   // loadPreviousImageでさらに戻る、前進中（既定含む）は次へ進む
   // （continueInLastDirectionが直近の方向を引き継ぐ）。
+  // #65レビュー2巡目nit: undoDisplayCountの完了を待ってからcontinueInLastDirection
+  // を呼ぶ（順序確定）。並行に発火すると、continueInLastDirectionが先に次の
+  // get_next_imageを完了させてバックエンドのAppState.last_incremented_displayを
+  // 次のpathへ進めてしまい、その後に届くundo_display_count(古いpath)が
+  // パス不一致で無視されてしまう競合を避けるため。
   const handleMediaError = (path: string) => {
-    void undoDisplayCount(path).catch((err) => {
-      console.error('Failed to undo display count:', err);
-    });
-    void continueInLastDirection();
+    void (async () => {
+      try {
+        await undoDisplayCount(path);
+      } catch (err) {
+        console.error('Failed to undo display count:', err);
+      }
+      await continueInLastDirection();
+    })();
   };
 
   // キーボードショートカット

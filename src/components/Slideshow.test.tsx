@@ -139,7 +139,9 @@ describe('Slideshow media lifecycle (#65)', () => {
     const { rerender } = render(
       <Slideshow image={makeImage({ isVideo: true, path: '/videos/a.mp4' })} isPlaying={true} />,
     );
-    expect(playSpy).toHaveBeenCalled();
+    // #65レビュー2巡目S8: 初回マウント時の再生開始はautoPlay属性に任せる
+    // （mediaKeyの変化そのものではeffectがplay()を呼ばない設計にしたため、
+    // マウント直後はplaySpyが呼ばれていなくて正しい）。
 
     rerender(
       <Slideshow image={makeImage({ isVideo: true, path: '/videos/a.mp4' })} isPlaying={false} />,
@@ -304,5 +306,45 @@ describe('Slideshow remounts on displayToken even when the path is unchanged (#6
 
     expect(second).not.toBeNull();
     expect(second).not.toBe(first);
+  });
+});
+
+// #65レビュー2巡目S8(must): 動画→動画の遷移でmediaKeyだけが変わった（isPlayingは
+// 変化していない）場合、退場中の古い(まだDOM上に残っている)動画要素に対して
+// play()を呼び直してはいけない。呼ぶと再生位置が0に巻き戻り、短い動画では
+// 再度onEndedが発火して1枚飛ばしてしまっていた。
+describe('Slideshow does not replay the exiting video on mediaKey change alone (#65レビュー2巡目S8)', () => {
+  it('does not call play() again when mediaKey changes but isPlaying stays true throughout', () => {
+    const videoA = makeImage({ isVideo: true, path: '/videos/a.mp4' });
+    const videoB = makeImage({ isVideo: true, path: '/videos/b.mp4' });
+    const { rerender } = render(<Slideshow image={videoA} displayToken={0} isPlaying={true} />);
+    // 初回マウントの挙動（autoPlay属性任せ、jsdomではplay()は呼ばれない）を
+    // このテストの対象外にするためリセットしておく。
+    playSpy.mockClear();
+
+    rerender(<Slideshow image={videoB} displayToken={1} isPlaying={true} />);
+
+    // isPlayingはtrue→trueで変化していないので、退場中のvideoAに対して
+    // play()を呼び直してはいけない（S8の不具合そのもの）。
+    expect(playSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not call onAdvance when a stale (exiting) video fires onEnded after a newer mediaKey already exists (self-key guard)', () => {
+    const onAdvance = vi.fn();
+    const videoA = makeImage({ isVideo: true, path: '/videos/a.mp4' });
+    const videoB = makeImage({ isVideo: true, path: '/videos/b.mp4' });
+    const { container, rerender } = render(
+      <Slideshow image={videoA} displayToken={0} isPlaying={true} onAdvance={onAdvance} />,
+    );
+
+    rerender(<Slideshow image={videoB} displayToken={1} isPlaying={true} onAdvance={onAdvance} />);
+    // AnimatePresence(mode="wait")はまだvideoBを実マウントしていないため、
+    // ここで拾えるのは退場中のvideoA（古いクロージャを持ったまま）。
+    const stillExitingVideo = container.querySelector('video')!;
+    fireEvent.ended(stillExitingVideo);
+
+    // 古いクロージャのmediaKeyは既に最新ではないため、二重にonAdvanceが
+    // 呼ばれてはいけない（呼ばれると1枚飛ばしてしまう）。
+    expect(onAdvance).not.toHaveBeenCalled();
   });
 });

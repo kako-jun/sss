@@ -342,13 +342,20 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
   // 再試行する（`rootUnavailable`の文言「再接続をお待ちください…」を実挙動に
   // 一致させる）。直近の方向（`continueInLastDirection`）で続行し、まだ同じ
   // 状態が続いていれば次のnoticeが新しいタイマーをまた張る形で繰り返す。
+  //
+  // #65レビュー2巡目S9(must): `isPlaying`を見ずに動いていたため、一時停止中・
+  // 設定画面表示中（＝呼び出し側でisPlayingをfalseにしている間）も裏で
+  // 自動再試行が進んでしまっていた。一時停止中は再試行せず、再開時にこの
+  // effectがisPlayingの変化をdepsで拾って（notice側は変わっていなくても）
+  // 新しいタイマーを張り直す形で再開する。
   useEffect(() => {
+    if (!isPlaying) return;
     if (notice?.kind !== 'error' && notice?.kind !== 'rootUnavailable') return;
     const timer = window.setTimeout(() => {
       void continueInLastDirection();
     }, intervalRef.current);
     return () => window.clearTimeout(timer);
-  }, [notice, continueInLastDirection]);
+  }, [notice, isPlaying, continueInLastDirection]);
 
   return {
     currentImage,

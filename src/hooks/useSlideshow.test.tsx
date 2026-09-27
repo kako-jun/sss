@@ -707,6 +707,76 @@ describe('auto-retry on error/rootUnavailable notices (#65レビューS3/S4)', (
     expect(getPreviousImage).toHaveBeenCalledTimes(2);
     expect(result.current.currentImage?.path).toBe('/prev.jpg');
   });
+
+  // #65レビュー2巡目S9(must): 一時停止中・設定画面表示中（＝呼び出し側が
+  // isPlayingをfalseにしている間）は自動再試行が裏で進んではいけない。
+  it('does not auto-retry while isPlaying is false (paused/settings open), even if the error persists', async () => {
+    getNextImage.mockRejectedValue('temporary glitch');
+    const { result, rerender } = renderHook(({ playing }) => useSlideshow(5000, playing), {
+      initialProps: { playing: true },
+    });
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.notice).toEqual({ kind: 'error', message: 'temporary glitch' });
+
+    // 一時停止（isPlaying=false）に切り替える。
+    rerender({ playing: false });
+    getNextImage.mockClear();
+
+    // 表示間隔を大きく超えて待っても、一時停止中は再試行しない。
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+    expect(getNextImage).not.toHaveBeenCalled();
+  });
+
+  it('resumes auto-retry once isPlaying becomes true again after being paused', async () => {
+    getNextImage.mockRejectedValue('temporary glitch');
+    const { result, rerender } = renderHook(({ playing }) => useSlideshow(5000, playing), {
+      initialProps: { playing: true },
+    });
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    rerender({ playing: false });
+    getNextImage.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+    expect(getNextImage).not.toHaveBeenCalled(); // 前提: 一時停止中は再試行しない
+
+    // 再開する。
+    getNextImage.mockResolvedValue(found('/recovered.jpg'));
+    rerender({ playing: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(getNextImage).toHaveBeenCalled();
+    expect(result.current.currentImage?.path).toBe('/recovered.jpg');
+  });
+
+  it('does not auto-retry rootUnavailable while paused either', async () => {
+    getNextImage.mockResolvedValue({ kind: 'rootUnavailable' } satisfies ImageNavigationResult);
+    const { result, rerender } = renderHook(({ playing }) => useSlideshow(5000, playing), {
+      initialProps: { playing: true },
+    });
+
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.notice).toEqual({ kind: 'rootUnavailable' });
+
+    rerender({ playing: false });
+    getNextImage.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15000);
+    });
+    expect(getNextImage).not.toHaveBeenCalled();
+  });
 });
 
 describe('pause percentage uses the interval active when the timer started (#65レビューnit)', () => {

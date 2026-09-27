@@ -330,6 +330,41 @@ describe('App onError continues in the last navigation direction (#65レビュ�
     expect(getPreviousImage).not.toHaveBeenCalled();
     expect(undoDisplayCount).toHaveBeenCalledWith('/a.jpg');
   });
+
+  // #65レビュー2巡目nit: undoDisplayCountの完了を待ってからcontinueInLastDirection
+  // を呼ぶ（順序確定）。並行に発火すると、continueInLastDirection側が先に次の
+  // get_next_imageを完了させ、バックエンドのlast_incremented_displayを次のpathへ
+  // 進めてしまい、その後に届くundo_display_count(古いpath)がパス不一致で無視
+  // されてしまう競合が起こり得るため。
+  it('awaits undoDisplayCount before calling continueInLastDirection (ordering)', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+
+    let resolveUndo!: () => void;
+    undoDisplayCount.mockReset().mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveUndo = resolve;
+      }),
+    );
+    getNextImage.mockClear();
+    getNextImage.mockResolvedValueOnce(foundImage('/b.jpg'));
+    fireEvent.error(findPhotoImg());
+
+    // undoDisplayCountがまだ解決していない間は、次のget_next_imageは呼ばれない。
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getNextImage).not.toHaveBeenCalled();
+
+    resolveUndo();
+    await waitFor(() => {
+      expect(getNextImage).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe('App shows a bottom toast (not a full-screen takeover) on a mid-viewing error notice (#65レビューS3)', () => {
