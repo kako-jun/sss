@@ -430,6 +430,57 @@ const scenarios = [
       };
     },
   },
+  {
+    // #65レビュー3巡目M4(must): 「同じpathの連続表示はフェード省略」nitが、
+    // AnimatePresence(mode="wait")の退場500ms中の再レンダーで誤って発火し、
+    // 画像→動画・動画→画像を含む全ての切り替えでフェードインが消えていた
+    // （新要素がopacity 0→1ではなく瞬時に1で現れる）。新しくマウントされた
+    // 要素が必ず低いopacityから始まり、約0.5秒かけて1に達することを
+    // 40ms間隔のサンプリングで確認する。
+    name: 'newly mounted media always fades in over ~0.5s, never appears instantly at opacity 1 (M4)',
+    hash: 'fade',
+    async run(page) {
+      async function sampleOpacityFor(ms) {
+        const samples = [];
+        const deadline = Date.now() + ms;
+        while (Date.now() < deadline) {
+          const opacity = await page.evaluate(() => {
+            const el =
+              document.querySelector('video') ||
+              [...document.querySelectorAll('img')].find((i) => i.alt !== 'SSS Logo');
+            return el ? Number(getComputedStyle(el).opacity) : null;
+          });
+          samples.push(opacity);
+          await page.waitForTimeout(40);
+        }
+        return samples;
+      }
+
+      const fadesIn = (samples) => {
+        const sawLow = samples.some((o) => o !== null && o < 0.9);
+        const sawHigh = samples.some((o) => o !== null && o >= 0.95);
+        return sawLow && sawHigh;
+      };
+
+      // 初回マウント(画像a)のフェードインを見る。
+      const initialSamples = await sampleOpacityFor(700);
+
+      // 手動で次へ進み、2件目(動画)への切り替わりのフェードインも見る
+      // （退場500ms + 自身のフェード500msぶん、余裕を持って観測する）。
+      await page.keyboard.press('ArrowRight');
+      const toVideoSamples = await sampleOpacityFor(1300);
+
+      // さらに次へ進み、動画→画像の切り替わりも確認する。
+      await page.keyboard.press('ArrowRight');
+      const toImageSamples = await sampleOpacityFor(1300);
+
+      const pass = fadesIn(initialSamples) && fadesIn(toVideoSamples) && fadesIn(toImageSamples);
+      return {
+        pass,
+        detail: `initial=${JSON.stringify(initialSamples)} toVideo=${JSON.stringify(toVideoSamples)} toImage=${JSON.stringify(toImageSamples)}`,
+      };
+    },
+  },
 ];
 
 async function main() {
