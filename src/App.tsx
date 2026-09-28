@@ -464,18 +464,22 @@ function App() {
           <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-2" />
         </div>
 
-        {/* 終了ボタン（右上） */}
-        <button
-          onClick={() => exit(0)}
-          className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
-          title={t('exitTooltip')}
-          aria-label={t('exitTooltip')}
-        >
-          <X size={18} />
-          <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
-            {t('exitTooltip')}
-          </span>
-        </button>
+        {/* 終了ボタン（右上）。#66視覚刷新: 通常表示中の右上ピルと統一 */}
+        <div className="fixed top-4 right-4 z-50">
+          <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
+            <button
+              onClick={() => exit(0)}
+              className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
+              title={t('exitTooltip')}
+              aria-label={t('exitTooltip')}
+            >
+              <X size={16} />
+              <span className="absolute top-full right-0 mt-2 px-2 py-1 bg-black/90 text-white/70 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
+                {t('exitTooltip')}
+              </span>
+            </button>
+          </div>
+        </div>
 
         <div className="w-screen h-screen flex items-center justify-center relative z-10">
           <div className="text-white/50 text-center">
@@ -519,74 +523,79 @@ function App() {
         onMediaError={handleMediaError}
       />
 
-      {/* 右上の常設ボタン列（終了・ショートカット・ウィンドウモード・設定）。
-          #66 問題10: 以前は各ボタンが個別に`fixed top-4 right-N`のマジックナンバーで
-          位置指定されていて、idle時も表示されっぱなしだった。1つのflex行にまとめ、
-          オーバーレイ同様にidle時はフェードアウトする（focus-within時は例外的に
-          可視のまま。キーボードでTab移動して見えなくなるのを防ぐ）。 */}
-      <div
-        className={`fixed top-4 right-4 z-50 flex items-center gap-2 ${idleFadeClassName(isIdle)}`}
-      >
-        <button
-          onClick={() => setIsShortcutsOpen(true)}
-          className="relative p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/20 hover:text-white/50 transition-colors group"
-          title={t('shortcutsButtonTooltip')}
-          aria-label={t('shortcutsButtonTooltip')}
-        >
-          <Keyboard size={16} />
-          <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
-            {t('shortcutsButtonTooltip')}
-          </span>
-        </button>
+      {/* 右上の常設ボタン（終了・ショートカット・ウィンドウモード・設定）。
+          #66視覚刷新: 枠線付き四角ボタン4つの並びから、枠線なしアイコンを1つの
+          ガラス調ピル（DESIGN.md「Icon Pill Group」）にまとめた。idle時は
+          オーバーレイ同様にフェードアウトする（focus-within時は例外的に可視の
+          まま。キーボードでTab移動して見えなくなるのを防ぐ）。 */}
+      <div className={`fixed top-4 right-4 z-50 ${idleFadeClassName(isIdle)}`}>
+        <div className="flex items-center gap-0.5 bg-black/50 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
+          <button
+            onClick={() => setIsShortcutsOpen(true)}
+            className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
+            title={t('shortcutsButtonTooltip')}
+            aria-label={t('shortcutsButtonTooltip')}
+          >
+            <Keyboard size={16} />
+            <span className="absolute top-full right-0 mt-2 px-2 py-1 bg-black/90 text-white/70 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
+              {t('shortcutsButtonTooltip')}
+            </span>
+          </button>
 
-        <button
-          onClick={handleToggleWindowMode}
-          className="relative p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/20 hover:text-white/50 transition-colors group"
-          title={isFullscreen ? t('switchToWindowMode') : t('switchToFullscreen')}
-          aria-label={isFullscreen ? t('switchToWindowMode') : t('switchToFullscreen')}
-        >
-          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-          <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
-            {isFullscreen ? t('windowModeLabel') : t('fullscreenLabel')}
-          </span>
-        </button>
+          <button
+            onClick={handleToggleWindowMode}
+            className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
+            title={isFullscreen ? t('switchToWindowMode') : t('switchToFullscreen')}
+            aria-label={isFullscreen ? t('switchToWindowMode') : t('switchToFullscreen')}
+          >
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            <span className="absolute top-full right-0 mt-2 px-2 py-1 bg-black/90 text-white/70 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
+              {isFullscreen ? t('windowModeLabel') : t('fullscreenLabel')}
+            </span>
+          </button>
 
-        <button
-          onClick={handleSettings}
-          className="relative p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/20 hover:text-white/50 transition-colors group"
-          title={t('settingsTitle')}
-          aria-label={t('settingsTitle')}
-        >
-          <SettingsIcon size={16} />
-          <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
-            {t('settingsTitle')}
-          </span>
-        </button>
+          <button
+            onClick={handleSettings}
+            className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
+            title={t('settingsTitle')}
+            aria-label={t('settingsTitle')}
+          >
+            <SettingsIcon size={16} />
+            <span className="absolute top-full right-0 mt-2 px-2 py-1 bg-black/90 text-white/70 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
+              {t('settingsTitle')}
+            </span>
+          </button>
 
-        <button
-          onClick={() => exit(0)}
-          className="relative p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
-          title={t('exitTooltip')}
-          aria-label={t('exitTooltip')}
-        >
-          <X size={18} />
-          <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
-            {t('exitTooltip')}
-          </span>
-        </button>
+          <button
+            onClick={() => exit(0)}
+            className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
+            title={t('exitTooltip')}
+            aria-label={t('exitTooltip')}
+          >
+            <X size={16} />
+            <span className="absolute top-full right-0 mt-2 px-2 py-1 bg-black/90 text-white/70 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
+              {t('exitTooltip')}
+            </span>
+          </button>
+        </div>
       </div>
 
-      {/* 画像がない場合の案内画面（ようこそ/空/接続不可/読込失敗）。#65問題1・5・9 */}
+      {/* 画像がない場合の案内画面（ようこそ/空/接続不可/読込失敗）。#65問題1・5・9
+          #66視覚刷新: 角丸のガラスカードに統一し、ようこそ画面だけロゴマーク・
+          プライマリボタン・ショートカットヒントを添える。 */}
       {!currentImage && !isLoading && !isSettingsOpen && emptyStateContent && (
-        <div className="fixed inset-0 flex items-center justify-center z-40">
-          <div className="text-center max-w-md px-6">
-            <div className="text-white/60 text-xl mb-2">{emptyStateContent.title}</div>
+        <div className="fixed inset-0 flex items-center justify-center z-40 px-6">
+          <div className="text-center max-w-sm w-full bg-black/30 backdrop-blur-md border border-white/10 rounded-2xl px-8 py-10">
+            {!hasDirectory && (
+              <img src={logoBg} alt="" aria-hidden="true" className="w-14 h-14 mx-auto mb-5" />
+            )}
+            <div className="text-white/85 text-xl font-medium mb-2">{emptyStateContent.title}</div>
             {emptyStateContent.subtitle && (
-              <div className="text-white/30 text-sm mb-6">{emptyStateContent.subtitle}</div>
+              <div className="text-white/50 text-sm mb-6">{emptyStateContent.subtitle}</div>
             )}
             {directoryErrorMessage && (
               <div
-                className="text-red-400/80 font-mono text-xs mb-6 truncate max-w-[90vw] mx-auto"
+                className="text-red-400/80 font-mono text-xs mb-6 truncate max-w-full mx-auto"
                 title={directoryErrorMessage}
               >
                 {directoryErrorMessage}
@@ -594,11 +603,22 @@ function App() {
             )}
             <button
               onClick={handleSettings}
-              className="flex items-center gap-2 px-5 py-2 bg-white/8 hover:bg-white/15 border border-white/10 text-white/50 hover:text-white/80 rounded transition-colors mx-auto text-sm"
+              className="flex items-center justify-center gap-2 px-6 py-2.5 bg-white/90 hover:bg-white text-black font-medium rounded-lg transition-colors mx-auto text-sm"
             >
               <SettingsIcon size={16} />
               {hasDirectory ? t('openSettings') : t('selectFolder')}
             </button>
+            {!hasDirectory && (
+              <div className="mt-6 flex items-center justify-center gap-1.5 text-white/30 text-xs">
+                <span
+                  className="font-mono px-1.5 py-0.5 bg-white/8 border border-white/10 rounded"
+                  aria-hidden="true"
+                >
+                  ?
+                </span>
+                <span>{t('shortcutsHintWelcome')}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -607,7 +627,7 @@ function App() {
           復元後のバックグラウンドスキャン失敗（#65レビュー修正） */}
       {currentImage && bottomNotice && (
         <div
-          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 bg-black/80 text-white/50 text-xs px-3 py-2 rounded border border-white/10 max-w-[90vw] truncate"
+          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 max-w-[90vw] truncate"
           title={bottomNotice}
         >
           {bottomNotice}
