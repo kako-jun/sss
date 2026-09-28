@@ -34,6 +34,11 @@ function App() {
   const [totalImages, setTotalImages] = useState(0);
   const [canGoBack, setCanGoBack] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  // #82レビュー2巡目 nit: initLocale完了前は、モジュール読込時点の暫定推定
+  // （navigator.language等）でロケールが確定していることがあり、直後に
+  // OSロケール優先の結果へ切り替わって表示言語が一瞬反転して見えることがある。
+  // ローディング文言はinitLocale完了（localeReady=true）まで出さないことで防ぐ。
+  const [localeReady, setLocaleReady] = useState(false);
   const [displayInterval, setDisplayInterval] = useState<number>(DEFAULT_DISPLAY_INTERVAL);
   const [initStatus, setInitStatus] = useState<string>(''); // 初期化状態メッセージ
   const [realtimeProgress, setRealtimeProgress] = useState<{
@@ -153,6 +158,9 @@ function App() {
       // getSettingがrejectすると起動シーケンスが一生呼ばれず起動画面のまま
       // 止まっていた（テスト担当が発見）。
       void initLocale(getSetting, getOsLocale).then(() => {
+        // #82レビュー2巡目 nit: ここでロケールが確定した後にローディング文言を
+        // 表示し始める（それまでは何も出さず、暫定推定からの反転を見せない）。
+        setLocaleReady(true);
         // #62レビューS1: 起動時の初期化シーケンス（前回状態の復元→可能なら即表示、
         // スキャンはバックグラウンド）は React から切り離した純粋関数に委譲する
         // （src/lib/startup.ts。単体テストしやすくするため）。
@@ -421,7 +429,11 @@ function App() {
 
         <div className="w-screen h-screen flex items-center justify-center relative z-10">
           <div className="text-white/50 text-center">
-            <div className="text-lg mb-4">{initStatus || t('loadingPlaylist')}</div>
+            {/* #82レビュー2巡目 nit: localeReady（initLocale完了）までは文言を出さない。
+                非表示中もレイアウト高さを保つため空のnon-breaking spaceを置く。 */}
+            <div className="text-lg mb-4">
+              {localeReady ? initStatus || t('loadingPlaylist') : ' '}
+            </div>
 
             {/* リアルタイム進捗表示 */}
             {realtimeProgress && (
@@ -431,7 +443,7 @@ function App() {
               </div>
             )}
 
-            <div className="text-white/25 text-xs">{t('pleaseWait')}</div>
+            <div className="text-white/25 text-xs">{localeReady ? t('pleaseWait') : ' '}</div>
           </div>
         </div>
       </div>

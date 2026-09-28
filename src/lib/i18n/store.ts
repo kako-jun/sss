@@ -35,12 +35,22 @@ export function getLanguageSetting(): LanguageSetting {
 }
 
 /**
- * `navigator.language` を見て 'auto' を実際のロケールへ解決する。
- * jaで始まる（ja, ja-JP等）ならja、それ以外は既定でen。
+ * #82レビュー2巡目nit: 生のロケールタグ（`navigator.language`の`ja-JP`形式、
+ * OSロケール取得コマンドの`ja_JP.UTF-8`/`ja`/`C`/空文字/`zh-Hant-TW`形式など）を
+ * 'ja'|'en' へ正規化する。`ja`で始まっていても直後が区切り文字（`-`/`_`/`.`/`@`）
+ * か文字列終端でなければ別言語（例: ジャマイカ・クレオール英語の`jam`）として
+ * 扱う。それ以外はすべて既定で'en'。navigator側・OS側の両方でこの関数を使う
+ * ことで、区切り文字の流儀（`-` vs `_`）が違っても同じ判定基準になる。
  */
+export function normalizeLocaleTag(tag: string | null | undefined): Locale {
+  if (!tag) return 'en';
+  return /^ja([-_.@]|$)/i.test(tag) ? 'ja' : 'en';
+}
+
+/** `navigator.language` を見て 'auto' を実際のロケールへ解決する。 */
 function detectNavigatorLocale(): Locale {
-  if (typeof navigator === 'undefined' || !navigator.language) return 'en';
-  return navigator.language.toLowerCase().startsWith('ja') ? 'ja' : 'en';
+  if (typeof navigator === 'undefined') return 'en';
+  return normalizeLocaleTag(navigator.language);
 }
 
 /**
@@ -84,10 +94,14 @@ export function clearOsLocaleCache(): void {
  * `.then()` の中で起動シーケンス本体を走らせているため、ここで reject すると
  * アプリが起動画面のまま永久に止まっていた）。
  *
- * `getOsLocale` は任意（#82レビューshould3）。渡された場合、設定が `auto` の
- * ときだけOSロケールの取得を試み、成功すれば `cachedOsLocale` を更新してから
- * 改めて解決し直す。取得に失敗しても無視して `navigator.language` ベースの
- * 解決のまま進む（起動を止めない）。
+ * `getOsLocale` は任意（#82レビューshould3）。渡された場合、**保存された設定値に
+ * かかわらず常に**OSロケールの取得を試み、成功すれば `cachedOsLocale` を更新する
+ * （#82レビュー2巡目should2: 以前は保存値が`auto`の時だけ取得していたため、
+ * `ja`/`en`を明示保存している間はキャッシュが空のままで、後から設定画面で
+ * 「自動」に切り替えた瞬間は`navigator.language`ベースの解決にしかならず、
+ * OSロケールへ切り替わるにはアプリの再起動が要った。起動時に常に取得して
+ * おけば、後から`auto`を選んだ直後からOSロケールで解決される）。取得に失敗
+ * しても無視して `navigator.language` ベースの解決のまま進む（起動を止めない）。
  */
 export async function initLocale(
   getSetting: (key: string) => Promise<string | null>,
@@ -102,11 +116,11 @@ export async function initLocale(
     setting = 'auto';
   }
 
-  if (setting === 'auto' && getOsLocale) {
+  if (getOsLocale) {
     try {
       const osLocale = await getOsLocale();
       if (osLocale) {
-        cachedOsLocale = osLocale.toLowerCase().startsWith('ja') ? 'ja' : 'en';
+        cachedOsLocale = normalizeLocaleTag(osLocale);
       }
     } catch (err) {
       console.error('Failed to detect the OS locale, falling back to navigator.language:', err);

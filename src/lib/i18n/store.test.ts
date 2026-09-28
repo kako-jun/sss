@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   resolveLocale,
   setLanguageSetting,
@@ -7,6 +7,8 @@ import {
   getLanguageSetting,
   subscribeLocale,
   initLocale,
+  normalizeLocaleTag,
+  clearOsLocaleCache,
 } from './store';
 
 /** #80: 言語設定('ja'|'en'|'auto')→実ロケール解決と、購読/初期化ロジックの検証。 */
@@ -118,4 +120,83 @@ describe('i18n locale resolution (#80)', () => {
     expect(getLanguageSetting()).toBe('auto');
     expect(getLocale()).toBe('ja');
   });
+});
+
+/**
+ * #82レビュー2巡目 should2: 保存値が明示的な'ja'/'en'であっても、initLocaleは
+ * 常にgetOsLocaleを呼んでcachedOsLocaleを温めておく。以前は保存値が'auto'の
+ * 時しか呼んでいなかったため、'ja'/'en'を明示保存している間に設定画面で
+ * 「自動」へ切り替えても、その場ではnavigator.languageベースの解決にしか
+ * ならず、OSロケールへ切り替えるには再起動が要った。
+ */
+describe('initLocale keeps the OS locale cache warm for a later switch to "auto" (#82レビュー2巡目 should2)', () => {
+  const originalLanguage = navigator.language;
+
+  function setNavigatorLanguage(value: string) {
+    Object.defineProperty(navigator, 'language', { value, configurable: true });
+  }
+
+  afterEach(() => {
+    setNavigatorLanguage(originalLanguage);
+    clearOsLocaleCache();
+  });
+
+  it('calls getOsLocale even when the saved setting is an explicit "ja" (not "auto")', async () => {
+    setNavigatorLanguage('ja-JP'); // navigator側はja。OS側はenを返させ、両者を区別する。
+    const getSetting = async (key: string) => (key === 'language' ? 'ja' : null);
+    const getOsLocale = vi.fn(async () => 'en-US');
+
+    await initLocale(getSetting, getOsLocale);
+
+    expect(getOsLocale).toHaveBeenCalledTimes(1);
+    // 保存値'ja'が優先されるので、現在の表示はまだjaのまま。
+    expect(getLanguageSetting()).toBe('ja');
+    expect(getLocale()).toBe('ja');
+
+    // ここで再起動せずに「自動」へ切り替えると、キャッシュ済みのOSロケール
+    // （en）が即座に反映される（navigator.languageのja-JPではなく）。
+    setLanguageSetting('auto');
+    expect(getLocale()).toBe('en');
+  });
+
+  it('calls getOsLocale even when the saved setting is an explicit "en"', async () => {
+    setNavigatorLanguage('en-US');
+    const getSetting = async (key: string) => (key === 'language' ? 'en' : null);
+    const getOsLocale = vi.fn(async () => 'ja_JP.UTF-8');
+
+    await initLocale(getSetting, getOsLocale);
+
+    expect(getOsLocale).toHaveBeenCalledTimes(1);
+    expect(getLocale()).toBe('en'); // 保存値優先
+
+    setLanguageSetting('auto');
+    expect(getLocale()).toBe('ja');
+  });
+});
+
+/**
+ * #82レビュー2巡目 nit: OSロケール取得コマンド・navigator.languageの両方が
+ * 返しうる様々な形式のタグを、統一した基準（/^ja([-_.@]|$)/i）で正規化する
+ * ことをテーブルテストで固定する。
+ */
+describe('normalizeLocaleTag table test (#82レビュー2巡目 nit)', () => {
+  const cases: Array<[string | null | undefined, 'ja' | 'en']> = [
+    ['ja_JP.UTF-8', 'ja'], // Linux/macOSのgetenv形式
+    ['ja', 'ja'],
+    ['ja-JP', 'ja'], // navigator.language形式
+    ['JA-JP', 'ja'], // 大文字小文字を無視
+    ['ja@euro', 'ja'], // POSIXロケールのmodifier
+    ['C', 'en'], // POSIXの既定（ロケール未設定）
+    ['', 'en'],
+    ['zh-Hant-TW', 'en'],
+    ['jam', 'en'], // ジャマイカ・クレオール英語のISO 639-3コード。「ja」で始まるが別言語
+    [null, 'en'],
+    [undefined, 'en'],
+  ];
+
+  for (const [input, expected] of cases) {
+    it(`normalizeLocaleTag(${JSON.stringify(input)}) -> ${expected}`, () => {
+      expect(normalizeLocaleTag(input)).toBe(expected);
+    });
+  }
 });
