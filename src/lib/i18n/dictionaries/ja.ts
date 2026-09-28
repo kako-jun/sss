@@ -25,6 +25,9 @@ export const ja = {
   shortcutFullscreen: 'フルスクリーン切り替え',
   shortcutEscape: '終了（設定中は閉じる）',
   shortcutHelp: 'このヘルプを表示',
+  // #66視覚刷新: ようこそ画面の下部に添える「?」バッジ隣の説明文（バッジ自体は
+  // JSX側の固定"?"表示。文言はバッジに続く説明部分だけを持つ）。
+  shortcutsHintWelcome: 'ショートカット一覧を表示',
 
   // === 起動時の案内画面（#65） ===
   welcomeTitle: 'ようこそ SSS へ',
@@ -63,9 +66,11 @@ export const ja = {
   excludeByDate: '撮影日付で除外',
   excludeByDirectory: 'フォルダを除外',
   excludeByFile: 'ファイルを除外',
-  noLocationInfo: '位置情報なし',
-  noDateTime: '日時不明',
   locationMapAlt: '位置情報の地図',
+  // #66 視覚刷新: ファイルサイズ・表示回数・最終表示日時は本文に常設せず、
+  // ファイル名のtitleツールチップにまとめて表示する。
+  displayCountTooltip: '表示回数: {count}回',
+  lastDisplayedTooltip: '最終表示: {when}',
   pickCopyDone: 'コピー完了: {path}',
   pickCopyFailed: 'エラー: コピー失敗',
   excludeFailed: 'エラー: 除外失敗',
@@ -92,6 +97,9 @@ export const ja = {
 
   // === 設定画面: 入力（スキャン） ===
   directorySelectionTitle: 'フォルダ選択',
+  // #66視覚刷新: 見出し＋説明＋コントロールの一貫した縦リズムのための説明文。
+  directorySelectionDescription:
+    '10万枚規模でも数秒で起動できるよう、前回からの変更分だけを検出します',
   scanningLabel: 'スキャン中...',
   scanLabel: 'スキャン',
   scanResultTitle: 'スキャン結果',
@@ -112,11 +120,13 @@ export const ja = {
 
   // === 設定画面: オプション ===
   displayIntervalTitle: '表示間隔',
+  displayIntervalDescription: '次の写真・動画に切り替わるまでの秒数（5〜60秒）',
   exifRotationLabel: 'EXIF回転情報に従って画像を自動回転',
   pickDestinationTitle: 'ピック先フォルダ',
 
   // === 設定画面: 除外ルール ===
   excludeRulesTitle: '除外ルール',
+  excludeRulesDescription: 'スライドショーから除外する写真・動画の条件を管理します',
   noExcludeRules: '除外ルールはありません',
   dateRuleTag: '撮影日',
   removeTooltip: '解除',
@@ -160,6 +170,7 @@ export const ja = {
   versionLabel: 'バージョン: {version}',
   viewOnGitHub: 'GitHubで見る',
   dangerZoneTitle: '危険な操作',
+  dangerZoneDescription: '元に戻せない操作です。実行前によく確認してください',
   resetSettingsButton: '設定を初期化',
   resettingSettingsLabel: '初期化中...',
   confirmResetAllData:
