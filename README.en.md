@@ -56,13 +56,16 @@ npm run tauri:build
 - **Previous button**: goes back to the previous photo/video (from history, does not increase its display count)
 - **Next button**: advances immediately
 - **"…" menu** (inside the overlay): open the file manager, view your picks, or exclude by date/file/folder
-- **Settings button** (top right, always visible even without moving the mouse): opens the settings screen
+- **Top-right buttons** (exit, shortcuts, window mode, settings): shown while you're using the mouse, and fade out on idle just like the overlay
 
 #### Keyboard shortcuts
 
-- **ESC**: quit the app
+- **ESC**: quit the app (just closes Settings or the shortcuts overlay if either is open)
 - **Left arrow**: go to the previous photo/video
 - **Right arrow**: go to the next photo/video
+- **Space**: toggle pause/resume
+- **F / F11**: toggle fullscreen and windowed mode
+- **?**: show the keyboard shortcuts overlay
 
 ### Exclude rules
 

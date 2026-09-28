@@ -165,6 +165,30 @@ bg-black/90 rounded shadow-xl border border-white/8
 p-2 space-y-1 backdrop-blur-sm
 ```
 
+### Hover-reveal Controls (#66)
+
+Small per-item action buttons that live inside a list row or thumbnail (exclude-rule
+remove, pick delete, history exclude-menu) must never be `opacity-0` by default —
+an element only visible on `:hover` is invisible to keyboard and touch users.
+Use a low resting opacity instead, brightened on hover/focus:
+
+```
+opacity-40 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity
+```
+
+### Focus Ring (#66)
+
+`:focus-visible` only (never plain `:focus` on buttons/links, so a mouse click
+doesn't draw a ring on a non-text control). Defined globally in `index.css`:
+
+```
+outline: 2px solid rgba(255,255,255,0.6);
+outline-offset: 2px;
+```
+
+0.6-opacity white against the black canvas meets ~7:1 contrast (WCAG 2.4.11
+non-text contrast requires 3:1). An earlier 0.15-opacity ring failed this test.
+
 ## 5. Layout Principles
 
 ### Container
@@ -263,6 +287,15 @@ This is a Tauri desktop app — no mobile breakpoints. The UI adapts to window r
 - UI fades to `opacity: 0` after idle timeout (300ms transition)
 - `pointer-events: none` when hidden
 - Mouse movement restores UI
+- The top-right button row (exit, shortcuts, window mode, settings) fades with the
+  same rule as the bottom overlay — it must never stay solid while the overlay is
+  hidden (#66). Shared via `idleFadeClassName()` in `constants.ts`
+- `focus-within:opacity-100` on both fading containers keeps them visible while a
+  keyboard user has tabbed into a control inside — a focused-but-invisible element
+  is a focus-visibility failure, not just a visual nit
+- The mouse cursor itself hides (`cursor-none`) on the same idle timeout while the
+  slideshow is showing (not while the Settings modal is open) — a photo-viewing app
+  should not leave a static cursor sitting on top of the image (#66)
 
 ### Touch Targets
 
