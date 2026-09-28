@@ -36,15 +36,13 @@ export function LanguageSection() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        {t('languageLabel')}
-      </h3>
-      <div className="inline-flex bg-black/40 rounded border border-white/8 p-0.5 gap-0.5">
+      <h3 className="text-sm font-medium text-white/70">{t('languageLabel')}</h3>
+      <div className="inline-flex bg-black/40 rounded-lg p-0.5 gap-0.5">
         {OPTIONS.map((option) => (
           <button
             key={option}
             onClick={() => handleChange(option)}
-            className={`px-3 py-1.5 rounded text-sm transition-colors ${
+            className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
               setting === option
                 ? 'bg-white/15 text-white/80'
                 : 'text-white/40 hover:text-white/60 hover:bg-white/5'

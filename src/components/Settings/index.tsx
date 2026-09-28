@@ -102,20 +102,20 @@ export function Settings({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.97, opacity: 0 }}
         transition={{ duration: MODAL_ANIMATION_DURATION }}
-        className="bg-neutral-950 rounded-xl shadow-2xl p-7 max-w-2xl w-full mx-8 max-h-[90vh] overflow-hidden border border-white/8 flex flex-col"
+        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-2xl w-full mx-8 max-h-[80vh] overflow-hidden border border-white/10 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 id="settings-heading" className="text-lg font-medium text-white/70">
+          <h2 id="settings-heading" className="text-lg font-medium text-white/80">
             {t('settingsTitle')}
           </h2>
           <button
             onClick={onClose}
             aria-label={t('closeTooltip')}
             title={t('closeTooltip')}
-            className="p-1.5 hover:bg-white/8 rounded transition-colors"
+            className="p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white/90 transition-colors"
           >
-            <X className="w-5 h-5 text-white/30 hover:text-white/60" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
@@ -151,8 +151,8 @@ export function Settings({
                 onClick={() => selectTab(id)}
                 className={`px-3 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 outline-offset-[-2px] ${
                   selected
-                    ? 'text-white/80 border-b border-white/50'
-                    : 'text-white/30 hover:text-white/50'
+                    ? 'text-white/90 font-medium border-b-2 border-white/80'
+                    : 'text-white/40 hover:text-white/70 border-b-2 border-transparent'
                 }`}
               >
                 {t(labelKey)}
@@ -161,9 +161,13 @@ export function Settings({
           })}
         </div>
 
-        {/* タブコンテンツ（高さ固定でタブ切替時のガタつきを防止）。各パネルに
+        {/* タブコンテンツ。#66視覚刷新: 旧50vhの固定最小高は短い内容のタブ
+            （フォルダ・オプション等）でもモーダルが常に画面の半分を占めて
+            間延びして見えた。内容に合わせて縮み、最小高は「タブ切替時に
+            ガタつかない」ための控えめな値（260px）だけに抑え、最大は
+            モーダル自体のmax-h-[80vh]に任せてスクロールする。各パネルに
             role=tabpanel/aria-labelledbyを付け、対応するタブと対応付ける。 */}
-        <div className="flex-1 overflow-y-auto min-h-[50vh]">
+        <div className="flex-1 overflow-y-auto min-h-[260px]">
           {activeTab === 'scan' && (
             <div role="tabpanel" id="tabpanel-scan" aria-labelledby="tab-scan" tabIndex={0}>
               <ScanSection onScanComplete={onScanComplete} />

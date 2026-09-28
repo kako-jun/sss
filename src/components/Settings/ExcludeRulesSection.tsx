@@ -72,9 +72,10 @@ export function ExcludeRulesSection() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        {t('excludeRulesTitle')}
-      </h3>
+      <div>
+        <h3 className="text-sm font-medium text-white/70">{t('excludeRulesTitle')}</h3>
+        <p className="text-xs text-white/40 mt-1">{t('excludeRulesDescription')}</p>
+      </div>
 
       {rules.length === 0 ? (
         <div className="text-white/30 text-sm">{t('noExcludeRules')}</div>
@@ -83,7 +84,7 @@ export function ExcludeRulesSection() {
           {rules.map(({ pattern, ruleType }) => (
             <div
               key={`${pattern}-${ruleType}`}
-              className="flex items-center justify-between gap-2 px-3 py-1.5 bg-black/40 rounded border border-white/8 group"
+              className="flex items-center justify-between gap-2 px-3 py-1.5 bg-black/40 rounded-lg group"
             >
               <div className="flex items-center gap-2 min-w-0">
                 {ruleType === 'date' && (
@@ -91,17 +92,19 @@ export function ExcludeRulesSection() {
                     {t('dateRuleTag')}
                   </span>
                 )}
-                <span className="text-white/55 text-sm truncate">{pattern}</span>
+                <span className="text-white/55 text-sm truncate" title={pattern}>
+                  {pattern}
+                </span>
               </div>
               <button
                 onClick={() => handleRemove(pattern, ruleType)}
                 // #66 問題9(#61レビュー由来): hoverのみで表示されるとキーボード/
                 // タッチで見えなかった。既定でも薄く見せ、hover/focusで強調する。
-                className="p-1 hover:bg-white/8 rounded transition-colors shrink-0 opacity-40 group-hover:opacity-100 focus-visible:opacity-100"
+                className="p-1 hover:bg-white/10 rounded-lg transition-colors shrink-0 opacity-40 group-hover:opacity-100 focus-visible:opacity-100"
                 title={t('removeTooltip')}
                 aria-label={t('removeTooltip')}
               >
-                <X className="w-3.5 h-3.5 text-white/30 hover:text-white/60" />
+                <X className="w-3.5 h-3.5 text-white/40 hover:text-white/70" />
               </button>
             </div>
           ))}
@@ -118,12 +121,13 @@ export function ExcludeRulesSection() {
           }}
           onKeyDown={handleKeyDown}
           placeholder={t('addPatternPlaceholder')}
-          className="flex-1 px-3 py-2 bg-black/40 text-white/50 rounded border border-white/8 focus:outline-none focus:border-white/20 text-sm"
+          className="flex-1 px-3 py-2 bg-black/40 text-white/50 rounded-lg border border-white/8 focus:outline-none focus:border-white/20 text-sm"
         />
+        {/* #66視覚刷新: 主要操作（追加）はDESIGN.md「Buttons — Primary」にする。 */}
         <button
           onClick={handleAdd}
           disabled={!newPattern.trim()}
-          className="flex items-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded border border-white/8 transition shrink-0 text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 px-4 py-2 bg-white/90 hover:bg-white disabled:bg-white/10 disabled:text-white/30 disabled:cursor-not-allowed text-black font-medium rounded-lg transition-colors shrink-0 text-sm"
         >
           <Plus className="w-4 h-4" />
           {t('addButtonLabel')}

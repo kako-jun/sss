@@ -74,26 +74,26 @@ export function InfoSection() {
         </div>
       </div>
 
-      {/* GitHubリンク */}
+      {/* GitHubリンク。#66視覚刷新: 副次操作なのでDESIGN.md「Buttons — Ghost」 */}
       <div>
         <button
           onClick={handleOpenGitHub}
-          className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/60 rounded border border-white/8 transition-colors text-sm"
+          className="flex items-center gap-2 px-4 py-2 text-white/40 hover:text-white/70 hover:bg-white/8 rounded-lg transition-colors text-sm"
         >
           <ExternalLink size={16} />
           {t('viewOnGitHub')}
         </button>
       </div>
 
-      {/* 設定の初期化 */}
-      <div className="border-t border-white/8 pt-6">
-        <h4 className="text-xs font-medium text-white/25 uppercase tracking-wider mb-3">
-          {t('dangerZoneTitle')}
-        </h4>
+      {/* 設定の初期化。#66視覚刷新: 罫線区切りをやめ、カード背景（bg-black/20）
+          で危険な操作の領域を視覚的に分ける。 */}
+      <div className="bg-black/20 rounded-lg p-4">
+        <h4 className="text-sm font-medium text-white/70">{t('dangerZoneTitle')}</h4>
+        <p className="text-xs text-white/40 mt-1 mb-3">{t('dangerZoneDescription')}</p>
         <button
           onClick={handleResetSettings}
           disabled={isResetting}
-          className="flex items-center gap-2 px-4 py-2 bg-red-950/50 hover:bg-red-900/50 disabled:bg-black/20 disabled:text-white/20 text-red-400/60 hover:text-red-400/80 rounded border border-red-900/30 transition-colors text-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-red-950/60 hover:bg-red-900/60 disabled:bg-black/20 disabled:text-white/20 disabled:cursor-not-allowed text-red-400/70 hover:text-red-400/90 rounded-lg transition-colors text-sm"
         >
           <RotateCcw size={16} />
           {isResetting ? t('resettingSettingsLabel') : t('resetSettingsButton')}

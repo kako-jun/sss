@@ -37,12 +37,10 @@ export function PickSection() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        {t('pickListTitle')}
-      </h3>
+      <h3 className="text-sm font-medium text-white/70">{t('pickListTitle')}</h3>
 
       {images.length === 0 ? (
-        <div className="p-4 bg-black/30 rounded text-center text-white/30 text-sm border border-white/5">
+        <div className="p-4 bg-black/30 rounded-lg text-center text-white/30 text-sm">
           {t('noPickedPhotos')}
         </div>
       ) : (

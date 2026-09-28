@@ -111,9 +111,10 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        {t('directorySelectionTitle')}
-      </h3>
+      <div>
+        <h3 className="text-sm font-medium text-white/70">{t('directorySelectionTitle')}</h3>
+        <p className="text-xs text-white/40 mt-1">{t('directorySelectionDescription')}</p>
+      </div>
 
       <div className="flex gap-2">
         <input
@@ -121,21 +122,24 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
           value={selectedDirectory}
           readOnly
           placeholder=""
-          className="flex-1 px-3 py-2 bg-black/40 text-white/60 rounded border border-white/8 focus:outline-none focus:border-white/20 text-sm"
+          title={selectedDirectory}
+          className="flex-1 px-3 py-2 bg-black/40 text-white/60 rounded-lg border border-white/8 focus:outline-none focus:border-white/20 text-sm truncate"
         />
         <button
           onClick={handleSelectDirectory}
-          className="flex items-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded border border-white/8 transition shrink-0 text-sm"
+          className="flex items-center gap-2 px-4 py-2 text-white/50 hover:text-white/80 hover:bg-white/8 rounded-lg transition-colors shrink-0 text-sm"
         >
           <FolderOpen className="w-4 h-4" />
           {t('selectButtonLabel')}
         </button>
       </div>
 
+      {/* #66視覚刷新: 主要操作（スキャン実行）はDESIGN.md「Buttons — Primary」
+          （白塗り）、副次操作（フォルダ選択）は「Buttons — Ghost」にする。 */}
       <button
         onClick={handleScan}
         disabled={!selectedDirectory || isScanning}
-        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 disabled:bg-black/20 disabled:text-white/20 text-white/60 hover:text-white/80 rounded border border-white/8 disabled:border-white/5 transition text-sm"
+        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white/90 hover:bg-white disabled:bg-white/10 disabled:text-white/30 disabled:cursor-not-allowed text-black font-medium rounded-lg transition-colors text-sm"
       >
         <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
         {isScanning ? t('scanningLabel') : t('scanLabel')}
@@ -151,10 +155,8 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
 
       {scanProgress && (
         <div className="space-y-2">
-          <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-            {t('scanResultTitle')}
-          </h3>
-          <div className="space-y-2 p-4 bg-black/30 rounded border border-white/5">
+          <h3 className="text-sm font-medium text-white/70">{t('scanResultTitle')}</h3>
+          <div className="space-y-2 p-4 bg-black/30 rounded-lg">
             <div className="text-sm text-white/50">
               {t('fileCountLabel')}{' '}
               <span className="font-mono text-white/70">
@@ -182,7 +184,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
           </div>
 
           {scanProgress.errorCount > 0 && (
-            <div className="space-y-2 p-4 bg-black/30 rounded border border-white/5">
+            <div className="space-y-2 p-4 bg-black/30 rounded-lg">
               <div className="text-sm text-white/40">
                 {t('readErrorsLabel')}{' '}
                 <span className="font-mono text-red-400/80">
