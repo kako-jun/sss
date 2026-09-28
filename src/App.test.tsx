@@ -526,6 +526,136 @@ describe('App i18n (#80): language setting resolution', () => {
 // のまま保持し、表示のたびに現在のロケールへ解決する。エラー表示中に言語を
 // 切り替えても、確定済みの旧言語の文言のまま固まらず、新しい言語へ即座に
 // 切り替わることを固定する（新旧言語が混在しないことの回帰テスト）。
+// #66 問題1: 設定中のESCはモーダルを閉じる。それ以外はexit_appを呼ぶ。以前は
+// フェーズに関わらず常にexit_appを呼んでいたため、設定画面でESCを押しただけで
+// アプリごと終了していた。
+describe('App Escape key (#66 問題1)', () => {
+  it('closes the Settings modal instead of exiting the app when Settings is open', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    // App自身が描画する設定ボタン（右上）をクリックして開く（Settingsコンポーネント
+    // 自体はこのファイルでスタブ化されているため、data-testid="settings-stub" が
+    // 現れることで開いたことを確認する）。
+    fireEvent.click(screen.getByTitle('設定'));
+    expect(screen.getByTestId('settings-stub')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('settings-stub')).toBeNull();
+    });
+    expect(invoke).not.toHaveBeenCalledWith('exit_app');
+  });
+
+  it('calls exit_app when Escape is pressed and nothing is open', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('exit_app');
+    });
+  });
+});
+
+// #66 問題4: Space=一時停止/再開、F/F11=フルスクリーン切替、?=ショートカット一覧。
+describe('App keyboard shortcuts: Space, F, ? (#66 問題4)', () => {
+  it('toggles the pause icon/tooltip in the overlay when Space is pressed on the document body', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+    // 再生中は「一時停止」ツールチップ/アイコン。
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+
+    fireEvent.keyDown(document.body, { key: ' ' });
+
+    await waitFor(() => {
+      expect(screen.getByTitle('再生')).toBeTruthy();
+    });
+    expect(screen.queryByTitle('一時停止')).toBeNull();
+
+    // もう一度押すと再生に戻る。
+    fireEvent.keyDown(document.body, { key: ' ' });
+    await waitFor(() => {
+      expect(screen.getByTitle('一時停止')).toBeTruthy();
+    });
+  });
+
+  it('toggles fullscreen via setFullscreen/setDecorations when F is pressed', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+    // 起動時のisFullscreen()解決(true)を待つ。
+    await waitFor(() => {
+      expect(win.isFullscreen).toHaveBeenCalled();
+    });
+
+    fireEvent.keyDown(document, { key: 'f' });
+
+    await waitFor(() => {
+      expect(win.setFullscreen).toHaveBeenCalledWith(false);
+    });
+    expect(win.setDecorations).toHaveBeenCalledWith(true);
+  });
+
+  it('toggles the shortcuts overlay when ? is pressed, and Escape closes it without exiting', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: '?' });
+    await waitFor(() => {
+      expect(screen.getByText('キーボードショートカット')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByText('キーボードショートカット')).toBeNull();
+    });
+    expect(invoke).not.toHaveBeenCalledWith('exit_app');
+  });
+
+  it('does not toggle pause when Space is pressed while a button has focus (avoids double-firing the native click)', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+
+    const settingsButton = screen.getByTitle('設定');
+    settingsButton.focus();
+    fireEvent.keyDown(settingsButton, { key: ' ' });
+
+    // フォーカスがボタンにある間はグローバルのSpaceショートカットを発火しない
+    // （ボタン自身のネイティブなクリック相当の挙動に譲る）。
+    await Promise.resolve();
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+  });
+});
+
 describe('App directoryError follows locale switches without mixing languages (#82 should1)', () => {
   it('re-resolves the startup directory error message to the new language after switching locale mid-display', async () => {
     getLastDirectoryPath.mockResolvedValue('/photos');

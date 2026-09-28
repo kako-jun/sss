@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 
 // #59: tauri-plugin-shell の open() から tauri-plugin-opener の openUrl() への移行。
 // 地図セルのクリックが正しい引数で openUrl を呼ぶことをピン留めする（GPS座標→URL整形の
@@ -46,7 +46,7 @@ const requiredProps = {
   totalImages: 10,
   progress: 0,
   progressDurationMs: 0,
-  isPlaying: true,
+  isPausedByUser: false,
   onPrevious: noop,
   onNext: noop,
   onOpenPickTab: noop,
@@ -112,6 +112,80 @@ describe('OverlayUI exclude advances immediately (#65 問題5)', () => {
 
     await screen.findByText('エラー: 除外失敗');
     expect(onExcluded).not.toHaveBeenCalled();
+  });
+});
+
+// #66 問題2: 旧実装は「実際に再生中か(isPlaying)」を渡していたが、オーバーレイの
+// ⏸/▶ボタンはオーバーレイにマウスオーバーしないと見えず、ホバー中はApp.tsx側で
+// 常にisPlaying=falseへ自動一時停止するため、ボタンが見えている間は常に
+// アイコンが▶(再生)のまま固定されて見える不具合があった。ユーザーが選んだ
+// 一時停止状態(isPausedByUser)を独立して渡すことで、ホバーの影響を受けずに
+// 正しいアイコン/ツールチップになることを固定する。
+describe('OverlayUI pause/play icon reflects isPausedByUser, not the hover-derived isPlaying (#66 問題2)', () => {
+  it('shows the Pause icon and "一時停止" tooltip when not paused by the user', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} isPausedByUser={false} />);
+
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+    expect(screen.queryByTitle('再生')).toBeNull();
+  });
+
+  it('shows the Play icon and "再生" tooltip when paused by the user', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} isPausedByUser={true} />);
+
+    expect(screen.getByTitle('再生')).toBeTruthy();
+    expect(screen.queryByTitle('一時停止')).toBeNull();
+  });
+});
+
+describe('OverlayUI status message timers do not interfere with each other (#66 問題6)', () => {
+  it('keeps a newly shown message visible for its own full duration even if triggered right after a previous one', async () => {
+    // 完全に決定的な擬似タイマー（自動進行なし）で制御し、mockの解決に必要な
+    // マイクロタスクのフラッシュだけ明示的に行う（実時間との結合による揺れを避ける）。
+    vi.useFakeTimers();
+    excludeImage.mockResolvedValue({ pattern: 'a.tmp', needsRescan: false });
+    pickImage.mockResolvedValue('/picks/a.tmp');
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    // 1回目: 除外してステータスメッセージを表示する。
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('ファイルを除外'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('除外パターン追加: a.tmp')).toBeTruthy();
+
+    // 2.9秒後（1回目のタイマーが発火する直前）に2回目のピック操作で新しい
+    // メッセージを表示する。旧実装は1回目のタイマー(あと0.1秒)がそのまま発火し、
+    // 2回目のメッセージを即座に消してしまっていた。
+    act(() => {
+      vi.advanceTimersByTime(2900);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('ピック（コピー）'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('コピー完了: /picks/a.tmp')).toBeTruthy();
+
+    // 1回目のタイマーが本来発火していたはずの時刻(+0.2秒)を過ぎても、
+    // 2回目のメッセージはまだ消えない（干渉していない証拠）。
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.getByText('コピー完了: /picks/a.tmp')).toBeTruthy();
+
+    // 2回目のメッセージ自身の3秒が経過すれば消える。
+    act(() => {
+      vi.advanceTimersByTime(2900);
+    });
+    expect(screen.queryByText('コピー完了: /picks/a.tmp')).toBeNull();
+
+    vi.useRealTimers();
   });
 });
 

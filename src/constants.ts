@@ -19,3 +19,20 @@ export function clampDisplayInterval(ms: number): number {
 
 // アニメーション
 export const MODAL_ANIMATION_DURATION = 0.2; // 秒
+
+/**
+ * idle（マウス非操作）時にフェードアウトする要素の共通クラス（#66）。
+ * オーバーレイUIと右上の常設ボタン（終了・ウィンドウモード・設定・ショートカット）の
+ * 両方に使う。`focus-within:opacity-100`により、キーボードでTab移動して内部の
+ * ボタンにフォーカスが当たっている間は idle 判定に関わらず可視化する
+ * （フォーカスされたのに見えない、というa11y上の欠陥を避けるため）。
+ */
+export const IDLE_FADE_BASE =
+  'transition-opacity duration-300 focus-within:opacity-100 focus-within:pointer-events-auto';
+export const IDLE_FADE_HIDDEN = 'opacity-0 pointer-events-none';
+export const IDLE_FADE_VISIBLE = 'opacity-100 pointer-events-auto';
+
+/** `IDLE_FADE_*` をまとめて組み立てるヘルパー。 */
+export function idleFadeClassName(isIdle: boolean): string {
+  return `${IDLE_FADE_BASE} ${isIdle ? IDLE_FADE_HIDDEN : IDLE_FADE_VISIBLE}`;
+}

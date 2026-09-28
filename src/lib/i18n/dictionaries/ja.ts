@@ -15,6 +15,16 @@ export const ja = {
   windowModeLabel: 'ウィンドウモード',
   fullscreenLabel: 'フルスクリーン',
   genericErrorTitle: 'エラーが発生しました',
+  closeTooltip: '閉じる',
+
+  // === キーボードショートカット一覧（#66） ===
+  shortcutsButtonTooltip: 'ショートカット一覧 (?)',
+  shortcutsTitle: 'キーボードショートカット',
+  shortcutSpace: '一時停止 / 再開',
+  shortcutNavigate: '前へ / 次へ',
+  shortcutFullscreen: 'フルスクリーン切り替え',
+  shortcutEscape: '終了（設定中は閉じる）',
+  shortcutHelp: 'このヘルプを表示',
 
   // === 起動時の案内画面（#65） ===
   welcomeTitle: 'ようこそ SSS へ',
@@ -71,6 +81,7 @@ export const ja = {
   secondsUnitOnly: '秒',
 
   // === 設定画面: タブ ===
+  settingsTabsLabel: '設定タブ',
   tabScan: 'フォルダ',
   tabOptions: 'オプション',
   tabExclude: '除外ルール',

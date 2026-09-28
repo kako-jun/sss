@@ -15,6 +15,16 @@ export const en = {
   windowModeLabel: 'Windowed',
   fullscreenLabel: 'Fullscreen',
   genericErrorTitle: 'Something went wrong',
+  closeTooltip: 'Close',
+
+  // === Keyboard shortcuts (#66) ===
+  shortcutsButtonTooltip: 'Keyboard shortcuts (?)',
+  shortcutsTitle: 'Keyboard Shortcuts',
+  shortcutSpace: 'Pause / resume',
+  shortcutNavigate: 'Previous / next',
+  shortcutFullscreen: 'Toggle fullscreen',
+  shortcutEscape: 'Exit (closes Settings first if open)',
+  shortcutHelp: 'Show this help',
 
   // === Startup notice screens (#65) ===
   welcomeTitle: 'Welcome to SSS',
@@ -69,6 +79,7 @@ export const en = {
   secondsUnitOnly: 's',
 
   // === Settings: tabs ===
+  settingsTabsLabel: 'Settings tabs',
   tabScan: 'Folder',
   tabOptions: 'Options',
   tabExclude: 'Exclude Rules',

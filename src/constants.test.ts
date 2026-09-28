@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL } from './constants';
+import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL, idleFadeClassName } from './constants';
 
 // #65 問題7: clampDisplayInterval は保存済み設定の破損（NaN/0/範囲外）を丸める唯一の
 // 検証経路（IntervalSection・起動シーケンス・useSlideshow が全てこれを通す）。
@@ -49,5 +49,28 @@ describe('clampDisplayInterval boundaries (#65 問題7)', () => {
 
   it('clamps zero up to the minimum', () => {
     expect(clampDisplayInterval(0)).toBe(5000);
+  });
+});
+
+// #66 問題10: 右上の常設ボタン列・オーバーレイの両方がidle時にフェードアウトする
+// 共通クラスを組み立てるヘルパー。opacity/pointer-eventsの対がidle状態に応じて
+// 正しく入れ替わり、focus-within時の可視化クラスは常に含まれることを固定する。
+describe('idleFadeClassName (#66 問題10)', () => {
+  it('hides (opacity-0, pointer-events-none) when idle', () => {
+    const className = idleFadeClassName(true);
+    expect(className).toContain('opacity-0');
+    expect(className).toContain('pointer-events-none');
+  });
+
+  it('shows (opacity-100, pointer-events-auto) when not idle, and never opacity-0', () => {
+    const className = idleFadeClassName(false);
+    expect(className).toContain('opacity-100');
+    expect(className).toContain('pointer-events-auto');
+    expect(className).not.toContain('opacity-0');
+  });
+
+  it('always includes focus-within escape hatches regardless of idle state', () => {
+    expect(idleFadeClassName(true)).toContain('focus-within:opacity-100');
+    expect(idleFadeClassName(false)).toContain('focus-within:opacity-100');
   });
 });

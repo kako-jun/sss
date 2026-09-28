@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import type { ImageInfo } from '../types';
 import { openInExplorer, pickImage, excludeImage } from '../lib/tauri';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useT } from '../lib/i18n';
 
@@ -30,7 +30,16 @@ interface OverlayUIProps {
    * 補間させる（#65 問題6: 60fpsのJSポーリングを撤去し、setState回数を削る）。
    */
   progressDurationMs: number;
-  isPlaying: boolean; // 再生中かどうか
+  /**
+   * ユーザーが明示的に一時停止したか（#66 問題2）。旧実装は「実際に再生中かどうか
+   * (isPlaying)」を渡していたが、`isPlaying` はオーバーレイにマウスオーバー中は
+   * 常にfalse（App.tsx側で自動一時停止するため）になる。オーバーレイの
+   * ⏸/▶ボタンはオーバーレイにホバーしないと見えない位置にあるため、
+   * 「ボタンが見えている間は常にisPlaying=false」となり、アイコンが常に▶に
+   * 固定されて見える不具合があった。ユーザーが選んだ意思（トグル前の状態）を
+   * 独立して渡すことで、ホバーによる自動一時停止と混同しないようにする。
+   */
+  isPausedByUser: boolean;
   onPrevious: () => void;
   onNext: () => void;
   onOpenPickTab: () => void;
@@ -52,7 +61,7 @@ export function OverlayUI({
   totalImages,
   progress,
   progressDurationMs,
-  isPlaying,
+  isPausedByUser,
   onPrevious,
   onNext,
   onOpenPickTab,
@@ -65,7 +74,31 @@ export function OverlayUI({
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showExcludeSubmenu, setShowExcludeSubmenu] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const statusTimeoutRef = useRef<number | undefined>(undefined);
   const t = useT();
+
+  // #66 問題6: 複数の操作（ピック/除外等）が短時間に連続すると、先に張った
+  // setTimeoutが後から表示した新しいメッセージを消してしまう（＝タイマーが
+  // 干渉する）不具合があった。常に「直前のタイマーを破棄してから新しく張る」
+  // ことで、表示中のメッセージが常にその表示から3秒後に消えることを保証する。
+  const showStatusMessage = useCallback((message: string) => {
+    if (statusTimeoutRef.current !== undefined) {
+      window.clearTimeout(statusTimeoutRef.current);
+    }
+    setStatusMessage(message);
+    statusTimeoutRef.current = window.setTimeout(() => {
+      statusTimeoutRef.current = undefined;
+      setStatusMessage('');
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (statusTimeoutRef.current !== undefined) {
+        window.clearTimeout(statusTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleOpenDirectory = async () => {
     if (!image) return;
@@ -86,12 +119,10 @@ export function OverlayUI({
 
     try {
       const destPath = await pickImage(image.path);
-      setStatusMessage(t('pickCopyDone', { path: destPath }));
-      setTimeout(() => setStatusMessage(''), 3000);
+      showStatusMessage(t('pickCopyDone', { path: destPath }));
     } catch (err) {
       console.error('Failed to share image:', err);
-      setStatusMessage(t('pickCopyFailed'));
-      setTimeout(() => setStatusMessage(''), 3000);
+      showStatusMessage(t('pickCopyFailed'));
     }
     setShowMoreMenu(false);
   };
@@ -104,19 +135,17 @@ export function OverlayUI({
       // フロント辞書側で組み立てる（旧実装はバックエンドが組み立て済みの日本語
       // 文字列をそのまま表示しており、言語切替に追従できなかった）。
       const { pattern, needsRescan } = await excludeImage(image.path, type);
-      setStatusMessage(
+      showStatusMessage(
         needsRescan
           ? t('excludeAddedNeedsRescan', { pattern })
           : t('excludeAddedFile', { pattern }),
       );
-      setTimeout(() => setStatusMessage(''), 3000);
       // #65 問題5: 除外した画像を表示し続けず、即座に次へ進んでプレイリスト
       // 情報（位置/総数）も最新化する。
       onExcluded?.();
     } catch (err) {
       console.error('Failed to exclude image:', err);
-      setStatusMessage(t('excludeFailed'));
-      setTimeout(() => setStatusMessage(''), 3000);
+      showStatusMessage(t('excludeFailed'));
     }
     setShowExcludeSubmenu(false);
     setShowMoreMenu(false);
@@ -289,6 +318,7 @@ export function OverlayUI({
               }}
               className="p-2 rounded transition-colors text-white/30 hover:text-white/60 hover:bg-white/5"
               title={t('menuTooltip')}
+              aria-label={t('menuTooltip')}
             >
               <Ellipsis size={18} />
             </button>
@@ -362,6 +392,7 @@ export function OverlayUI({
               onClick={handlePick}
               className="p-2 rounded transition-colors text-white/30 hover:text-white/60 hover:bg-white/5"
               title={t('pickTooltip')}
+              aria-label={t('pickTooltip')}
             >
               <HandGrab size={18} />
             </button>
@@ -378,6 +409,7 @@ export function OverlayUI({
                   : 'text-white/15 cursor-not-allowed'
               }`}
               title={t('previousTooltip')}
+              aria-label={t('previousTooltip')}
             >
               <ChevronLeft size={18} />
             </button>
@@ -388,9 +420,10 @@ export function OverlayUI({
             <button
               onClick={onTogglePause}
               className="p-2 rounded transition-colors text-white/40 hover:text-white/70 hover:bg-white/5"
-              title={isPlaying ? t('pauseTooltip') : t('playTooltip')}
+              title={isPausedByUser ? t('playTooltip') : t('pauseTooltip')}
+              aria-label={isPausedByUser ? t('playTooltip') : t('pauseTooltip')}
             >
-              {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+              {isPausedByUser ? <Play size={18} /> : <Pause size={18} />}
             </button>
           </div>
 
@@ -400,6 +433,7 @@ export function OverlayUI({
               onClick={onNext}
               className="p-2 rounded transition-colors text-white/40 hover:text-white/70 hover:bg-white/5"
               title={t('nextTooltip')}
+              aria-label={t('nextTooltip')}
             >
               <ChevronRight size={18} />
             </button>
