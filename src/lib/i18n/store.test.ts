@@ -175,6 +175,68 @@ describe('initLocale keeps the OS locale cache warm for a later switch to "auto"
 });
 
 /**
+ * #82レビュー3巡目nit: `getSetting`/`getOsLocale`が（rejectでなく）永久に
+ * pendingのまま返ってこない場合、約1秒でタイムアウトしてフォールバックする
+ * ことを固定する（以前はreject/例外しか救っておらず、無限pendingだと
+ * initLocaleが永久に解決しなかった＝起動シーケンスが呼ばれなかった）。
+ */
+describe('initLocale times out a hanging getSetting/getOsLocale instead of hanging forever (#82レビュー3巡目 nit)', () => {
+  const originalLanguage = navigator.language;
+
+  function setNavigatorLanguage(value: string) {
+    Object.defineProperty(navigator, 'language', { value, configurable: true });
+  }
+
+  afterEach(() => {
+    setNavigatorLanguage(originalLanguage);
+    clearOsLocaleCache();
+    vi.useRealTimers();
+  });
+
+  it('falls back to "auto" when getSetting never resolves nor rejects', async () => {
+    vi.useFakeTimers();
+    setNavigatorLanguage('ja-JP');
+    // 一度もresolve/rejectしない、永久にpendingのままのPromiseを模す。
+    const getSetting = () => new Promise<string | null>(() => {});
+
+    const done = initLocale(getSetting);
+    await vi.advanceTimersByTimeAsync(1000);
+    await done;
+
+    expect(getLanguageSetting()).toBe('auto');
+    expect(getLocale()).toBe('ja'); // navigator.languageへフォールバック
+  });
+
+  it('falls back to navigator.language when getOsLocale never resolves nor rejects', async () => {
+    vi.useFakeTimers();
+    setNavigatorLanguage('en-US');
+    const getSetting = async () => null;
+    const getOsLocale = vi.fn(() => new Promise<string | null>(() => {}));
+
+    const done = initLocale(getSetting, getOsLocale);
+    await vi.advanceTimersByTimeAsync(1000);
+    await done;
+
+    expect(getOsLocale).toHaveBeenCalledTimes(1);
+    expect(getLanguageSetting()).toBe('auto');
+    expect(getLocale()).toBe('en'); // navigator.languageへフォールバック（OSロケール未取得）
+  });
+
+  it('does not wait the full timeout when getSetting resolves quickly', async () => {
+    vi.useFakeTimers();
+    setNavigatorLanguage('en-US');
+    const getSetting = async (key: string) => (key === 'language' ? 'ja' : null);
+
+    const done = initLocale(getSetting);
+    // タイムアウト(1000ms)より十分前に解決していることを確認する。
+    await vi.advanceTimersByTimeAsync(10);
+    await done;
+
+    expect(getLanguageSetting()).toBe('ja');
+  });
+});
+
+/**
  * #82レビュー2巡目 nit: OSロケール取得コマンド・navigator.languageの両方が
  * 返しうる様々な形式のタグを、統一した基準（/^ja([-_.@]|$)/i）で正規化する
  * ことをテーブルテストで固定する。

@@ -85,6 +85,29 @@ export function clearOsLocaleCache(): void {
 }
 
 /**
+ * #82レビュー3巡目nit: `getSetting`/`getOsLocale`がreject/例外ではなく**永久に
+ * pendingのまま返ってこない**場合に備えたタイムアウト。以前は`initLocale`内の
+ * `try/catch`がreject（must対応）しか救わず、Promiseが解決も拒否もしないまま
+ * 固まるケース（例: IPC側のバグ、フリーズしたバックエンド）は起動シーケンスを
+ * 永久に止め得た。約1秒でnullにフォールバックする（`getSetting`のnullは
+ * 「保存値なし→auto」、`getOsLocale`のnullは「OSロケール取得不可→
+ * navigator.languageへフォールバック」と、どちらも既存のnull処理と同じ意味に
+ * なるためタイムアウト値として都合が良い）。タイムアウト後に元のPromiseが
+ * 遅れてreject/resolveしても、`.catch(() => {})`でunhandled rejection警告を
+ * 防ぎつつ無視する（Promiseは最初の決着以降は変化しないため、race自体の結果には
+ * 影響しない）。
+ */
+const LOCALE_FETCH_TIMEOUT_MS = 1000;
+
+function withTimeout(promise: Promise<string | null>, timeoutMs: number): Promise<string | null> {
+  promise.catch(() => {});
+  const timeout = new Promise<null>((resolve) => {
+    setTimeout(() => resolve(null), timeoutMs);
+  });
+  return Promise.race([promise, timeout]);
+}
+
+/**
  * アプリ起動時、保存済みの `app_settings.language` を読み込んでストアを初期化する。
  * 保存値が無い/不正な場合は 'auto' として扱う。
  *
@@ -109,7 +132,7 @@ export async function initLocale(
 ): Promise<void> {
   let setting: LanguageSetting = 'auto';
   try {
-    const saved = await getSetting('language');
+    const saved = await withTimeout(getSetting('language'), LOCALE_FETCH_TIMEOUT_MS);
     setting = saved === 'ja' || saved === 'en' ? saved : 'auto';
   } catch (err) {
     console.error('Failed to load the language setting, falling back to "auto":', err);
@@ -118,7 +141,7 @@ export async function initLocale(
 
   if (getOsLocale) {
     try {
-      const osLocale = await getOsLocale();
+      const osLocale = await withTimeout(getOsLocale(), LOCALE_FETCH_TIMEOUT_MS);
       if (osLocale) {
         cachedOsLocale = normalizeLocaleTag(osLocale);
       }
