@@ -15,17 +15,26 @@ name = "sss_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+# #69レビュー: 下限を明示（bareな"2"だとJS側(@tauri-apps/*)だけ先行更新されても
+# 気付けず minor 不一致が再発するため、各tauri系クレートは現在揃えたバージョンを
+# 下限として固定する）。tauri-build 自体は tauri 本体と別のバージョン系列。
+tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+# JS側 @tauri-apps/api・cli と同じ 2.12 系を下限にする（#69レビュー）。
+tauri = { version = "2.12", features = ["protocol-asset"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rusqlite = { version = "0.40", features = ["bundled"] }
 globset = "0.4"
 walkdir = "2"
 kamadak-exif = "0.6"
-rand = "0.9"
+# #69レビュー: 完全平等ランダムの趣旨に合わせ、整数範囲サンプリング（`Rng::random_range`。
+# playlist.rs で新規画像を巡へ挿入する際の比率抽選に使用）を、ごく僅かな理論上の
+# バイアスも許さない厳密一様な方式にする。なお `SliceRandom::shuffle` は要素数が
+# u32::MAX 未満（常にこれに該当）の場合このフィーチャに依存しない専用の一様アルゴリズム
+# (`IncreasingUniform`、Durstenfeld版Fisher–Yates) を使うため影響を受けない。
+rand = { version = "0.9", features = ["unbiased"] }
 rayon = "1"
 image = "0.25"
 md5 = "0.8"
@@ -34,16 +43,18 @@ dirs = "7"
 # #82 should3: OSロケール取得（tauri-plugin-osを避けcapabilityを増やさないための
 # 素の#[tauri::command]用）。
 sys-locale = "0.3"
-tauri-plugin-single-instance = { version = "2" }
-tauri-plugin-dialog = "2"
-tauri-plugin-opener = "2"
-tauri-plugin-process = "2"
+# 各プラグインは対応する JS パッケージ（@tauri-apps/plugin-*）の minor に揃える
+# （#69レビュー）。plugin-single-instance は JS 側を持たないため自身の現行版を下限にする。
+tauri-plugin-single-instance = { version = "2.5" }
+tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2.6"
+tauri-plugin-process = "2.4"
 
 # `test` フィーチャは resolver v2 (edition 2021) のため通常ビルドには混入しない。
 # get_next_image 等の #[tauri::command] を tauri::test::mock_app() 経由で
 # 直接呼ぶ結合テスト用（#60: 存在しないファイルで表示回数が加算されないことの検証）。
 [dev-dependencies]
-tauri = { version = "2", features = ["test"] }
+tauri = { version = "2.12", features = ["test"] }
 
 [features]
 default = ["custom-protocol"]
