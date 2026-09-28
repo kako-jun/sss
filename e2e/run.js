@@ -528,7 +528,72 @@ const scenarios = [
       return { pass, detail: `exitTitle=${JSON.stringify(exitTitle)}` };
     },
   },
+  {
+    // #82レビュー2巡目 should1（回帰）: tabScanを「フォルダ」にした影響で、
+    // 設定タブ行が幅720・ja だと各タブ文字が1文字ずつ折り返っていた
+    // （Settings/index.tsxのタブボタンにwhitespace-nowrap+flex-shrink-0、
+    // タブ行にoverflow-x-autoを追加して修正）。幅720/1280 x ja/enの
+    // 全組み合わせで、各タブボタンのtop座標が全て一致する（＝1行に収まって
+    // いる）ことを確認する。
+    name: 'Settings tab row stays on a single line at width 720/1280 (ja) (#82レビュー2巡目 should1)',
+    hash: 'welcome', // ディレクトリ未設定→ようこそ画面。設定ボタンは常設なのでどのhashでも開ける
+    async run(page) {
+      return measureSettingsTabRowAtWidths(page);
+    },
+  },
+  {
+    name: 'Settings tab row stays on a single line at width 720/1280 (en) (#82レビュー2巡目 should1)',
+    hash: 'welcome',
+    locale: 'en-US',
+    async run(page) {
+      return measureSettingsTabRowAtWidths(page);
+    },
+  },
 ];
+
+/**
+ * #82レビュー2巡目 should1（回帰）: tabScanを「フォルダ」にした影響で、設定タブ行が
+ * 幅720・ja だと各タブ文字が1文字ずつ折り返っていた（Settings/index.tsxのタブ
+ * ボタンにwhitespace-nowrap+flex-shrink-0、タブ行にoverflow-x-autoを追加して
+ * 修正）。設定モーダルを一度だけ開き、閉じずにビューポート幅を1280→720へ変えながら
+ * タブボタンのtop座標が全て一致する（＝1行に収まっている）ことを確認する。
+ */
+async function measureSettingsTabRowAtWidths(page) {
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    // 設定ボタンはlucide-reactの<Settings>アイコン（App.tsx: `Settings as
+    // SettingsIcon`）を持つ唯一のボタン。titleはロケール依存な上、window
+    // モード切替ボタンのtitle（switchToWindowMode等）はja訳だと「ウィンドウ」が
+    // 全角カタカナでASCII "window" を含まないため、title文字列での除外法は
+    // ja/enで挙動が変わり得た（実際にja側で誤ってwindowモード切替ボタンを
+    // クリックしていた）。lucide-reactは`createLucideIcon`でアイコン名から
+    // 機械的に`lucide-settings`等のクラス名を付与するため、ロケールに左右
+    // されないこちらで直接選ぶ。
+    const icon = document.querySelector('svg.lucide-settings');
+    const settingsBtn = icon && icon.closest('button');
+    settingsBtn && settingsBtn.click();
+  });
+  await page.waitForTimeout(400);
+
+  const measure = () =>
+    page.evaluate(() => {
+      const tabButtons = [...document.querySelectorAll('.overflow-x-auto > button')];
+      const tops = tabButtons.map((b) => Math.round(b.getBoundingClientRect().top));
+      const singleLine = tabButtons.length > 0 && new Set(tops).size === 1;
+      return { count: tabButtons.length, tops, singleLine };
+    });
+
+  const at1280 = await measure();
+  await page.setViewportSize({ width: 720, height: 800 });
+  await page.waitForTimeout(100);
+  const at720 = await measure();
+
+  const pass = at1280.count === 7 && at1280.singleLine && at720.count === 7 && at720.singleLine;
+  return {
+    pass,
+    detail: `at1280=${JSON.stringify(at1280)} at720=${JSON.stringify(at720)}`,
+  };
+}
 
 async function main() {
   if (await isPortInUse(PORT)) {
@@ -577,7 +642,7 @@ async function main() {
         // （app_settings.language 未設定→'auto'→navigator.languageの経路）。
         // 英語ロケールを検証するシナリオは `locale: 'en-US'` を個別に指定する。
         const page = await browser.newPage({
-          viewport: { width: 1280, height: 800 },
+          viewport: scenario.viewport || { width: 1280, height: 800 },
           locale: scenario.locale || 'ja-JP',
         });
         await page.addInitScript({ path: INIT_SCRIPT });

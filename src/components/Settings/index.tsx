@@ -61,11 +61,15 @@ export function Settings({
           </button>
         </div>
 
-        {/* タブナビゲーション */}
-        <div className="flex gap-1 mb-6 border-b border-white/8">
+        {/* タブナビゲーション。#82レビュー2巡目should1: tabScanを「フォルダ」に
+            した影響で幅720（ja）だと各タブが1文字ずつ折り返す回帰が起きたため、
+            ボタンは折り返さず(whitespace-nowrap flex-shrink-0)、行自体を
+            横スクロール可能にする（DESIGN.md準拠の控えめなスクロールバーは
+            index.cssの::-webkit-scrollbarで全要素共通適用済み） */}
+        <div className="flex gap-1 mb-6 border-b border-white/8 overflow-x-auto">
           <button
             onClick={() => setActiveTab('scan')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 ${
               activeTab === 'scan'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
@@ -75,7 +79,7 @@ export function Settings({
           </button>
           <button
             onClick={() => setActiveTab('options')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 ${
               activeTab === 'options'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
@@ -85,7 +89,7 @@ export function Settings({
           </button>
           <button
             onClick={() => setActiveTab('exclude')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 ${
               activeTab === 'exclude'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
@@ -95,7 +99,7 @@ export function Settings({
           </button>
           <button
             onClick={() => setActiveTab('pick')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 ${
               activeTab === 'pick'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
@@ -105,7 +109,7 @@ export function Settings({
           </button>
           <button
             onClick={() => setActiveTab('history')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 ${
               activeTab === 'history'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
@@ -118,7 +122,7 @@ export function Settings({
               setActiveTab('stats');
               setStatsKey((prev) => prev + 1); // タブを開くたびにkeyを変更して再マウント
             }}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 ${
               activeTab === 'stats'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
@@ -128,7 +132,7 @@ export function Settings({
           </button>
           <button
             onClick={() => setActiveTab('info')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-4 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 ${
               activeTab === 'info'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
