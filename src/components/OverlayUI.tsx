@@ -218,7 +218,7 @@ export function OverlayUI({
                     高速に写真をスキップするとレート制限を受ける可能性がある */}
                 <img
                   src={tileUrl!}
-                  alt="Location Map"
+                  alt={t('locationMapAlt')}
                   className="w-full h-full object-cover grayscale opacity-60 group-hover:opacity-80 group-hover:grayscale-0 transition-all"
                 />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

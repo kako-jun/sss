@@ -8,7 +8,7 @@
 export const en = {
   // === App-wide ===
   windowTitle: 'sss - Smart Slide Show',
-  exitTooltip: 'Press ESC to exit',
+  exitTooltip: 'Exit (Esc)',
   settingsTitle: 'Settings',
   switchToWindowMode: 'Switch to windowed mode',
   switchToFullscreen: 'Switch to fullscreen',
@@ -28,7 +28,7 @@ export const en = {
     'Everything may be excluded by your rules, or the folder has no supported files. Check Settings to review.',
   directoryUnreachableTitle: "Can't read your last folder",
   directoryUnreachableSubtitle: 'Check the connection, or pick a different folder in Settings',
-  rootUnavailable: "Can't connect to the folder. Waiting to reconnect…",
+  rootUnavailable: "Can't connect to the folder. Waiting to reconnect...",
   loadFailedGaveUp: 'Several photos failed to load. Check the folder connection.',
   startupDirectoryRejected: "Couldn't connect to your last folder: {reason}",
 
@@ -55,6 +55,7 @@ export const en = {
   excludeByFile: 'Exclude this file',
   noLocationInfo: 'No location',
   noDateTime: 'No date',
+  locationMapAlt: 'Location map',
   pickCopyDone: 'Copied to {path}',
   pickCopyFailed: 'Error: copy failed',
   excludeFailed: 'Error: exclude failed',
@@ -65,9 +66,10 @@ export const en = {
   loadingLabel: 'Loading...',
   selectButtonLabel: 'Select',
   secondsUnit: '{value}s',
+  secondsUnitOnly: 's',
 
   // === Settings: tabs ===
-  tabScan: 'Import',
+  tabScan: 'Folder',
   tabOptions: 'Options',
   tabExclude: 'Exclude Rules',
   tabPick: 'Picks',
@@ -76,7 +78,7 @@ export const en = {
   tabInfo: 'Info',
 
   // === Settings: Import (scan) ===
-  directorySelectionTitle: 'Select Directory',
+  directorySelectionTitle: 'Select Folder',
   scanningLabel: 'Scanning...',
   scanLabel: 'Scan',
   scanResultTitle: 'Scan Results',
@@ -87,18 +89,18 @@ export const en = {
   readErrorsLabel: 'Read errors:',
   errorCountValue: '{count}',
   keptAsUnknownNote: '(kept as unknown, not deleted)',
-  pleaseSelectDirectoryFirst: 'Please select a directory first',
-  failedToSelectDirectory: 'Failed to select directory',
-  failedToScanDirectory: 'Failed to scan directory',
+  pleaseSelectDirectoryFirst: 'Please select a folder first',
+  failedToSelectDirectory: 'Failed to select a folder',
+  failedToScanDirectory: 'Failed to scan the folder',
   errorScanInProgress: 'A scan is already in progress. Please wait for it to finish.',
   errorDirectoryNotFound: "Couldn't find the selected folder: {path}",
   errorDirectoryUnsafe: "This folder can't be used for security reasons: {path}",
-  selectDirectoryDialogTitle: 'Select Photo Directory',
+  selectDirectoryDialogTitle: 'Select Photo Folder',
 
   // === Settings: Options ===
   displayIntervalTitle: 'Display Interval',
   exifRotationLabel: 'Auto-rotate images based on EXIF orientation',
-  pickDestinationTitle: 'Pick Destination Directory',
+  pickDestinationTitle: 'Picks Folder',
 
   // === Settings: Exclude Rules ===
   excludeRulesTitle: 'Exclude Rules',
@@ -116,7 +118,8 @@ export const en = {
   pickListTitle: 'Picked Photos',
   noPickedPhotos: 'No picked photos yet',
   deleteTooltip: 'Delete',
-  confirmDeletePickedPhoto: 'Remove this photo from your picks?',
+  confirmDeletePickedPhoto:
+    "Delete this copy from your picks folder? The original photo isn't affected.",
 
   // === Settings: History ===
   recentHistoryTitle: 'Recently Shown (last 100)',
@@ -133,7 +136,7 @@ export const en = {
   viewedFilesCountLabel: 'Files shown at least once:',
   displayCountPerImageTitle: 'Display Count per Image',
   fairnessExplanation:
-    'If the complete-equality shuffle is working correctly, every file gets shown evenly.',
+    'If the fair-shuffle algorithm is working correctly, every photo gets shown equally often.',
   resettingLabel: 'Resetting...',
   resetDisplayCountsButton: 'Reset Display Counts',
   confirmResetDisplayCounts: 'Reset the display count for every image?',
@@ -153,7 +156,7 @@ export const en = {
 
   // === Language setting ===
   languageLabel: 'Language',
-  languageAuto: 'Auto (follow OS setting)',
+  languageAuto: 'Auto (system)',
   languageJa: '日本語',
   languageEn: 'English',
 } as const;

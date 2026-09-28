@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useT, useLocale, getLanguageSetting, setLanguageSetting } from '../../lib/i18n';
+import { useT, getLanguageSetting, setLanguageSetting } from '../../lib/i18n';
 import type { LanguageSetting } from '../../lib/i18n';
 import { saveSetting } from '../../lib/tauri';
 
@@ -12,8 +12,10 @@ const OPTIONS: LanguageSetting[] = ['auto', 'ja', 'en'];
  * `app_settings` へ永続化する。
  */
 export function LanguageSection() {
+  // #82レビューnit: `useT()`自体が内部で`useLocale()`を呼びロケール変更を購読して
+  // 再レンダーを起こすため、ここで別途`useLocale()`を呼ぶのは冗長だった（返り値も
+  // 使っていない）。このボタン群自身の表示言語追従は`t`経由で引き続き効く。
   const t = useT();
-  useLocale(); // ロケール変更時にこのボタン群自身の表示言語も追従させる
   const [setting, setSetting] = useState<LanguageSetting>(getLanguageSetting());
 
   const handleChange = async (next: LanguageSetting) => {

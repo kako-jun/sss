@@ -28,7 +28,7 @@ export const ja = {
     '除外ルールで全て除外されているか、フォルダに対象ファイルがありません。設定から確認してください。',
   directoryUnreachableTitle: '前回のフォルダを読めません',
   directoryUnreachableSubtitle: '接続を確認するか、設定から別のフォルダを選んでください',
-  rootUnavailable: 'フォルダに接続できません。再接続をお待ちください…',
+  rootUnavailable: 'フォルダに接続できません。再接続をお待ちください...',
   loadFailedGaveUp: '複数の写真の読み込みに失敗しました。フォルダの状態を確認してください。',
   startupDirectoryRejected: '前回のフォルダに接続できませんでした: {reason}',
 
@@ -37,7 +37,7 @@ export const ja = {
   statusCheckingLastFolder: '前回フォルダを確認しています...',
   statusRestoringState: '前回の状態を復元しています...',
   statusLoadingImages: '画像を読み込んでいます...',
-  statusScanningDirectory: 'ディレクトリをスキャンしています...',
+  statusScanningDirectory: 'フォルダをスキャンしています...',
   statusScanComplete: 'スキャン完了: {count}ファイル検出',
 
   // === オーバーレイUI ===
@@ -51,10 +51,11 @@ export const ja = {
   viewPicks: 'ピックを見る',
   excludeMenuLabel: '除外',
   excludeByDate: '撮影日付で除外',
-  excludeByDirectory: 'ディレクトリを除外',
+  excludeByDirectory: 'フォルダを除外',
   excludeByFile: 'ファイルを除外',
   noLocationInfo: '位置情報なし',
   noDateTime: '日時不明',
+  locationMapAlt: '位置情報の地図',
   pickCopyDone: 'コピー完了: {path}',
   pickCopyFailed: 'エラー: コピー失敗',
   excludeFailed: 'エラー: 除外失敗',
@@ -65,9 +66,12 @@ export const ja = {
   loadingLabel: '読み込み中...',
   selectButtonLabel: '選択',
   secondsUnit: '{value}秒',
+  // #82レビューnit: IntervalSectionの「秒」単独表示は`secondsUnit`に空文字を
+  // 渡す代用でなく専用キーにする。
+  secondsUnitOnly: '秒',
 
   // === 設定画面: タブ ===
-  tabScan: '入力',
+  tabScan: 'フォルダ',
   tabOptions: 'オプション',
   tabExclude: '除外ルール',
   tabPick: 'ピック',
@@ -76,7 +80,7 @@ export const ja = {
   tabInfo: '情報',
 
   // === 設定画面: 入力（スキャン） ===
-  directorySelectionTitle: 'ディレクトリ選択',
+  directorySelectionTitle: 'フォルダ選択',
   scanningLabel: 'スキャン中...',
   scanLabel: 'スキャン',
   scanResultTitle: 'スキャン結果',
@@ -98,7 +102,7 @@ export const ja = {
   // === 設定画面: オプション ===
   displayIntervalTitle: '表示間隔',
   exifRotationLabel: 'EXIF回転情報に従って画像を自動回転',
-  pickDestinationTitle: 'ピック先ディレクトリ',
+  pickDestinationTitle: 'ピック先フォルダ',
 
   // === 設定画面: 除外ルール ===
   excludeRulesTitle: '除外ルール',
@@ -116,7 +120,9 @@ export const ja = {
   pickListTitle: 'ピック一覧',
   noPickedPhotos: 'ピックした写真はありません',
   deleteTooltip: '削除',
-  confirmDeletePickedPhoto: 'この写真をピックフォルダから削除しますか？',
+  // #82レビューshould5: ピック削除は実ファイルの削除であることと、元の写真は
+  // 残ることを明示する（実挙動と文言を一致させる）。
+  confirmDeletePickedPhoto: 'ピックフォルダのコピーを削除しますか？元の写真は残ります。',
 
   // === 設定画面: 履歴 ===
   recentHistoryTitle: '最近の表示履歴（最新100件）',

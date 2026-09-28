@@ -140,7 +140,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
             }}
             className="w-14 px-2 py-1 bg-black/40 text-white/60 rounded border border-white/8 text-center text-sm focus:outline-none focus:border-white/20"
           />
-          <span className="text-white/30 text-sm">{t('secondsUnit', { value: '' })}</span>
+          <span className="text-white/30 text-sm">{t('secondsUnitOnly')}</span>
         </div>
       </div>
     </div>

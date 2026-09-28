@@ -56,8 +56,9 @@ const requiredProps = {
 };
 
 function clickMapButton() {
-  // 地図セルのボタン自体にはラベルが無いため、内側の img (alt="Location Map") から辿る。
-  fireEvent.click(screen.getByAltText('Location Map').closest('button')!);
+  // 地図セルのボタン自体にはラベルが無いため、内側の img
+  // （alt=t('locationMapAlt')、既定ロケールはja→'位置情報の地図'）から辿る。
+  fireEvent.click(screen.getByAltText('位置情報の地図').closest('button')!);
 }
 
 beforeEach(() => {
@@ -164,7 +165,7 @@ describe('OverlayUI map button (openUrl)', () => {
     });
     render(<OverlayUI image={image} {...requiredProps} />);
 
-    expect(screen.queryByAltText('Location Map')).toBeNull();
+    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
     expect(openUrl).not.toHaveBeenCalled();
   });
 });

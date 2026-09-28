@@ -33,12 +33,12 @@ describe('t() message interpolation (#80)', () => {
     );
   });
 
-  // secondsUnit: '{value}秒' はScanSection（実測秒数を埋める）とIntervalSection
-  // （既に別の<input>に数値があるため単位表記だけ欲しい）の2箇所で共用されている。
-  // IntervalSection側は`t('secondsUnit', { value: '' })`と明示的に空文字を渡す
-  // ことで単位だけを残す設計（キー自体を分けず、パラメータを空にする選択）。
-  // 「パラメータ自体を渡さない」場合（プレースホルダがそのまま残る）とは異なる
-  // 挙動になることをここで区別して固定する。
+  // #82レビューnit: 以前はIntervalSectionが`t('secondsUnit', { value: '' })`と
+  // 明示的に空文字を渡すことで単位だけを残す代用をしていたが、専用キー
+  // `secondsUnitOnly`を追加したため今はScanSection（実測秒数を埋める用途）だけが
+  // `secondsUnit`を使う。この空文字明示の挙動自体は`t()`本体の一般的な能力
+  // （「パラメータ自体を渡さない」場合とは異なりプレースホルダがそのまま残らない）
+  // として引き続き有効なため、テストとして残す。
   it('replaces a placeholder with an empty string when the param is explicitly "" (distinct from omitting the param)', () => {
     expect(t('secondsUnit', { value: '' })).toBe('秒');
     expect(t('secondsUnit', {})).toBe('{value}秒');

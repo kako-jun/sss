@@ -232,7 +232,7 @@ describe('selectDirectory (dialog plugin)', () => {
     expect(open).toHaveBeenCalledWith({
       directory: true,
       multiple: false,
-      title: 'Select Photo Directory',
+      title: 'Select Photo Folder',
     });
   });
 

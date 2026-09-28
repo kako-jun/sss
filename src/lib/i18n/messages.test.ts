@@ -101,4 +101,17 @@ describe('i18n dictionaries (#80)', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  // #82レビューshould6: en辞書に日本語が紛れ込むと、英語ロケールなのに一部だけ
+  // 日本語が表示される事故になる。`languageJa`（言語選択肢自体の表記
+  // 「日本語」。他言語の選択画面でも自国語表記のままにするUI慣習に従うため
+  // 例外として日本語のままでよい）だけを除外して検証する。
+  it('has no Japanese characters in the en dictionary, except the languageJa entry itself', () => {
+    const japanesePattern = /[぀-ヿ一-鿿]/;
+    const offenders = Object.entries(en)
+      .filter(([key]) => key !== 'languageJa')
+      .filter(([, value]) => japanesePattern.test(value))
+      .map(([key, value]) => `${key}: ${value}`);
+    expect(offenders).toEqual([]);
+  });
 });

@@ -58,7 +58,7 @@ describe('LanguageSection (#80)', () => {
     // 追従する（languageLabel見出し・ラベルが英語になる）。
     await waitFor(() => {
       expect(screen.getByText('Language')).toBeTruthy();
-      expect(screen.getByText('Auto (follow OS setting)')).toBeTruthy();
+      expect(screen.getByText('Auto (system)')).toBeTruthy();
       expect(screen.getByText('English').closest('button')!.className).toContain('bg-white/15');
     });
     expect(saveSetting).toHaveBeenCalledWith('language', 'en');

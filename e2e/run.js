@@ -520,11 +520,11 @@ const scenarios = [
       await page.waitForTimeout(500);
       const exitTitle = await page.evaluate(() => {
         const btn = [...document.querySelectorAll('button')].find((b) =>
-          (b.title || '').includes('ESC'),
+          (b.title || '').toLowerCase().includes('esc'),
         );
         return btn ? btn.title : null;
       });
-      const pass = exitTitle === 'Press ESC to exit';
+      const pass = exitTitle === 'Exit (Esc)';
       return { pass, detail: `exitTitle=${JSON.stringify(exitTitle)}` };
     },
   },
