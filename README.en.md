@@ -13,7 +13,7 @@ A slideshow app that shows 100,000+ photos fairly.
 - **5-image prefetch cache**: smooth transitions (single-threaded, works on weak CPUs too)
 - **Display stats**: tracks and shows display count and last-shown time
 - **EXIF info display**: shows date taken and GPS coordinates
-- **.sssignore**: gitignore-style exclude rules (placed in your home directory)
+- **Exclude rules**: manage exclude rules by date, file, or folder in Settings → Exclude Rules (a legacy `.sssignore` file is migrated to the database automatically on first scan)
 - **Screensaver suppression**: keeps the display always on
 - **Cross-platform**: Windows/Linux/macOS
 - **Japanese/English UI**: follows the OS locale automatically, with a manual switch in Settings → Options
@@ -42,8 +42,8 @@ npm run tauri:build
 
 ### First launch
 
-1. The settings screen appears when you start the app
-2. Pick a photo folder with the "Select Folder" button
+1. If no photo folder has ever been set, a welcome screen appears
+2. Click "Select Folder" to open Settings, then pick a photo folder in the Folder tab
 3. Start scanning with the "Scan" button
 4. The slideshow starts automatically once the scan finishes
 
@@ -51,12 +51,12 @@ npm run tauri:build
 
 #### Mouse
 
-- **Move the mouse**: shows the UI and pauses the slideshow automatically
+- **Move the mouse**: shows the overlay UI and pauses the slideshow automatically
 - **Click outside the overlay**: hides the UI immediately and resumes
 - **Previous button**: goes back to the previous photo/video (from history, does not increase its display count)
 - **Next button**: advances immediately
-- **Open button**: opens the file manager with the current file selected
-- **Settings button**: opens the settings screen
+- **"…" menu** (inside the overlay): open the file manager, view your picks, or exclude by date/file/folder
+- **Settings button** (top right, always visible even without moving the mouse): opens the settings screen
 
 #### Keyboard shortcuts
 
@@ -64,23 +64,11 @@ npm run tauri:build
 - **Left arrow**: go to the previous photo/video
 - **Right arrow**: go to the next photo/video
 
-### .sssignore
+### Exclude rules
 
-Create a `.sssignore` file in your home directory (Windows: `%USERPROFILE%`, Unix: `$HOME`) to exclude specific photos.
+The Settings → Exclude Rules tab lists and manages exclude rules by date, file, or folder (the overlay's "…" menu also lets you exclude the currently shown photo by date/file/folder on the spot). Rules are stored in the app's own database.
 
-```gitignore
-# Exclude specific dates
-**/2023-05-15/**
-**/2024-01-*/**
-
-# Exclude specific folders
-**/private/**
-**/work/**
-
-# File patterns
-*_draft.*
-screenshot_*.png
-```
+A legacy `.sssignore` file (gitignore-style, in your home directory: Windows `%USERPROFILE%`, Unix `$HOME`) from older versions is migrated into the database once, on the first scan, and then renamed to `.sssignore.bak` (it is never read again after that).
 
 ## Tech Stack
 
@@ -92,7 +80,7 @@ screenshot_*.png
 - **image v0.25**: image processing (4K resizing)
 - **kamadak-exif v0.6**: EXIF reading
 - **md5 v0.7**: cache filename hashing
-- **globset v0.4**: `.sssignore` pattern matching
+- **globset v0.4**: exclude-rule glob pattern matching
 - **keepawake v0.4**: screensaver suppression
 
 ### Frontend (React)
@@ -108,14 +96,12 @@ screenshot_*.png
 
 Shown when you move the mouse:
 
-- 📁 File path (full path)
-- 🖼️ Image size (width x height)
-- 💾 File size
+- 🗺️ Location (a map thumbnail when GPS data is available, click to open Google Maps; "No location" otherwise)
 - 📅 Date taken (from EXIF, images only)
-- 📍 GPS coordinates (EXIF: latitude/longitude, images only)
-- 📊 Playlist position (e.g. 1,234 / 100,000)
-- 🔢 Display count
-- 🕒 Last shown time (ISO 8601)
+- 📁 File name and file size (hover for the full path as a tooltip)
+- 📊 Playlist position (e.g. 1,234 / 100,000) and display count
+
+Per-photo display counts and last-shown times are available in Settings → History and Settings → Stats.
 
 ## Performance
 

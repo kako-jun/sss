@@ -65,7 +65,11 @@ pub struct Stats {
 #[serde(rename_all = "camelCase")]
 pub struct ExcludeOutcome {
     pub pattern: String,
-    /// true: ディレクトリ/未取得の日付除外など、次回スキャンまで反映されない。
-    /// false: ファイル除外・exif_cache既知の日付除外など、即座に反映済み。
+    /// true: `exclude_type` が "date"/"directory"。date は exif_cache で既知の
+    /// 画像だけ即座にプレイリストから外すが、未取得分が残りうるため実装上は
+    /// 常にtrue（#82レビュー: 以前のdocコメントは「exif_cache既知の日付除外は
+    /// false」と誤っていたが、実際のコードは date/directory の両方で常に
+    /// `true` を返す。実際に即時反映のみで再スキャン不要なのは "file" だけ）。
+    /// false: `exclude_type` が "file"（即座にプレイリストから除去済み）。
     pub needs_rescan: bool,
 }

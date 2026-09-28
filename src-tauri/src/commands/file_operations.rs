@@ -222,7 +222,7 @@ pub async fn remove_ignore_pattern(
 /// パターンは、実際に使う正規化後の形（`glob_check_pattern`）で検証する。
 ///
 /// #80: `Err` はユーザー向け文言でなくエラーコードで返す。フロント辞書
-/// （`resolveAddPatternError`）が表示文言に変換する。`invalidPattern`は
+/// （`resolveAddPatternErrorMessage`）が表示文言に変換する。`invalidPattern`は
 /// globsetクレートの技術的なエラー内容を`:`区切りで詳細として付ける
 /// （パターンを書いたユーザー自身へのデバッグ情報として有用なため）。
 #[tauri::command]
