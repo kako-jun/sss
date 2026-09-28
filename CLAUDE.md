@@ -511,7 +511,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 - **CI**: `.github/workflows/ci.yml` — push/PR to main で2ジョブ実行
   - `check`（ubuntu-22.04）: `npm run lint` / `npm run format:check` / `npm run build` / `npm test`（vitest）/ `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test`
-  - `cross-platform`（windows-latest / macos-latest）: `cargo clippy --all-targets -- -D warnings` / `cargo test`。`#[cfg(windows)]`/`#[cfg(target_os = "macos")]` 配下のコード・実機限定テストは ubuntu だけでは一度もコンパイルされないため（#63 で発覚した Windows 固有バグの反省）
+  - `cross-platform`（windows-latest / macos-latest）: `cargo clippy --all-targets -- -D warnings` / `cargo test`。`#[cfg(windows)]`/`#[cfg(target_os = "macos")]` 配下のコード・実機限定テストは ubuntu だけでは一度もコンパイルされないため（#63 で発覚した Windows 固有バグの反省）。Windows では `tauri::test::mock_app` 系 integration test が `src-tauri/build.rs` のマニフェスト埋め込みワークアラウンドを必要とする（tauri-apps/tauri#13419 未修正の既知バグ。詳細は architecture.md）
   - `npm run e2e` は CI に含めない（実ブラウザ/実ファイル前提のため手動実行）
 - **Audit**: `.github/workflows/audit.yml`（ci.yml とは別ファイル）— `rustsec/audit-check` で `src-tauri` の Rust 依存関係を検査。`src-tauri/Cargo.toml`/`Cargo.lock` を変更する push/PR と、毎週月曜03:00 UTC の schedule（新規登録された既知脆弱性の検出用）でのみ実行し、無関係な変更で毎回は回さない
   - **ignore 方針**: 直せない/直す価値のない advisory（例: 上流未対応の unmaintained warning）が出た場合は、`rustsec/audit-check` の `ignore` 入力に advisory ID を追加し、なぜ ignore するか・いつ見直すかを同じ行にコメントで残す。安易な ignore 追加はせず、まず `cargo update` での解消を優先する
