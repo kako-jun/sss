@@ -53,6 +53,13 @@ export interface IgnoreRule {
   ruleType: 'glob' | 'date';
 }
 
+// `exclude_image` の結果（#80: バックエンドの `ExcludeOutcome` と対応。表示文言は
+// フロント辞書側で組み立てる）。
+export interface ExcludeOutcome {
+  pattern: string;
+  needsRescan: boolean;
+}
+
 /**
  * `get_next_image` / `get_previous_image` の結果（#65）。
  *

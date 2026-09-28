@@ -6,8 +6,10 @@ import {
   saveSetting,
   getDefaultShareDirectory,
 } from '../../lib/tauri';
+import { useT } from '../../lib/i18n';
 
 export function ShareDirectorySection() {
+  const t = useT();
   const [shareDirectoryPath, setShareDirectoryPath] = useState<string>('');
   const [defaultPath, setDefaultPath] = useState<string>('');
 
@@ -44,7 +46,7 @@ export function ShareDirectorySection() {
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        ピック先ディレクトリ
+        {t('pickDestinationTitle')}
       </h3>
 
       <div className="flex gap-2">
@@ -60,7 +62,7 @@ export function ShareDirectorySection() {
           className="flex items-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded border border-white/8 transition shrink-0 text-sm"
         >
           <FolderOpen className="w-4 h-4" />
-          選択
+          {t('selectButtonLabel')}
         </button>
       </div>
     </div>

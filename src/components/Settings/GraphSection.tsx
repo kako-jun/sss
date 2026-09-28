@@ -3,8 +3,14 @@ import { getDisplayStats, getStats, resetAllDisplayCounts } from '../../lib/taur
 import type { Stats } from '../../types';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
+import { useT, useLocale } from '../../lib/i18n';
 
 export function GraphSection() {
+  const t = useT();
+  // #80: `t` 自体は常に同一の関数参照（`useT`はロケール変更時の再レンダーのみを
+  // 起こす）なので、下のチャート再構築effectを言語切替に追従させるには
+  // `locale` 自体を依存配列に含める必要がある。
+  const locale = useLocale();
   const [displayStats, setDisplayStats] = useState<Array<[string, number]>>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -30,7 +36,7 @@ export function GraphSection() {
   }, [loadStats]);
 
   const handleReset = async () => {
-    if (!window.confirm('すべての画像の表示回数をリセットしますか？')) return;
+    if (!window.confirm(t('confirmResetDisplayCounts'))) return;
 
     setIsResetting(true);
     try {
@@ -66,10 +72,10 @@ export function GraphSection() {
       height: 300,
       series: [
         {
-          label: 'ファイルID',
+          label: t('seriesFileId'),
         },
         {
-          label: '表示回数',
+          label: t('seriesDisplayCount'),
           stroke: 'rgba(255, 255, 255, 0.5)',
           fill: 'rgba(255, 255, 255, 0.05)',
           width: 1,
@@ -80,7 +86,7 @@ export function GraphSection() {
       ],
       axes: [
         {
-          label: 'ファイルID (A-Z順)',
+          label: t('axisFileIdSorted'),
           stroke: 'rgba(255,255,255,0.3)',
           labelFont: '11px sans-serif',
           labelSize: 12,
@@ -96,7 +102,7 @@ export function GraphSection() {
           values: (_u: uPlot, vals: number[]) => vals.map((v: number) => Math.round(v).toString()), // 整数のみ表示
         },
         {
-          label: '表示回数',
+          label: t('seriesDisplayCount'),
           stroke: 'rgba(255,255,255,0.3)',
           labelFont: '11px sans-serif',
           labelSize: 12,
@@ -144,12 +150,12 @@ export function GraphSection() {
         plotRef.current = null;
       }
     };
-  }, [displayStats, isLoading]);
+  }, [displayStats, isLoading, locale, t]);
 
   if (isLoading) {
     return (
       <div className="p-4 bg-black/30 rounded text-center text-white/30 text-sm border border-white/5">
-        読み込み中...
+        {t('loadingLabel')}
       </div>
     );
   }
@@ -157,7 +163,7 @@ export function GraphSection() {
   if (displayStats.length === 0) {
     return (
       <div className="p-4 bg-black/30 rounded text-center text-white/30 text-sm border border-white/5">
-        データがありません。スキャンを実行してください。
+        {t('noStatsData')}
       </div>
     );
   }
@@ -166,7 +172,7 @@ export function GraphSection() {
     <div className="space-y-4">
       {stats && (
         <div className="flex justify-between text-white/40 text-sm">
-          <span>1回でも表示済みのファイル数:</span>
+          <span>{t('viewedFilesCountLabel')}</span>
           <span className="font-mono text-white/60">
             {stats.displayedImages.toLocaleString()} / {stats.totalImages.toLocaleString()}
           </span>
@@ -175,12 +181,10 @@ export function GraphSection() {
 
       <div className="bg-black/30 rounded p-4 border border-white/5">
         <h3 className="text-sm font-medium text-white/50 mb-4 uppercase tracking-wider">
-          画像ごとの表示回数
+          {t('displayCountPerImageTitle')}
         </h3>
         <div ref={chartRef} className="w-full" />
-        <div className="mt-3 text-xs text-white/25">
-          完全平等ランダムアルゴリズムが正しく動作していれば、全てのファイルが均等に表示されます
-        </div>
+        <div className="mt-3 text-xs text-white/25">{t('fairnessExplanation')}</div>
       </div>
 
       <button
@@ -188,7 +192,7 @@ export function GraphSection() {
         disabled={isResetting}
         className="text-sm text-red-400/60 hover:text-red-400/80 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
       >
-        {isResetting ? 'リセット中...' : '表示回数をリセット'}
+        {isResetting ? t('resettingLabel') : t('resetDisplayCountsButton')}
       </button>
     </div>
   );

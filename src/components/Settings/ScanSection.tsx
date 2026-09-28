@@ -3,12 +3,22 @@ import { useState, useEffect } from 'react';
 import { UnlistenFn, listen } from '@tauri-apps/api/event';
 import { selectDirectory, scanDirectory, getLastDirectoryPath } from '../../lib/tauri';
 import type { ScanProgress } from '../../types';
+import { useT, resolveScanErrorMessage } from '../../lib/i18n';
+import type { MessageKey } from '../../lib/i18n';
 
 interface ScanSectionProps {
   onScanComplete: () => void;
 }
 
+// #82レビューshould1: エラーは確定済みの表示文言でなく、辞書キー or バックエンドの
+// 生コードのどちらかで保持する。表示文言への変換はレンダーのたびに行うため、
+// エラー表示中に言語を切り替えても新旧の言語が混在したまま固まらない。
+type ScanErrorState =
+  | { kind: 'key'; key: MessageKey }
+  | { kind: 'code'; raw: string; directory: string };
+
 export function ScanSection({ onScanComplete }: ScanSectionProps) {
+  const t = useT();
   const [selectedDirectory, setSelectedDirectory] = useState<string>('');
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
@@ -16,7 +26,13 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
     current: number;
     total: number;
   } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ScanErrorState | null>(null);
+  const errorMessage =
+    error === null
+      ? null
+      : error.kind === 'key'
+        ? t(error.key)
+        : resolveScanErrorMessage(error.raw, error.directory);
 
   // 前回のディレクトリパスを読み込む
   useEffect(() => {
@@ -42,13 +58,17 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
       }
     } catch (err) {
       console.error('Failed to select directory:', err);
-      setError(err instanceof Error ? err.message : 'Failed to select directory');
+      if (err instanceof Error) {
+        setError({ kind: 'code', raw: err.message, directory: selectedDirectory });
+      } else {
+        setError({ kind: 'key', key: 'failedToSelectDirectory' });
+      }
     }
   };
 
   const handleScan = async () => {
     if (!selectedDirectory) {
-      setError('Please select a directory first');
+      setError({ kind: 'key', key: 'pleaseSelectDirectoryFirst' });
       return;
     }
 
@@ -71,14 +91,15 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
       onScanComplete();
     } catch (err) {
       console.error('Failed to scan directory:', err);
-      // Tauri コマンドの Err(String) はそのまま文字列としてrejectされる（Errorインスタンスではない）。
-      // asset scope の安全性チェックで拒否された場合など、理由をそのままユーザーに見せる。
+      // #80: Tauri コマンドの Err(String) はエラーコード（例: "directoryNotFound"）で
+      // 返る。表示は`errorMessage`（レンダー時に`resolveScanErrorMessage`へかける）
+      // に任せ、ここでは生のコード/文字列とselectedDirectoryだけ保持する（#82should1）。
       if (err instanceof Error) {
-        setError(err.message);
+        setError({ kind: 'code', raw: err.message, directory: selectedDirectory });
       } else if (typeof err === 'string') {
-        setError(err);
+        setError({ kind: 'code', raw: err, directory: selectedDirectory });
       } else {
-        setError('Failed to scan directory');
+        setError({ kind: 'key', key: 'failedToScanDirectory' });
       }
     } finally {
       setIsScanning(false);
@@ -91,7 +112,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        ディレクトリ選択
+        {t('directorySelectionTitle')}
       </h3>
 
       <div className="flex gap-2">
@@ -107,7 +128,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
           className="flex items-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded border border-white/8 transition shrink-0 text-sm"
         >
           <FolderOpen className="w-4 h-4" />
-          選択
+          {t('selectButtonLabel')}
         </button>
       </div>
 
@@ -117,10 +138,10 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
         className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 disabled:bg-black/20 disabled:text-white/20 text-white/60 hover:text-white/80 rounded border border-white/8 disabled:border-white/5 transition text-sm"
       >
         <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
-        {isScanning ? 'スキャン中...' : 'スキャン'}
+        {isScanning ? t('scanningLabel') : t('scanLabel')}
       </button>
 
-      {error && <div className="text-sm text-red-400/70">{error}</div>}
+      {errorMessage && <div className="text-sm text-red-400/70">{errorMessage}</div>}
 
       {realtimeProgress && (
         <div className="text-sm text-white/30 font-mono">
@@ -131,41 +152,43 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
       {scanProgress && (
         <div className="space-y-2">
           <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-            スキャン結果
+            {t('scanResultTitle')}
           </h3>
           <div className="space-y-2 p-4 bg-black/30 rounded border border-white/5">
             <div className="text-sm text-white/50">
-              ファイル数:{' '}
+              {t('fileCountLabel')}{' '}
               <span className="font-mono text-white/70">
                 {scanProgress.totalFiles.toLocaleString()}
               </span>
             </div>
             <div className="text-sm text-white/40">
-              新規:{' '}
+              {t('newFilesLabel')}{' '}
               <span className="font-mono text-white/60">
                 {scanProgress.newFiles.toLocaleString()}
               </span>
             </div>
             <div className="text-sm text-white/40">
-              削除:{' '}
+              {t('deletedFilesLabel')}{' '}
               <span className="font-mono text-white/60">
                 {scanProgress.deletedFiles.toLocaleString()}
               </span>
             </div>
             <div className="text-sm text-white/30">
-              処理時間:{' '}
-              <span className="font-mono">{(scanProgress.durationMs / 1000).toFixed(2)}秒</span>
+              {t('durationLabel')}{' '}
+              <span className="font-mono">
+                {t('secondsUnit', { value: (scanProgress.durationMs / 1000).toFixed(2) })}
+              </span>
             </div>
           </div>
 
           {scanProgress.errorCount > 0 && (
             <div className="space-y-2 p-4 bg-black/30 rounded border border-white/5">
               <div className="text-sm text-white/40">
-                読み取りエラー:{' '}
+                {t('readErrorsLabel')}{' '}
                 <span className="font-mono text-red-400/80">
-                  {scanProgress.errorCount.toLocaleString()}件
+                  {t('errorCountValue', { count: scanProgress.errorCount.toLocaleString() })}
                 </span>
-                <span className="text-white/30 text-xs"> （不明として保持、削除しません）</span>
+                <span className="text-white/30 text-xs"> {t('keptAsUnknownNote')}</span>
               </div>
               {scanProgress.errorExamples.length > 0 && (
                 <ul className="text-xs text-white/30 font-mono space-y-0.5">

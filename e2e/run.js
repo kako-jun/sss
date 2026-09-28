@@ -481,7 +481,178 @@ const scenarios = [
       };
     },
   },
+  {
+    // #80: 言語決定は app_settings.language ('ja'|'en'|'auto') → auto は
+    // navigator.language（ja*ならja、それ以外en）。`locale: 'en-US'`
+    // （Playwrightのbrowser.newPageオプション）でnavigator.languageを
+    // en-US化し、ようこそ画面が英語で表示されることを確認する
+    // （ディレクトリ未設定=hash 'welcome' の初回起動シナリオを流用）。
+    name: 'English locale (navigator.language=en-US): welcome screen renders in English',
+    hash: 'welcome',
+    locale: 'en-US',
+    async run(page) {
+      await page.waitForTimeout(500);
+      const welcomeVisible = await isVisible(page, 'Welcome to SSS');
+      // 「フォルダを選択」ボタンはアイコン(SVG)とテキストが兄弟要素のため、
+      // isVisible()の葉ノード限定チェックには乗らない。ボタン本文で直接確認する。
+      const selectFolderVisible = await page.evaluate(() =>
+        [...document.querySelectorAll('button')].some((b) =>
+          b.textContent.includes('Select Folder'),
+        ),
+      );
+      const notJapanese = !(await isVisible(page, 'ようこそ SSS へ'));
+      const htmlLang = await page.evaluate(() => document.documentElement.lang);
+      const pass = welcomeVisible && selectFolderVisible && notJapanese && htmlLang === 'en';
+      return {
+        pass,
+        detail: `welcomeVisible=${welcomeVisible} selectFolderVisible=${selectFolderVisible} notJapanese=${notJapanese} htmlLang=${htmlLang}`,
+      };
+    },
+  },
+  {
+    // #80: 英語ロケールでもオーバーレイUI（ウィンドウchrome）の文言が英語になる
+    // ことを確認する（終了ボタンのtitle属性で判定。マウスアイドル判定に左右
+    // されない安定した検証にするためDOM属性を直接見る）。
+    name: 'English locale (navigator.language=en-US): window chrome (exit tooltip) renders in English',
+    hash: 'slides',
+    locale: 'en-US',
+    async run(page) {
+      await page.waitForTimeout(500);
+      const exitTitle = await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find((b) =>
+          (b.title || '').toLowerCase().includes('esc'),
+        );
+        return btn ? btn.title : null;
+      });
+      const pass = exitTitle === 'Exit (Esc)';
+      return { pass, detail: `exitTitle=${JSON.stringify(exitTitle)}` };
+    },
+  },
+  {
+    // #82レビュー2巡目 should1（回帰）/ 3巡目 should+nit: tabScanを「フォルダ」に
+    // した影響で、設定タブ行が幅720・ja だと各タブ文字が1文字ずつ折り返っていた
+    // （Settings/index.tsxのタブボタンにwhitespace-nowrap+flex-shrink-0、
+    // タブ行にoverflow-x-autoを追加して修正、パディングもpx-4→px-3に縮小）。
+    // 幅1280/720（横スクロール不要）・幅320（横スクロールは可能なまま）の
+    // 3段階 x ja/enで、各タブボタンの**テキストが実際に1行で描画されている**
+    // ことを確認する（3巡目should: 旧実装は「全ボタンのtop座標が一致」だけで
+    // 判定しており、全ボタンが同時に2行割れする今回の回帰そのものを検出できな
+    // かった。flexコンテナの既定align-items:stretchで、全ボタンが同じ高さに
+    // 揃うため外側のtopは折返し有無に関わらず一致してしまう。ボタン内テキストの
+    // Range.getClientRects()で実際の行数を見る方式に直した）。
+    name: 'Settings tab row: each tab label renders on one line, no h-scroll at 720, scrollable when narrower (ja) (#82レビュー2/3巡目 should1)',
+    hash: 'welcome', // ディレクトリ未設定→ようこそ画面。設定ボタンは常設なのでどのhashでも開ける
+    async run(page) {
+      return measureSettingsTabRowAtWidths(page);
+    },
+  },
+  {
+    name: 'Settings tab row: each tab label renders on one line, no h-scroll at 720, scrollable when narrower (en) (#82レビュー2/3巡目 should1)',
+    hash: 'welcome',
+    locale: 'en-US',
+    async run(page) {
+      return measureSettingsTabRowAtWidths(page);
+    },
+  },
 ];
+
+/**
+ * #82レビュー2巡目 should1（回帰）/ 3巡目 should・nit: 設定タブ行の折返し・横
+ * スクロール挙動を検証する。設定モーダルを一度だけ開き、閉じずにビューポート幅を
+ * 1280→720→320へ変えながら、各段階で:
+ * - 各タブボタンの**テキストが1行で描画されている**か
+ *   （`Range.getClientRects()`で実際の行数を見る。ボタン自体の`top`座標が
+ *   揃っているかだけでは、flexの既定`align-items:stretch`で全ボタンが同じ
+ *   高さに揃うため、全ボタン同時の折返し＝今回の回帰そのものを見逃す）
+ * - 1280/720では行全体が横スクロール無しで収まっているか（3巡目nit: px-4→
+ *   px-3でjaの720を横スクロール無しに収める修正）
+ * - 320のような極端に狭い幅では横スクロールが可能なまま（overflow-x-auto自体は
+ *   機能し続けている）か
+ * を確認する。
+ */
+async function measureSettingsTabRowAtWidths(page) {
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    // 設定ボタンはlucide-reactの<Settings>アイコン（App.tsx: `Settings as
+    // SettingsIcon`）を持つ唯一のボタン。titleはロケール依存な上、window
+    // モード切替ボタンのtitle（switchToWindowMode等）はja訳だと「ウィンドウ」が
+    // 全角カタカナでASCII "window" を含まないため、title文字列での除外法は
+    // ja/enで挙動が変わり得た（実際にja側で誤ってwindowモード切替ボタンを
+    // クリックしていた）。lucide-reactは`createLucideIcon`でアイコン名から
+    // 機械的に`lucide-settings`等のクラス名を付与するため、ロケールに左右
+    // されないこちらで直接選ぶ。
+    const icon = document.querySelector('svg.lucide-settings');
+    const settingsBtn = icon && icon.closest('button');
+    settingsBtn && settingsBtn.click();
+  });
+  await page.waitForTimeout(400);
+
+  // #82レビュー3巡目nit: タブ行はoverflow-x-autoでクリップされるため、既定の
+  // フォーカスリング（要素の外側にはみ出す）だと上下端が欠けて見える。
+  // outline-offset:-2pxでリングを内側に描画するようにしたことをcomputed style
+  // で確認する（実ブラウザのgetComputedStyleで判定するプロジェクト規約）。
+  const outlineOffset = await page.evaluate(() => {
+    const btn = document.querySelector('.overflow-x-auto > button');
+    return btn ? getComputedStyle(btn).outlineOffset : null;
+  });
+
+  const measure = () =>
+    page.evaluate(() => {
+      const row = document.querySelector('.overflow-x-auto');
+      const tabButtons = row ? [...row.querySelectorAll(':scope > button')] : [];
+      // ボタン内テキストのRangeを取り、getClientRects()が返す矩形の「異なる
+      // top座標の数」を実際の行数とみなす（同一行内でも稀に矩形が分割される
+      // ことがあるため、topの重複排除で1行と2行以上を頑健に区別する）。
+      const lineCounts = tabButtons.map((b) => {
+        const range = document.createRange();
+        range.selectNodeContents(b);
+        const rects = [...range.getClientRects()];
+        const distinctTops = new Set(rects.map((r) => Math.round(r.top)));
+        return distinctTops.size;
+      });
+      const allSingleLine = tabButtons.length > 0 && lineCounts.every((n) => n === 1);
+      const scrollWidth = row ? row.scrollWidth : 0;
+      const clientWidth = row ? row.clientWidth : 0;
+      // 1pxの丸め誤差は許容する。
+      const hasHorizontalScroll = scrollWidth > clientWidth + 1;
+      return {
+        count: tabButtons.length,
+        lineCounts,
+        allSingleLine,
+        scrollWidth,
+        clientWidth,
+        hasHorizontalScroll,
+      };
+    });
+
+  const at1280 = await measure();
+  await page.setViewportSize({ width: 720, height: 800 });
+  await page.waitForTimeout(100);
+  const at720 = await measure();
+  // 3巡目nit: 720/1280が「たまたま横スクロール無しでも全部1行に収まっている」
+  // ことの確認に加え、overflow-x-auto自体が壊れて常時スクロール不可になって
+  // いないかも極端に狭い幅（320）で確認する。
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.waitForTimeout(100);
+  const atNarrow = await measure();
+
+  const pass =
+    outlineOffset === '-2px' &&
+    at1280.count === 7 &&
+    at1280.allSingleLine &&
+    !at1280.hasHorizontalScroll &&
+    at720.count === 7 &&
+    at720.allSingleLine &&
+    !at720.hasHorizontalScroll &&
+    atNarrow.count === 7 &&
+    atNarrow.allSingleLine &&
+    atNarrow.hasHorizontalScroll;
+
+  return {
+    pass,
+    detail: `outlineOffset=${outlineOffset} at1280=${JSON.stringify(at1280)} at720=${JSON.stringify(at720)} atNarrow=${JSON.stringify(atNarrow)}`,
+  };
+}
 
 async function main() {
   if (await isPortInUse(PORT)) {
@@ -525,7 +696,14 @@ async function main() {
     const results = [];
     try {
       for (const scenario of scenarios) {
-        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+        // #80: navigator.language はホストOS/ブラウザの設定に依存するため、
+        // 明示指定が無い既存シナリオは 'ja-JP' に固定してロケール解決を決定的にする
+        // （app_settings.language 未設定→'auto'→navigator.languageの経路）。
+        // 英語ロケールを検証するシナリオは `locale: 'en-US'` を個別に指定する。
+        const page = await browser.newPage({
+          viewport: scenario.viewport || { width: 1280, height: 800 },
+          locale: scenario.locale || 'ja-JP',
+        });
         await page.addInitScript({ path: INIT_SCRIPT });
         const consoleErrors = [];
         page.on('console', (m) => {

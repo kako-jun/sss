@@ -13,6 +13,7 @@ import {
   restorePlaylist,
   scanDirectory,
   getSetting,
+  getOsLocale,
   undoDisplayCount,
 } from './lib/tauri';
 import { runStartupSequence } from './lib/startup';
@@ -20,10 +21,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
 import { X, Settings as SettingsIcon, Minimize2, Maximize2 } from 'lucide-react';
 import logoBg from './assets/logo-bg.webp';
-import { uiText, noticeMessages } from './lib/messages';
+import { useT, useLocale, initLocale, resolveStartupDirectoryError } from './lib/i18n';
 import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL } from './constants';
 
 function App() {
+  const t = useT();
+  const locale = useLocale();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<TabType>('scan');
   const [settingsKey, setSettingsKey] = useState(0);
@@ -31,6 +34,11 @@ function App() {
   const [totalImages, setTotalImages] = useState(0);
   const [canGoBack, setCanGoBack] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  // #82レビュー2巡目 nit: initLocale完了前は、モジュール読込時点の暫定推定
+  // （navigator.language等）でロケールが確定していることがあり、直後に
+  // OSロケール優先の結果へ切り替わって表示言語が一瞬反転して見えることがある。
+  // ローディング文言はinitLocale完了（localeReady=true）まで出さないことで防ぐ。
+  const [localeReady, setLocaleReady] = useState(false);
   const [displayInterval, setDisplayInterval] = useState<number>(DEFAULT_DISPLAY_INTERVAL);
   const [initStatus, setInitStatus] = useState<string>(''); // 初期化状態メッセージ
   const [realtimeProgress, setRealtimeProgress] = useState<{
@@ -44,7 +52,13 @@ function App() {
   // 「設定済みだが今アクセスできない/スキャン失敗/空」を区別するために使う。
   const [hasDirectory, setHasDirectory] = useState(false);
   // #65: 起動時自動スキャンで前回ディレクトリが拒否された場合の理由（本文コメント由来）。
-  const [directoryError, setDirectoryError] = useState<string | null>(null);
+  // #82レビューshould1: 表示文言に確定させた文字列でなく、raw（バックエンドの
+  // エラーコード or 任意の文字列）とディレクトリパスを保持する。表示のたびに
+  // `resolveStartupDirectoryError`で現在のロケールへ解決することで、エラー表示中に
+  // 言語を切り替えても新旧の言語が混在しない（前の言語のまま固まらない）。
+  const [directoryError, setDirectoryError] = useState<{ raw: string; directory: string } | null>(
+    null,
+  );
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
   const { isIdle, setIsHovering } = useMouseIdle(3000);
 
@@ -82,6 +96,15 @@ function App() {
       console.error('Failed to get playlist info:', err);
     }
   };
+
+  // #80: ロケール変更（起動時の初期化含む）に追従してhtml lang属性とウィンドウ
+  // タイトルを更新する。切替の即時反映（ウィンドウタイトル・lang属性込み）を保証する。
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    getCurrentWindow()
+      .setTitle(t('windowTitle'))
+      .catch((err) => console.error('Failed to set window title:', err));
+  }, [locale, t]);
 
   // フルスクリーン状態をOSの実態と同期
   useEffect(() => {
@@ -127,26 +150,43 @@ function App() {
     const timeoutId = setTimeout(() => {
       initRef.current = true; // 初期化開始をマーク
 
-      // #62レビューS1: 起動時の初期化シーケンス（前回状態の復元→可能なら即表示、
-      // スキャンはバックグラウンド）は React から切り離した純粋関数に委譲する
-      // （src/lib/startup.ts。単体テストしやすくするため）。
-      runStartupSequence({
-        getSetting,
-        getLastDirectoryPath,
-        restorePlaylist,
-        scanDirectory,
-        initialize,
-        listenScanProgress: (cb) =>
-          listen<{ current: number; total: number }>('scan-progress', (event) => cb(event.payload)),
-        setInitStatus,
-        setRealtimeProgress,
-        setIsInitialized,
-        setDisplayInterval: (ms) => setDisplayInterval(clampDisplayInterval(ms)),
-        updatePlaylistInfo,
-        setHasDirectory,
-        onDirectoryError: (err) => {
-          setDirectoryError(err instanceof Error ? err.message : String(err));
-        },
+      // #80: 起動シーケンスより先に言語設定を確定させる（以降の initStatus 表示・
+      // 案内画面が最初から正しい言語になるようにするため）。
+      // #82レビューmust: `initLocale` 自体が内部で例外を吸収し必ずresolveする
+      // （getSetting/getOsLocaleの失敗はどちらも'auto'または既存の解決結果への
+      // フォールバックで飲み込まれる）ため、ここに`.catch()`は不要。以前は無く、
+      // getSettingがrejectすると起動シーケンスが一生呼ばれず起動画面のまま
+      // 止まっていた（テスト担当が発見）。
+      void initLocale(getSetting, getOsLocale).then(() => {
+        // #82レビュー2巡目 nit: ここでロケールが確定した後にローディング文言を
+        // 表示し始める（それまでは何も出さず、暫定推定からの反転を見せない）。
+        setLocaleReady(true);
+        // #62レビューS1: 起動時の初期化シーケンス（前回状態の復元→可能なら即表示、
+        // スキャンはバックグラウンド）は React から切り離した純粋関数に委譲する
+        // （src/lib/startup.ts。単体テストしやすくするため）。
+        runStartupSequence({
+          getSetting,
+          getLastDirectoryPath,
+          restorePlaylist,
+          scanDirectory,
+          initialize,
+          listenScanProgress: (cb) =>
+            listen<{ current: number; total: number }>('scan-progress', (event) =>
+              cb(event.payload),
+            ),
+          setInitStatus,
+          setRealtimeProgress,
+          setIsInitialized,
+          setDisplayInterval: (ms) => setDisplayInterval(clampDisplayInterval(ms)),
+          updatePlaylistInfo,
+          setHasDirectory,
+          onDirectoryError: (err, directory) => {
+            // #82レビューshould1: ここでは文言に確定させず、raw文字列のまま
+            // 保持する（表示側で毎レンダー`resolveStartupDirectoryError`にかける）。
+            const raw = err instanceof Error ? err.message : String(err);
+            setDirectoryError({ raw, directory });
+          },
+        });
       });
     }, 0);
 
@@ -303,19 +343,19 @@ function App() {
   // （問題1: 消えたファイル1枚でようこそ画面に落ちる、の根絶）。
   const emptyStateContent = (() => {
     if (!hasDirectory) {
-      return { title: uiText.welcomeTitle, subtitle: uiText.welcomeSubtitle };
+      return { title: t('welcomeTitle'), subtitle: t('welcomeSubtitle') };
     }
     if (notice?.kind === 'emptyPlaylist') {
-      return { title: uiText.emptyPlaylistTitle, subtitle: uiText.emptyPlaylistSubtitle };
+      return { title: t('emptyPlaylistTitle'), subtitle: t('emptyPlaylistSubtitle') };
     }
     if (notice?.kind === 'rootUnavailable') {
-      return { title: noticeMessages.rootUnavailable, subtitle: '' };
+      return { title: t('rootUnavailable'), subtitle: '' };
     }
     if (notice?.kind === 'loadFailedGaveUp') {
-      return { title: noticeMessages.loadFailedGaveUp, subtitle: '' };
+      return { title: t('loadFailedGaveUp'), subtitle: '' };
     }
     if (notice?.kind === 'error') {
-      return { title: 'エラーが発生しました', subtitle: notice.message };
+      return { title: t('genericErrorTitle'), subtitle: notice.message };
     }
     // #65レビュー修正: restorePlaylist失敗→前景scanDirectory自体が失敗した場合、
     // initialize()（＝useSlideshowの最初のgetNextImage）が一度も呼ばれないため
@@ -325,12 +365,20 @@ function App() {
     // なので「ようこそ」ではなく専用の案内にする。
     if (directoryError) {
       return {
-        title: uiText.directoryUnreachableTitle,
-        subtitle: uiText.directoryUnreachableSubtitle,
+        title: t('directoryUnreachableTitle'),
+        subtitle: t('directoryUnreachableSubtitle'),
       };
     }
     return null; // 読込中（初回表示待ち）。ローディング画面はisInitializedの分岐が別途担当。
   })();
+
+  // #82レビューshould1: `directoryError`はraw文字列のまま保持しているため、
+  // 表示文言への変換はレンダーのたびにここで行う（setState時点で固定しない）。
+  // こうすることで、エラー表示中に設定画面から言語を切り替えても、次の
+  // レンダーで新しい言語の文言に更新される（新旧言語が混在したまま固まらない）。
+  const directoryErrorMessage = directoryError
+    ? resolveStartupDirectoryError(directoryError.raw, directoryError.directory)
+    : null;
 
   // #65レビュー修正: 復元成功後のバックグラウンドスキャン失敗は、既に最初の画像を
   // 表示できている（currentImage != null）ため上の全画面案内は出さない。写真を
@@ -341,14 +389,12 @@ function App() {
   // トーストで見せる（useSlideshow側が表示間隔ごとに自動再試行する）。
   const bottomNotice: string | null =
     notice?.kind === 'rootUnavailable'
-      ? noticeMessages.rootUnavailable
+      ? t('rootUnavailable')
       : notice?.kind === 'loadFailedGaveUp'
-        ? noticeMessages.loadFailedGaveUp
+        ? t('loadFailedGaveUp')
         : notice?.kind === 'error'
           ? notice.message
-          : directoryError
-            ? noticeMessages.startupDirectoryRejected(directoryError)
-            : null;
+          : directoryErrorMessage;
 
   // directoryError による下部トーストだけは数秒で自動的に消す（notice由来の通知は
   // 次の正常な画像取得時にnoticeがnullへ戻るため対象外。上の全画面案内側は
@@ -373,17 +419,21 @@ function App() {
         <button
           onClick={() => exit(0)}
           className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
-          title={uiText.exitTooltip}
+          title={t('exitTooltip')}
         >
           <X size={18} />
           <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-            {uiText.exitTooltip}
+            {t('exitTooltip')}
           </span>
         </button>
 
         <div className="w-screen h-screen flex items-center justify-center relative z-10">
           <div className="text-white/50 text-center">
-            <div className="text-lg mb-4">{initStatus || uiText.loadingPlaylist}</div>
+            {/* #82レビュー2巡目 nit: localeReady（initLocale完了）までは文言を出さない。
+                非表示中もレイアウト高さを保つため空のnon-breaking spaceを置く。 */}
+            <div className="text-lg mb-4">
+              {localeReady ? initStatus || t('loadingPlaylist') : ' '}
+            </div>
 
             {/* リアルタイム進捗表示 */}
             {realtimeProgress && (
@@ -393,7 +443,7 @@ function App() {
               </div>
             )}
 
-            <div className="text-white/25 text-xs">{uiText.pleaseWait}</div>
+            <div className="text-white/25 text-xs">{localeReady ? t('pleaseWait') : ' '}</div>
           </div>
         </div>
       </div>
@@ -416,11 +466,11 @@ function App() {
       <button
         onClick={() => exit(0)}
         className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
-        title={uiText.exitTooltip}
+        title={t('exitTooltip')}
       >
         <X size={18} />
         <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-          {uiText.exitTooltip}
+          {t('exitTooltip')}
         </span>
       </button>
 
@@ -432,12 +482,12 @@ function App() {
             {emptyStateContent.subtitle && (
               <div className="text-white/30 text-sm mb-6">{emptyStateContent.subtitle}</div>
             )}
-            {directoryError && (
+            {directoryErrorMessage && (
               <div
                 className="text-red-400/80 font-mono text-xs mb-6 truncate max-w-[90vw] mx-auto"
-                title={noticeMessages.startupDirectoryRejected(directoryError)}
+                title={directoryErrorMessage}
               >
-                {noticeMessages.startupDirectoryRejected(directoryError)}
+                {directoryErrorMessage}
               </div>
             )}
             <button
@@ -445,7 +495,7 @@ function App() {
               className="flex items-center gap-2 px-5 py-2 bg-white/8 hover:bg-white/15 border border-white/10 text-white/50 hover:text-white/80 rounded transition-colors mx-auto text-sm"
             >
               <SettingsIcon size={16} />
-              {hasDirectory ? uiText.openSettings : uiText.selectFolder}
+              {hasDirectory ? t('openSettings') : t('selectFolder')}
             </button>
           </div>
         </div>
@@ -466,11 +516,11 @@ function App() {
       <button
         onClick={handleToggleWindowMode}
         className="fixed top-4 right-24 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/20 hover:text-white/50 transition-colors group"
-        title={isFullscreen ? 'ウィンドウモードに切り替え' : 'フルスクリーンに戻す'}
+        title={isFullscreen ? t('switchToWindowMode') : t('switchToFullscreen')}
       >
         {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
         <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-          {isFullscreen ? 'ウィンドウモード' : 'フルスクリーン'}
+          {isFullscreen ? t('windowModeLabel') : t('fullscreenLabel')}
         </span>
       </button>
 
@@ -478,11 +528,11 @@ function App() {
       <button
         onClick={handleSettings}
         className="fixed top-4 right-14 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/20 hover:text-white/50 transition-colors group"
-        title="設定"
+        title={t('settingsTitle')}
       >
         <SettingsIcon size={16} />
         <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-          設定
+          {t('settingsTitle')}
         </span>
       </button>
 

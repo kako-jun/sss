@@ -1,0 +1,162 @@
+/**
+ * English dictionary (#80).
+ *
+ * Same flat key set as `ja.ts` (enforced by `messages.test.ts`). `{param}`
+ * placeholders are substituted by `t(key, params)`. Translations aim for
+ * natural UI English rather than literal renderings of the Japanese source.
+ */
+export const en = {
+  // === App-wide ===
+  windowTitle: 'sss - Smart Slide Show',
+  exitTooltip: 'Exit (Esc)',
+  settingsTitle: 'Settings',
+  switchToWindowMode: 'Switch to windowed mode',
+  switchToFullscreen: 'Switch to fullscreen',
+  windowModeLabel: 'Windowed',
+  fullscreenLabel: 'Fullscreen',
+  genericErrorTitle: 'Something went wrong',
+
+  // === Startup notice screens (#65) ===
+  welcomeTitle: 'Welcome to SSS',
+  welcomeSubtitle: 'Select a photo folder to start the slideshow',
+  selectFolder: 'Select Folder',
+  openSettings: 'Open Settings',
+  loadingPlaylist: 'Loading playlist...',
+  pleaseWait: 'Please wait',
+  emptyPlaylistTitle: 'No photos to show',
+  emptyPlaylistSubtitle:
+    'Everything may be excluded by your rules, or the folder has no supported files. Check Settings to review.',
+  directoryUnreachableTitle: "Can't read your last folder",
+  directoryUnreachableSubtitle: 'Check the connection, or pick a different folder in Settings',
+  rootUnavailable: "Can't connect to the folder. Waiting to reconnect...",
+  loadFailedGaveUp: 'Several photos failed to load. Check the folder connection.',
+  startupDirectoryRejected: "Couldn't connect to your last folder: {reason}",
+
+  // === Startup sequence status text (src/lib/startup.ts) ===
+  statusLoadingSettings: 'Loading settings...',
+  statusCheckingLastFolder: 'Checking your last folder...',
+  statusRestoringState: 'Restoring your last session...',
+  statusLoadingImages: 'Loading images...',
+  statusScanningDirectory: 'Scanning folder...',
+  statusScanComplete: 'Scan complete: {count} files found',
+
+  // === Overlay UI ===
+  menuTooltip: 'Menu',
+  pickTooltip: 'Pick (copy)',
+  previousTooltip: 'Previous (←)',
+  nextTooltip: 'Next (→)',
+  pauseTooltip: 'Pause',
+  playTooltip: 'Play',
+  openInFileManager: 'Open in file manager',
+  viewPicks: 'View picks',
+  excludeMenuLabel: 'Exclude',
+  excludeByDate: 'Exclude by date taken',
+  excludeByDirectory: 'Exclude this folder',
+  excludeByFile: 'Exclude this file',
+  noLocationInfo: 'No location',
+  noDateTime: 'No date',
+  locationMapAlt: 'Location map',
+  pickCopyDone: 'Copied to {path}',
+  pickCopyFailed: "Couldn't copy the photo",
+  excludeFailed: 'Error: exclude failed',
+  excludeAddedFile: 'Exclude rule added: {pattern}',
+  excludeAddedNeedsRescan: 'Exclude rule added: {pattern} (rescan to apply the change)',
+
+  // === Settings: shared ===
+  loadingLabel: 'Loading...',
+  selectButtonLabel: 'Select',
+  secondsUnit: '{value}s',
+  secondsUnitOnly: 's',
+
+  // === Settings: tabs ===
+  tabScan: 'Folder',
+  tabOptions: 'Options',
+  tabExclude: 'Exclude Rules',
+  tabPick: 'Picks',
+  tabHistory: 'History',
+  tabStats: 'Stats',
+  tabInfo: 'Info',
+
+  // === Settings: Import (scan) ===
+  directorySelectionTitle: 'Select Folder',
+  scanningLabel: 'Scanning...',
+  scanLabel: 'Scan',
+  scanResultTitle: 'Scan Results',
+  fileCountLabel: 'Files:',
+  newFilesLabel: 'New:',
+  deletedFilesLabel: 'Deleted:',
+  durationLabel: 'Duration:',
+  readErrorsLabel: 'Read errors:',
+  errorCountValue: '{count}',
+  keptAsUnknownNote: '(kept in the list, not removed)',
+  pleaseSelectDirectoryFirst: 'Please select a folder first',
+  failedToSelectDirectory: 'Failed to select a folder',
+  failedToScanDirectory: 'Failed to scan the folder',
+  errorScanInProgress: 'A scan is already in progress. Please wait for it to finish.',
+  errorDirectoryNotFound: "Couldn't find the selected folder: {path}",
+  errorDirectoryUnsafe: "This folder can't be used for security reasons: {path}",
+  selectDirectoryDialogTitle: 'Select Photo Folder',
+
+  // === Settings: Options ===
+  displayIntervalTitle: 'Display Interval',
+  exifRotationLabel: 'Auto-rotate images based on EXIF orientation',
+  pickDestinationTitle: 'Picks Folder',
+
+  // === Settings: Exclude Rules ===
+  excludeRulesTitle: 'Exclude Rules',
+  noExcludeRules: 'No exclude rules yet',
+  dateRuleTag: 'Date',
+  removeTooltip: 'Remove',
+  addPatternPlaceholder: 'Enter a pattern (e.g. **/thumbs/)',
+  addButtonLabel: 'Add',
+  errorPatternEmpty: 'Please enter a pattern',
+  errorInvalidPattern: 'Invalid pattern: {detail}',
+  errorAddIgnoreRuleFailed: 'Failed to add the exclude rule',
+  addPatternFailedGeneric: 'Failed to add the pattern',
+
+  // === Settings: Picks ===
+  pickListTitle: 'Picked Photos',
+  noPickedPhotos: 'No picked photos yet',
+  deleteTooltip: 'Delete',
+  confirmDeletePickedPhoto:
+    "Delete this copy from your picks folder? The original photo isn't affected.",
+
+  // === Settings: History ===
+  recentHistoryTitle: 'Recently Shown (last 100)',
+  noHistoryItems: 'No history yet',
+  excludeThisPhoto: 'Exclude this photo',
+  excludeThisDate: 'Exclude this date',
+  excludeThisFolder: 'Exclude this folder',
+
+  // === Settings: Stats ===
+  seriesFileId: 'File ID',
+  seriesDisplayCount: 'Display Count',
+  axisFileIdSorted: 'File ID (sorted A-Z)',
+  noStatsData: 'No data yet. Run a scan first.',
+  viewedFilesCountLabel: 'Files shown at least once:',
+  displayCountPerImageTitle: 'Display Count per Image',
+  fairnessExplanation:
+    'If the fair-shuffle algorithm is working correctly, every photo gets shown equally often.',
+  resettingLabel: 'Resetting...',
+  resetDisplayCountsButton: 'Reset Display Counts',
+  confirmResetDisplayCounts: 'Reset the display count for every image?',
+
+  // === Settings: Info ===
+  appDescription: 'A slideshow app that shows 100,000+ photos fairly',
+  versionLabel: 'Version: {version}',
+  viewOnGitHub: 'View on GitHub',
+  dangerZoneTitle: 'Danger Zone',
+  resetSettingsButton: 'Reset All Data',
+  resettingSettingsLabel: 'Resetting...',
+  confirmResetAllData:
+    'Permanently delete all settings, playlist state, and display history?\n\nThis cannot be undone. The app will restart when finished.',
+  resettingMessage: 'Resetting. The app will restart when finished.',
+  resetErrorPrefix: 'Error: {detail}',
+  errorDbResetFailed: 'Failed to reset the database',
+
+  // === Language setting ===
+  languageLabel: 'Language',
+  languageAuto: 'Auto (system)',
+  languageJa: '日本語',
+  languageEn: 'English',
+} as const;

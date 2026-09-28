@@ -5,12 +5,14 @@ import { ScanSection } from './ScanSection';
 import { IntervalSection } from './IntervalSection';
 import { SettingsSection } from './SettingsSection';
 import { ShareDirectorySection } from './ShareDirectorySection';
+import { LanguageSection } from './LanguageSection';
 import { ExcludeRulesSection } from './ExcludeRulesSection';
 import { PickSection } from './PickSection';
 import { HistorySection } from './HistorySection';
 import { GraphSection } from './GraphSection';
 import { InfoSection } from './InfoSection';
 import { MODAL_ANIMATION_DURATION } from '../../constants';
+import { useT } from '../../lib/i18n';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -31,6 +33,7 @@ export function Settings({
 }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'scan');
   const [statsKey, setStatsKey] = useState(0); // 統計グラフの強制再マウント用
+  const t = useT();
 
   if (!isOpen) return null;
 
@@ -52,86 +55,95 @@ export function Settings({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-medium text-white/70">設定</h2>
+          <h2 className="text-lg font-medium text-white/70">{t('settingsTitle')}</h2>
           <button onClick={onClose} className="p-1.5 hover:bg-white/8 rounded transition-colors">
             <X className="w-5 h-5 text-white/30 hover:text-white/60" />
           </button>
         </div>
 
-        {/* タブナビゲーション */}
-        <div className="flex gap-1 mb-6 border-b border-white/8">
+        {/* タブナビゲーション。#82レビュー2巡目should1: tabScanを「フォルダ」に
+            した影響で幅720（ja）だと各タブが1文字ずつ折り返す回帰が起きたため、
+            ボタンは折り返さず(whitespace-nowrap flex-shrink-0)、行自体を
+            横スクロール可能にする（DESIGN.md準拠の控えめなスクロールバーは
+            index.cssの::-webkit-scrollbarで全要素共通適用済み）。
+            #82レビュー3巡目nit: パディングをpx-4→px-3にして幅720（ja）で
+            横スクロール無しに収まるようにした（狭幅では引き続きスクロール可能）。
+            各ボタンにoutline-offset-[-2px]を付け、overflow-x-autoのコンテナで
+            フォーカスリングの上下端が切れないようにした（負のoffsetでリングを
+            要素の内側に描画する）。 */}
+        <div className="flex gap-1 mb-6 border-b border-white/8 overflow-x-auto">
           <button
             onClick={() => setActiveTab('scan')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-3 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 outline-offset-[-2px] ${
               activeTab === 'scan'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            入力
+            {t('tabScan')}
           </button>
           <button
             onClick={() => setActiveTab('options')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-3 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 outline-offset-[-2px] ${
               activeTab === 'options'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            オプション
+            {t('tabOptions')}
           </button>
           <button
             onClick={() => setActiveTab('exclude')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-3 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 outline-offset-[-2px] ${
               activeTab === 'exclude'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            除外ルール
+            {t('tabExclude')}
           </button>
           <button
             onClick={() => setActiveTab('pick')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-3 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 outline-offset-[-2px] ${
               activeTab === 'pick'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            ピック
+            {t('tabPick')}
           </button>
           <button
             onClick={() => setActiveTab('history')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-3 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 outline-offset-[-2px] ${
               activeTab === 'history'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            履歴
+            {t('tabHistory')}
           </button>
           <button
             onClick={() => {
               setActiveTab('stats');
               setStatsKey((prev) => prev + 1); // タブを開くたびにkeyを変更して再マウント
             }}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-3 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 outline-offset-[-2px] ${
               activeTab === 'stats'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            統計グラフ
+            {t('tabStats')}
           </button>
           <button
             onClick={() => setActiveTab('info')}
-            className={`px-4 py-2 text-sm transition-colors ${
+            className={`px-3 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 outline-offset-[-2px] ${
               activeTab === 'info'
                 ? 'text-white/80 border-b border-white/50'
                 : 'text-white/30 hover:text-white/50'
             }`}
           >
-            情報
+            {t('tabInfo')}
           </button>
         </div>
 
@@ -143,6 +155,7 @@ export function Settings({
               <IntervalSection onIntervalChange={onIntervalChange} />
               <SettingsSection />
               <ShareDirectorySection />
+              <LanguageSection />
             </div>
           )}
           {activeTab === 'exclude' && (

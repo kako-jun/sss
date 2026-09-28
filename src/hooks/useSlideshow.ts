@@ -339,7 +339,7 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
 
   // #65レビューS3/S4: 一時的な通信断（`error`）やフォルダ接続不可
   // （`rootUnavailable`）は、ユーザー操作を待たず表示間隔ごとに自動で
-  // 再試行する（`rootUnavailable`の文言「再接続をお待ちください…」を実挙動に
+  // 再試行する（`rootUnavailable`の文言「再接続をお待ちください...」を実挙動に
   // 一致させる）。直近の方向（`continueInLastDirection`）で続行し、まだ同じ
   // 状態が続いていれば次のnoticeが新しいタイマーをまた張る形で繰り返す。
   //

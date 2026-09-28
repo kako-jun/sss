@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { getSetting, saveSetting } from '../../lib/tauri';
+import { useT } from '../../lib/i18n';
 
 export function SettingsSection() {
+  const t = useT();
   const [applyExifRotation, setApplyExifRotation] = useState(true);
 
   useEffect(() => {
@@ -37,7 +39,7 @@ export function SettingsSection() {
           className="mt-0.5 w-4 h-4 rounded border-white/20 bg-white/5 text-white/50 focus:ring-0 focus:ring-offset-0 accent-white/50"
         />
         <div className="text-white/55 text-sm group-hover:text-white/75 transition-colors">
-          EXIF回転情報に従って画像を自動回転
+          {t('exifRotationLabel')}
         </div>
       </label>
     </div>

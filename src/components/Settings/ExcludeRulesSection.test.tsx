@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { IgnoreRule } from '../../types';
+import { setLanguageSetting } from '../../lib/i18n/store';
 
 // #61: getIgnorePatterns が pattern + ruleType（"glob" | "date"）を返すようになった。
 // 撮影日ルール（ruleType: "date"）にだけ「撮影日」バッジが付き、通常globルールには
@@ -103,9 +104,11 @@ describe('ExcludeRulesSection captured-date badge (#61)', () => {
   // #61レビュー S2: 不正なglob（閉じていない `{` 等）は addIgnorePattern がバックエンドの
   // Err文字列で reject するようになった。従来は画面上に何も表示されなかったので、
   // エラーメッセージが表示されること・ルール一覧に追加されないことをピン留めする。
-  it('shows the backend error message and does not add the rule when addIgnorePattern rejects', async () => {
+  // #80: バックエンドは "invalidPattern:{detail}" 形式のエラーコードを返すようになり、
+  // フロントは `resolveAddPatternErrorMessage` でロケールに応じた文言へ変換する。
+  it('shows the translated backend error message and does not add the rule when addIgnorePattern rejects', async () => {
     getIgnorePatterns.mockResolvedValue([]);
-    addIgnorePattern.mockRejectedValue('Invalid pattern: unclosed alternate group');
+    addIgnorePattern.mockRejectedValue('invalidPattern:unclosed alternate group');
 
     render(<ExcludeRulesSection />);
 
@@ -118,14 +121,43 @@ describe('ExcludeRulesSection captured-date badge (#61)', () => {
     fireEvent.click(screen.getByText('追加'));
 
     await waitFor(() => {
-      expect(screen.getByText('Invalid pattern: unclosed alternate group')).toBeTruthy();
+      expect(screen.getByText('無効なパターンです: unclosed alternate group')).toBeTruthy();
     });
     expect(screen.queryByText('a{b.jpg')).toBeNull();
     expect(screen.getByText('除外ルールはありません')).toBeTruthy();
 
     // 入力を変えるとエラーが消える
     fireEvent.change(input, { target: { value: 'a{b.jpg2' } });
-    expect(screen.queryByText('Invalid pattern: unclosed alternate group')).toBeNull();
+    expect(screen.queryByText('無効なパターンです: unclosed alternate group')).toBeNull();
+  });
+
+  // #82レビューshould1: addErrorは確定済み文言でなく生コードで保持し、レンダーの
+  // たびに現在のロケールへ解決する。表示中に言語を切り替えても新旧混在しない。
+  it('re-resolves the add-pattern error message to the new language after switching locale mid-display', async () => {
+    getIgnorePatterns.mockResolvedValue([]);
+    addIgnorePattern.mockRejectedValue('invalidPattern:unclosed alternate group');
+
+    render(<ExcludeRulesSection />);
+    await waitFor(() => {
+      expect(screen.getByText('除外ルールはありません')).toBeTruthy();
+    });
+
+    const input = screen.getByPlaceholderText('パターンを入力（例: **/thumbs/）');
+    fireEvent.change(input, { target: { value: 'a{b.jpg' } });
+    fireEvent.click(screen.getByText('追加'));
+
+    await waitFor(() => {
+      expect(screen.getByText('無効なパターンです: unclosed alternate group')).toBeTruthy();
+    });
+
+    act(() => {
+      setLanguageSetting('en');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Invalid pattern: unclosed alternate group')).toBeTruthy();
+    });
+    expect(screen.queryByText('無効なパターンです: unclosed alternate group')).toBeNull();
   });
 
   // #61レビュー nit: ignore_rulesの主キーが (pattern, ruleType) の複合キーになったため、

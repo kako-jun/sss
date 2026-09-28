@@ -171,6 +171,7 @@ pub fn run() {
             commands::file_operations::get_picked_images,
             commands::file_operations::delete_picked_image,
             commands::file_operations::reset_all_display_counts,
+            commands::settings::get_os_locale,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

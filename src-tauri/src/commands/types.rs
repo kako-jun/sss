@@ -56,3 +56,20 @@ pub struct Stats {
     pub total_images: i32,
     pub displayed_images: i32,
 }
+
+/// `exclude_image` の結果（#80）。以前は表示用に完成させた日本語文字列
+/// （`"除外パターン追加: {pattern}"`等）をそのまま返していたが、i18n対応のため
+/// 構造化データに変える。文言の組み立てはフロント辞書側（`needsRescan`で
+/// 「再スキャンしてください」の要否を出し分ける）が担う。
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExcludeOutcome {
+    pub pattern: String,
+    /// true: `exclude_type` が "date"/"directory"。date は exif_cache で既知の
+    /// 画像だけ即座にプレイリストから外すが、未取得分が残りうるため実装上は
+    /// 常にtrue（#82レビュー: 以前のdocコメントは「exif_cache既知の日付除外は
+    /// false」と誤っていたが、実際のコードは date/directory の両方で常に
+    /// `true` を返す。実際に即時反映のみで再スキャン不要なのは "file" だけ）。
+    /// false: `exclude_type` が "file"（即座にプレイリストから除去済み）。
+    pub needs_rescan: bool,
+}

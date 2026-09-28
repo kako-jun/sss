@@ -1,6 +1,6 @@
 use crate::asset_scope::{resolve_and_sanitize_share_directory, resolve_share_directory};
 use crate::commands::playlist_persistence;
-use crate::commands::types::AppState;
+use crate::commands::types::{AppState, ExcludeOutcome};
 use crate::ignore::{glob_check_pattern, IgnoreFilter, IgnoreRule, RuleType};
 use crate::image_processor::{extract_date_only, get_exif_info};
 use globset::Glob;
@@ -220,17 +220,24 @@ pub async fn remove_ignore_pattern(
 /// #61 問題4: 不正なglob（例: `a{b.jpg` のような閉じていない `{`）は `eprintln!` で
 /// 握りつぶさず `Err` を返し、UI にも失敗を伝える。末尾 `/` のディレクトリ指定
 /// パターンは、実際に使う正規化後の形（`glob_check_pattern`）で検証する。
+///
+/// #80: `Err` はユーザー向け文言でなくエラーコードで返す。フロント辞書
+/// （`resolveAddPatternErrorMessage`）が表示文言に変換する。`invalidPattern`は
+/// globsetクレートの技術的なエラー内容を`:`区切りで詳細として付ける
+/// （パターンを書いたユーザー自身へのデバッグ情報として有用なため）。
 #[tauri::command]
 pub async fn add_ignore_pattern(pattern: String, state: State<'_, AppState>) -> Result<(), String> {
     let trimmed = pattern.trim();
     if trimmed.is_empty() {
-        return Err("Pattern must not be empty".to_string());
+        return Err("patternEmpty".to_string());
     }
-    Glob::new(&glob_check_pattern(trimmed)).map_err(|e| format!("Invalid pattern: {e}"))?;
+    Glob::new(&glob_check_pattern(trimmed)).map_err(|e| format!("invalidPattern:{e}"))?;
 
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.add_ignore_rule(trimmed, RuleType::Glob)
-        .map_err(|e| format!("Failed to add ignore rule: {e}"))
+    db.add_ignore_rule(trimmed, RuleType::Glob).map_err(|e| {
+        eprintln!("add_ignore_pattern: failed to add ignore rule: {e}");
+        "addIgnoreRuleFailed".to_string()
+    })
 }
 
 /// `exclude_image` が `update_images` でプレイリストのメンバーシップを変えた直後に
@@ -254,16 +261,21 @@ fn persist_current_playlist(state: &State<AppState>, playlist: &crate::playlist:
 }
 
 /// 除外機能：画像をDBのignore_rulesに追加
+///
+/// #80: 戻り値は完成済みの日本語文字列でなく `ExcludeOutcome`（構造化データ）。
+/// エラーもユーザー向け文言でなくエラーコードで返す（呼び出し元のOverlayUIは
+/// 現状これらのエラーメッセージ自体を表示せずconsole.errorのみに流している
+/// ため、コード化は将来UIで表示する場合に備えた一貫性のため）。
 #[tauri::command]
 pub async fn exclude_image(
     image_path: String,
     exclude_type: String, // "date", "file", "directory"
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<ExcludeOutcome, String> {
     let path = Path::new(&image_path);
 
     if !path.exists() {
-        return Err("Image file does not exist".to_string());
+        return Err("imageFileNotFound".to_string());
     }
 
     let (pattern, rule_type) = match exclude_type.as_str() {
@@ -272,9 +284,9 @@ pub async fn exclude_image(
             match get_exif_info(path) {
                 Ok(exif) => match exif.date_time.as_deref().and_then(extract_date_only) {
                     Some(date) => (date, RuleType::Date),
-                    None => return Err("No EXIF date found".to_string()),
+                    None => return Err("noExifDate".to_string()),
                 },
-                Err(_) => return Err("Failed to read EXIF data".to_string()),
+                Err(_) => return Err("exifReadFailed".to_string()),
             }
         }
         "file" => {
@@ -294,16 +306,18 @@ pub async fn exclude_image(
                     RuleType::Glob,
                 )
             } else {
-                return Err("Failed to get parent directory".to_string());
+                return Err("parentDirectoryNotFound".to_string());
             }
         }
-        _ => return Err("Invalid exclude type".to_string()),
+        _ => return Err("invalidExcludeType".to_string()),
     };
 
     // DB に除外ルールを追加
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.add_ignore_rule(&pattern, rule_type)
-        .map_err(|e| format!("Failed to add ignore rule: {e}"))?;
+    db.add_ignore_rule(&pattern, rule_type).map_err(|e| {
+        eprintln!("exclude_image: failed to add ignore rule: {e}");
+        "addIgnoreRuleFailed".to_string()
+    })?;
 
     if exclude_type == "file" {
         // ファイル除外は即座にプレイリストから削除
@@ -317,7 +331,10 @@ pub async fn exclude_image(
             persist_current_playlist(&state, playlist);
         }
         drop(playlist_lock);
-        Ok(format!("除外パターン追加: {pattern}"))
+        Ok(ExcludeOutcome {
+            pattern,
+            needs_rescan: false,
+        })
     } else if exclude_type == "date" {
         // 撮影日除外: exif_cache で既に「その日付」と分かっている画像は、再スキャンを
         // 待たずに即座にプレイリストから外す（#61レビュー M2）。exif_cache に無い
@@ -351,15 +368,17 @@ pub async fn exclude_image(
                 persist_current_playlist(&state, playlist);
             }
         }
-        Ok(format!(
-            "除外パターン追加: {pattern} (変更を反映するには再スキャンしてください)"
-        ))
+        Ok(ExcludeOutcome {
+            pattern,
+            needs_rescan: true,
+        })
     } else {
         // ディレクトリ除外は再スキャンが必要
         drop(db);
-        Ok(format!(
-            "除外パターン追加: {pattern} (変更を反映するには再スキャンしてください)"
-        ))
+        Ok(ExcludeOutcome {
+            pattern,
+            needs_rescan: true,
+        })
     }
 }
 

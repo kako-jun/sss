@@ -2,12 +2,17 @@ import { X, Plus } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getIgnorePatterns, removeIgnorePattern, addIgnorePattern } from '../../lib/tauri';
 import type { IgnoreRule } from '../../types';
+import { useT, resolveAddPatternErrorMessage } from '../../lib/i18n';
 
 export function ExcludeRulesSection() {
+  const t = useT();
   const [rules, setRules] = useState<IgnoreRule[]>([]);
   const [newPattern, setNewPattern] = useState('');
   const [loading, setLoading] = useState(true);
+  // #82レビューshould1: 確定済みの文言でなく生のエラーコードを保持し、
+  // レンダーのたびに現在のロケールへ変換する（言語切替中の新旧混在防止）。
   const [addError, setAddError] = useState<string | null>(null);
+  const addErrorMessage = addError === null ? null : resolveAddPatternErrorMessage(addError);
 
   useEffect(() => {
     getIgnorePatterns()
@@ -48,7 +53,10 @@ export function ExcludeRulesSection() {
       // ようになった。従来はconsole.errorに流すだけで画面上は何も起きなかったので、
       // ユーザーに失敗を伝える。
       console.error('Failed to add ignore pattern:', err);
-      setAddError(typeof err === 'string' ? err : 'パターンの追加に失敗しました');
+      // #82レビューshould1: 生のコードのまま保持する（`resolveAddPatternErrorMessage`は
+      // 未知の文字列に対して`addPatternFailedGeneric`へフォールバックするため、
+      // 文字列でないerrはString(err)化しても実質同じ結果になる）。
+      setAddError(typeof err === 'string' ? err : String(err));
     }
   };
 
@@ -59,15 +67,17 @@ export function ExcludeRulesSection() {
   };
 
   if (loading) {
-    return <div className="text-white/30 text-sm">読み込み中...</div>;
+    return <div className="text-white/30 text-sm">{t('loadingLabel')}</div>;
   }
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">除外ルール</h3>
+      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
+        {t('excludeRulesTitle')}
+      </h3>
 
       {rules.length === 0 ? (
-        <div className="text-white/30 text-sm">除外ルールはありません</div>
+        <div className="text-white/30 text-sm">{t('noExcludeRules')}</div>
       ) : (
         <div className="space-y-1">
           {rules.map(({ pattern, ruleType }) => (
@@ -78,7 +88,7 @@ export function ExcludeRulesSection() {
               <div className="flex items-center gap-2 min-w-0">
                 {ruleType === 'date' && (
                   <span className="shrink-0 px-1.5 py-0.5 text-xs leading-none rounded bg-white/10 text-white/50">
-                    撮影日
+                    {t('dateRuleTag')}
                   </span>
                 )}
                 <span className="text-white/55 text-sm truncate">{pattern}</span>
@@ -86,7 +96,7 @@ export function ExcludeRulesSection() {
               <button
                 onClick={() => handleRemove(pattern, ruleType)}
                 className="p-1 hover:bg-white/8 rounded transition-colors shrink-0 opacity-0 group-hover:opacity-100"
-                title="解除"
+                title={t('removeTooltip')}
               >
                 <X className="w-3.5 h-3.5 text-white/30 hover:text-white/60" />
               </button>
@@ -104,7 +114,7 @@ export function ExcludeRulesSection() {
             setAddError(null);
           }}
           onKeyDown={handleKeyDown}
-          placeholder="パターンを入力（例: **/thumbs/）"
+          placeholder={t('addPatternPlaceholder')}
           className="flex-1 px-3 py-2 bg-black/40 text-white/50 rounded border border-white/8 focus:outline-none focus:border-white/20 text-sm"
         />
         <button
@@ -113,10 +123,10 @@ export function ExcludeRulesSection() {
           className="flex items-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded border border-white/8 transition shrink-0 text-sm disabled:opacity-30 disabled:cursor-not-allowed"
         >
           <Plus className="w-4 h-4" />
-          追加
+          {t('addButtonLabel')}
         </button>
       </div>
-      {addError && <div className="text-red-400/80 text-sm">{addError}</div>}
+      {addErrorMessage && <div className="text-red-400/80 text-sm">{addErrorMessage}</div>}
     </div>
   );
 }

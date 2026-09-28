@@ -71,3 +71,21 @@ pub async fn get_last_directory_path(state: State<'_, AppState>) -> Result<Optio
         .map_err(|e| format!("Database error: {e}"))?;
     Ok(path)
 }
+
+/// OSのロケール（例: "ja-JP"、"en-US"）を取得する（#82 レビュー should3）。
+///
+/// `navigator.language` はWebViewの実装依存で、macOSのWKWebViewは
+/// `CFBundleLocalizations`（Info.plist）にアプリが対応言語として明示していない
+/// ロケールだと実際のOS設定に関わらず`en-US`固定になる既知の制約がある
+/// （詳細は `docs/architecture.md` 6-(g)「表示言語（auto）はOSロケールを優先して
+/// 解決する」）。フロントはこのコマンドの結果を優先し、取得できない場合
+/// （`None`）だけ `navigator.language` にフォールバックする（保存値が `auto`
+/// かどうかによらず、`initLocale` は起動時に毎回このコマンドを呼ぶ）。
+///
+/// `tauri-plugin-os` を丸ごと追加するとcapability許可（`os:allow-locale`）が
+/// 増えるため、素の `#[tauri::command]`（capability不要）+ `sys-locale`
+/// クレートで最小限に実装する。
+#[tauri::command]
+pub fn get_os_locale() -> Option<String> {
+    sys_locale::get_locale()
+}

@@ -3,8 +3,10 @@ import { useState, useEffect } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { getRecentImages, excludeImage } from '../../lib/tauri';
 import type { RecentImage } from '../../types';
+import { useT } from '../../lib/i18n';
 
 export function HistorySection() {
+  const t = useT();
   const [images, setImages] = useState<RecentImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -32,18 +34,18 @@ export function HistorySection() {
   };
 
   if (loading) {
-    return <div className="text-white/30 text-sm">読み込み中...</div>;
+    return <div className="text-white/30 text-sm">{t('loadingLabel')}</div>;
   }
 
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        最近の表示履歴（最新100件）
+        {t('recentHistoryTitle')}
       </h3>
 
       {images.length === 0 ? (
         <div className="p-4 bg-black/30 rounded text-center text-white/30 text-sm border border-white/5">
-          表示履歴はありません
+          {t('noHistoryItems')}
         </div>
       ) : (
         <div className="grid grid-cols-4 gap-2">
@@ -63,7 +65,7 @@ export function HistorySection() {
               <button
                 onClick={() => setActiveMenu(activeMenu === img.path ? null : img.path)}
                 className="absolute top-1 right-1 p-0.5 bg-black/70 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/90"
-                title="除外"
+                title={t('excludeMenuLabel')}
               >
                 <Ban className="w-3.5 h-3.5 text-white/60 hover:text-white/90" />
               </button>
@@ -77,21 +79,21 @@ export function HistorySection() {
                       className="w-full p-1.5 rounded hover:bg-white/8 text-left text-xs text-white/50 hover:text-white/80 transition-colors flex items-center gap-1.5"
                     >
                       <ChevronRight size={10} />
-                      この写真を除外
+                      {t('excludeThisPhoto')}
                     </button>
                     <button
                       onClick={() => handleExclude(img.path, 'date')}
                       className="w-full p-1.5 rounded hover:bg-white/8 text-left text-xs text-white/50 hover:text-white/80 transition-colors flex items-center gap-1.5"
                     >
                       <ChevronRight size={10} />
-                      この日付を除外
+                      {t('excludeThisDate')}
                     </button>
                     <button
                       onClick={() => handleExclude(img.path, 'directory')}
                       className="w-full p-1.5 rounded hover:bg-white/8 text-left text-xs text-white/50 hover:text-white/80 transition-colors flex items-center gap-1.5"
                     >
                       <ChevronRight size={10} />
-                      このフォルダを除外
+                      {t('excludeThisFolder')}
                     </button>
                   </div>
                 </>

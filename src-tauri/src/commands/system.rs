@@ -47,8 +47,13 @@ pub fn reset_core(
 ) -> Result<(), String> {
     // 1. 全ユーザーデータテーブルの中身を1トランザクションで空にし、既定除外ルールを
     //    再投入する（スキーマ・`PRAGMA user_version` は維持）。
-    db.reset_to_defaults()
-        .map_err(|e| format!("データベースの初期化に失敗しました: {e}"))?;
+    // #80: ユーザー向け文言でなくエラーコード（`dbResetFailed`）で返す。技術的な
+    // 詳細はログ（英語のまま）にのみ残す。フロント辞書は `errorDbResetFailed` に
+    // 変換する。
+    db.reset_to_defaults().map_err(|e| {
+        eprintln!("reset_core: failed to reset database: {e}");
+        "dbResetFailed".to_string()
+    })?;
 
     // 2. メモリ上のプレイリスト・スキャン対象ディレクトリをクリアする。
     *directory_path.lock().unwrap_or_else(|e| e.into_inner()) = None;

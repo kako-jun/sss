@@ -1,6 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { IgnoreRule, ImageNavigationResult, RecentImage, ScanProgress, Stats } from '../types';
+import type {
+  ExcludeOutcome,
+  IgnoreRule,
+  ImageNavigationResult,
+  RecentImage,
+  ScanProgress,
+  Stats,
+} from '../types';
+import { t } from './i18n';
 
 /**
  * デフォルトのピック先ディレクトリパスを取得
@@ -16,7 +24,7 @@ export async function selectDirectory(): Promise<string | null> {
   const selected = await open({
     directory: true,
     multiple: false,
-    title: 'Select Photo Directory',
+    title: t('selectDirectoryDialogTitle'),
   });
 
   if (typeof selected === 'string') {
@@ -117,6 +125,21 @@ export async function getSetting(key: string): Promise<string | null> {
 }
 
 /**
+ * OSのロケール（例: "ja-JP"）を取得する（#82 should3。詳細は
+ * `docs/architecture.md` 6-(g)「表示言語（auto）はOSロケールを優先して解決する」）。
+ *
+ * `navigator.language` はWebViewの実装依存で、macOSのWKWebViewは
+ * `CFBundleLocalizations` にアプリの対応言語として明示していないロケールだと
+ * 実際のOS設定に関わらず `en-US` 固定になる既知の制約がある。`initLocale`
+ * （`src/lib/i18n/store.ts`）は保存値が `auto` かどうかによらず起動時に毎回
+ * こちらを優先して呼び、取得できない場合（`null`）だけ `navigator.language`
+ * にフォールバックする（#82レビュー2巡目 should2）。
+ */
+export async function getOsLocale(): Promise<string | null> {
+  return await invoke<string | null>('get_os_locale');
+}
+
+/**
  * ピック：画像をPictures/sss-pickedフォルダにコピー
  */
 export async function pickImage(imagePath: string): Promise<string> {
@@ -125,12 +148,15 @@ export async function pickImage(imagePath: string): Promise<string> {
 
 /**
  * 除外：画像をDBの除外ルールに追加
+ *
+ * #80: 戻り値は構造化データ（`ExcludeOutcome`）。表示文言の組み立ては
+ * 呼び出し側（フロント辞書）が行う。
  */
 export async function excludeImage(
   imagePath: string,
   excludeType: 'date' | 'file' | 'directory',
-): Promise<string> {
-  return await invoke<string>('exclude_image', { imagePath, excludeType });
+): Promise<ExcludeOutcome> {
+  return await invoke<ExcludeOutcome>('exclude_image', { imagePath, excludeType });
 }
 
 /**
