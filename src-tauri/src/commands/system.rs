@@ -125,8 +125,8 @@ pub async fn reset_all_data(app: AppHandle, state: State<'_, AppState>) -> Resul
     )?;
 
     // プロセスを再起動する。`db_guard`をここでdropせず持ち越すことで、上記コメントの
-    // 遮断を維持する。`AppHandle::restart`の戻り値は`!`（絶対に戻らない。tauri 2.10.3
-    // `app.rs`で確認済み）: メインスレッド上での呼び出しなら新プロセスをspawnしてから
+    // 遮断を維持する。`AppHandle::restart`の戻り値は`!`（絶対に戻らない。tauri 2.12.0
+    // でも同一を確認）: メインスレッド上での呼び出しなら新プロセスをspawnしてから
     // `exit(0)`、そうでなければ`RunEvent::ExitRequested`/`Exit`をトリガーしてこの
     // 呼び出し自体は戻らずスレッドをブロックし続ける（イベントループが実際の終了処理を
     // 担う）。`?`を挟まずこの関数の最後の式にすることで、`!`が`Result<(), String>`へ

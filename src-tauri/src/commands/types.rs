@@ -15,7 +15,7 @@ pub struct AppState {
     /// 画像最適化キャッシュを作る単一ワーカースレッド（#60）。表示・先読み要求はここに積む。
     pub cache_worker: CacheWorker,
     /// スクリーンセーバー抑制ハンドル。初期化に失敗した環境（D-Bus 無し等）では `None`
-    pub _keep_awake: Option<keepawake::AwakeHandle>,
+    pub _keep_awake: Option<keepawake::KeepAwake>,
     /// `scan_directory` の二重実行防止フラグ（#61レビュー nit）。
     /// `commands::scan::ScanGuard` が `compare_exchange` で操作する。
     pub scan_in_progress: AtomicBool,

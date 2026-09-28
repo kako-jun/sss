@@ -12,6 +12,11 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-22.04
+    env:
+      # リポルートの .cargo/config.toml は jobs=1（ローカルのメモリ制約回避用、詳細は
+      # CLAUDE.md参照）を強制するが、CI ランナーではメモリに余裕がありビルドが
+      # 不要に遅くなるだけなので、環境変数（config.tomlより優先される）で上書きする。
+      CARGO_BUILD_JOBS: 4
     steps:
       - uses: actions/checkout@v5
 
@@ -73,6 +78,9 @@ jobs:
       matrix:
         platform: [windows-latest, macos-latest]
     runs-on: ${{ matrix.platform }}
+    env:
+      # check ジョブと同じ理由（リポルート .cargo/config.toml の jobs=1 をCIでは無効化）。
+      CARGO_BUILD_JOBS: 4
     steps:
       - uses: actions/checkout@v5
 

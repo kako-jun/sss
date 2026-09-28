@@ -1,2 +1,7 @@
+# rusqlite の `bundled` フィーチャが同梱の libsqlite3 (amalgamation) をコンパイルする際、
+# 他クレートと並列ビルドするとメモリ不足でビルドが落ちることがあったための制限
+# (Tauri 2移行時のコミット ad24d02 で導入)。低スペック環境でのビルドを想定し維持する。
+# CI（.github/workflows/ci.yml）はメモリに余裕があるため CARGO_BUILD_JOBS 環境変数で
+# この設定を上書きしている（環境変数がこのファイルより優先される）。
 [build]
 jobs = 1
