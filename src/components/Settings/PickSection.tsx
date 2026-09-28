@@ -57,8 +57,11 @@ export function PickSection() {
               />
               <button
                 onClick={() => handleDelete(path)}
-                className="absolute top-1 right-1 p-0.5 bg-black/70 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/90"
+                // #66 問題9: hoverのみで表示されるとキーボード/タッチで見えなかった。
+                // 既定でも薄く見せ、hover/focusで強調する。
+                className="absolute top-1 right-1 p-0.5 bg-black/70 rounded opacity-40 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-black/90"
                 title={t('deleteTooltip')}
+                aria-label={t('deleteTooltip')}
               >
                 <X className="w-3.5 h-3.5 text-white/60 hover:text-white/90" />
               </button>

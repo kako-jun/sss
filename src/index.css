@@ -74,9 +74,14 @@ body {
   color: rgba(255, 255, 255, 0.5) !important;
 }
 
-/* Smooth focus transitions */
-input:focus,
-button:focus-visible {
-  outline: 1px solid rgba(255, 255, 255, 0.15);
-  outline-offset: 1px;
+/* Focus-visible ring (#66 a11y: 旧 rgba(255,255,255,0.15) は黒背景に対して
+   コントラスト比 ~1.5:1 しかなく、WCAG 2.4.11 (非テキストコントラスト、3:1)を
+   満たさなかった。0.6まで明るくし、キーボード操作時だけ表示する
+   :focus-visible に統一する（マウスクリックでの表示は避ける）。 */
+input:focus-visible,
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 2px;
 }

@@ -95,8 +95,11 @@ export function ExcludeRulesSection() {
               </div>
               <button
                 onClick={() => handleRemove(pattern, ruleType)}
-                className="p-1 hover:bg-white/8 rounded transition-colors shrink-0 opacity-0 group-hover:opacity-100"
+                // #66 問題9(#61レビュー由来): hoverのみで表示されるとキーボード/
+                // タッチで見えなかった。既定でも薄く見せ、hover/focusで強調する。
+                className="p-1 hover:bg-white/8 rounded transition-colors shrink-0 opacity-40 group-hover:opacity-100 focus-visible:opacity-100"
                 title={t('removeTooltip')}
+                aria-label={t('removeTooltip')}
               >
                 <X className="w-3.5 h-3.5 text-white/30 hover:text-white/60" />
               </button>
