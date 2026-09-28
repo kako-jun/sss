@@ -946,6 +946,13 @@ async function main() {
           if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
         });
         await page.goto(`${BASE_URL}/#${scenario.hash}`);
+        // #66: 複数ページを同じbrowserで使い回す中、直前のシナリオがフォーカス
+        // トラップ（モーダルを開いてフォーカスを奪う）を使うと、後続シナリオの
+        // page.keyboard.press()がOSレベルでは非アクティブな古いページに実際の
+        // キー入力ルーティングを奪われることがあった（document.activeElementは
+        // 期待通りbodyのままなのに、Spaceキー等が効かない）。明示的にこのページを
+        // 前面に出してからキーボード操作を伴うシナリオを実行する。
+        await page.bringToFront();
         let outcome;
         try {
           outcome = await scenario.run(page);

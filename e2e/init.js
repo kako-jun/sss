@@ -142,6 +142,10 @@
           return { totalImages: (seqs[sc] || seqs.slides).length, displayedImages: 0 };
         case 'get_default_share_directory':
           return '/tmp/sss-picked';
+        // #66: 情報タブの表示バージョン（getVersion()、@tauri-apps/api/appが
+        // 内部で呼ぶコマンド）。未定義のままだとバージョン表示が空欄のままになる。
+        case 'plugin:app|version':
+          return '0.0.0-e2e';
         default:
           return null;
       }
