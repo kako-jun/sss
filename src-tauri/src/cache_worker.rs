@@ -1011,8 +1011,12 @@ mod tests {
         std::fs::write(&cache_file, b"data").unwrap();
 
         // mtime を意図的に過去へ巻き戻す。
+        // Windows は読み取り専用ハンドルでの set_modified を拒否する（属性変更には
+        // 書込アクセスが要る）ため、write(true) で開く（PR#83レビューM1b）。
         let old_time = SystemTime::now() - Duration::from_secs(3600);
-        std::fs::File::open(&cache_file)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&cache_file)
             .unwrap()
             .set_modified(old_time)
             .unwrap();
