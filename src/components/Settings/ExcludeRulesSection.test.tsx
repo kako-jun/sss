@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { IgnoreRule } from '../../types';
+import { setLanguageSetting } from '../../lib/i18n/store';
 
 // #61: getIgnorePatterns が pattern + ruleType（"glob" | "date"）を返すようになった。
 // 撮影日ルール（ruleType: "date"）にだけ「撮影日」バッジが付き、通常globルールには
@@ -127,6 +128,35 @@ describe('ExcludeRulesSection captured-date badge (#61)', () => {
 
     // 入力を変えるとエラーが消える
     fireEvent.change(input, { target: { value: 'a{b.jpg2' } });
+    expect(screen.queryByText('無効なパターンです: unclosed alternate group')).toBeNull();
+  });
+
+  // #82レビューshould1: addErrorは確定済み文言でなく生コードで保持し、レンダーの
+  // たびに現在のロケールへ解決する。表示中に言語を切り替えても新旧混在しない。
+  it('re-resolves the add-pattern error message to the new language after switching locale mid-display', async () => {
+    getIgnorePatterns.mockResolvedValue([]);
+    addIgnorePattern.mockRejectedValue('invalidPattern:unclosed alternate group');
+
+    render(<ExcludeRulesSection />);
+    await waitFor(() => {
+      expect(screen.getByText('除外ルールはありません')).toBeTruthy();
+    });
+
+    const input = screen.getByPlaceholderText('パターンを入力（例: **/thumbs/）');
+    fireEvent.change(input, { target: { value: 'a{b.jpg' } });
+    fireEvent.click(screen.getByText('追加'));
+
+    await waitFor(() => {
+      expect(screen.getByText('無効なパターンです: unclosed alternate group')).toBeTruthy();
+    });
+
+    act(() => {
+      setLanguageSetting('en');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Invalid pattern: unclosed alternate group')).toBeTruthy();
+    });
     expect(screen.queryByText('無効なパターンです: unclosed alternate group')).toBeNull();
   });
 

@@ -14,4 +14,5 @@ export {
   resolveScanErrorMessage,
   resolveAddPatternErrorMessage,
   resolveResetAllDataErrorMessage,
+  resolveStartupDirectoryError,
 } from './errors';

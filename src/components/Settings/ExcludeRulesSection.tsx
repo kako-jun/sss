@@ -9,7 +9,10 @@ export function ExcludeRulesSection() {
   const [rules, setRules] = useState<IgnoreRule[]>([]);
   const [newPattern, setNewPattern] = useState('');
   const [loading, setLoading] = useState(true);
+  // #82レビューshould1: 確定済みの文言でなく生のエラーコードを保持し、
+  // レンダーのたびに現在のロケールへ変換する（言語切替中の新旧混在防止）。
   const [addError, setAddError] = useState<string | null>(null);
+  const addErrorMessage = addError === null ? null : resolveAddPatternErrorMessage(addError);
 
   useEffect(() => {
     getIgnorePatterns()
@@ -50,9 +53,10 @@ export function ExcludeRulesSection() {
       // ようになった。従来はconsole.errorに流すだけで画面上は何も起きなかったので、
       // ユーザーに失敗を伝える。
       console.error('Failed to add ignore pattern:', err);
-      setAddError(
-        typeof err === 'string' ? resolveAddPatternErrorMessage(err) : t('addPatternFailedGeneric'),
-      );
+      // #82レビューshould1: 生のコードのまま保持する（`resolveAddPatternErrorMessage`は
+      // 未知の文字列に対して`addPatternFailedGeneric`へフォールバックするため、
+      // 文字列でないerrはString(err)化しても実質同じ結果になる）。
+      setAddError(typeof err === 'string' ? err : String(err));
     }
   };
 
@@ -122,7 +126,7 @@ export function ExcludeRulesSection() {
           {t('addButtonLabel')}
         </button>
       </div>
-      {addError && <div className="text-red-400/80 text-sm">{addError}</div>}
+      {addErrorMessage && <div className="text-red-400/80 text-sm">{addErrorMessage}</div>}
     </div>
   );
 }

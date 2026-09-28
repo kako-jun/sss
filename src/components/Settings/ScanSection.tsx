@@ -4,10 +4,18 @@ import { UnlistenFn, listen } from '@tauri-apps/api/event';
 import { selectDirectory, scanDirectory, getLastDirectoryPath } from '../../lib/tauri';
 import type { ScanProgress } from '../../types';
 import { useT, resolveScanErrorMessage } from '../../lib/i18n';
+import type { MessageKey } from '../../lib/i18n';
 
 interface ScanSectionProps {
   onScanComplete: () => void;
 }
+
+// #82レビューshould1: エラーは確定済みの表示文言でなく、辞書キー or バックエンドの
+// 生コードのどちらかで保持する。表示文言への変換はレンダーのたびに行うため、
+// エラー表示中に言語を切り替えても新旧の言語が混在したまま固まらない。
+type ScanErrorState =
+  | { kind: 'key'; key: MessageKey }
+  | { kind: 'code'; raw: string; directory: string };
 
 export function ScanSection({ onScanComplete }: ScanSectionProps) {
   const t = useT();
@@ -18,7 +26,13 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
     current: number;
     total: number;
   } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ScanErrorState | null>(null);
+  const errorMessage =
+    error === null
+      ? null
+      : error.kind === 'key'
+        ? t(error.key)
+        : resolveScanErrorMessage(error.raw, error.directory);
 
   // 前回のディレクトリパスを読み込む
   useEffect(() => {
@@ -44,13 +58,17 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
       }
     } catch (err) {
       console.error('Failed to select directory:', err);
-      setError(err instanceof Error ? err.message : t('failedToSelectDirectory'));
+      if (err instanceof Error) {
+        setError({ kind: 'code', raw: err.message, directory: selectedDirectory });
+      } else {
+        setError({ kind: 'key', key: 'failedToSelectDirectory' });
+      }
     }
   };
 
   const handleScan = async () => {
     if (!selectedDirectory) {
-      setError(t('pleaseSelectDirectoryFirst'));
+      setError({ kind: 'key', key: 'pleaseSelectDirectoryFirst' });
       return;
     }
 
@@ -74,14 +92,14 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
     } catch (err) {
       console.error('Failed to scan directory:', err);
       // #80: Tauri コマンドの Err(String) はエラーコード（例: "directoryNotFound"）で
-      // 返る。`resolveScanErrorMessage` がロケールに応じた表示文言へ変換する
-      // （呼び出し時に自分が渡した selectedDirectory をパスの補完に使う）。
+      // 返る。表示は`errorMessage`（レンダー時に`resolveScanErrorMessage`へかける）
+      // に任せ、ここでは生のコード/文字列とselectedDirectoryだけ保持する（#82should1）。
       if (err instanceof Error) {
-        setError(resolveScanErrorMessage(err.message, selectedDirectory));
+        setError({ kind: 'code', raw: err.message, directory: selectedDirectory });
       } else if (typeof err === 'string') {
-        setError(resolveScanErrorMessage(err, selectedDirectory));
+        setError({ kind: 'code', raw: err, directory: selectedDirectory });
       } else {
-        setError(t('failedToScanDirectory'));
+        setError({ kind: 'key', key: 'failedToScanDirectory' });
       }
     } finally {
       setIsScanning(false);
@@ -123,7 +141,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
         {isScanning ? t('scanningLabel') : t('scanLabel')}
       </button>
 
-      {error && <div className="text-sm text-red-400/70">{error}</div>}
+      {errorMessage && <div className="text-sm text-red-400/70">{errorMessage}</div>}
 
       {realtimeProgress && (
         <div className="text-sm text-white/30 font-mono">

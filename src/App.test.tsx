@@ -21,6 +21,7 @@ const getPlaylistInfo = vi.fn();
 const getNextImage = vi.fn();
 const getPreviousImage = vi.fn();
 const undoDisplayCount = vi.fn();
+const getOsLocale = vi.fn();
 
 vi.mock('./lib/tauri', () => ({
   getSetting: (...a: unknown[]) => getSetting(...a),
@@ -31,6 +32,7 @@ vi.mock('./lib/tauri', () => ({
   getNextImage: (...a: unknown[]) => getNextImage(...a),
   getPreviousImage: (...a: unknown[]) => getPreviousImage(...a),
   undoDisplayCount: (...a: unknown[]) => undoDisplayCount(...a),
+  getOsLocale: (...a: unknown[]) => getOsLocale(...a),
 }));
 
 const listen = vi.fn();
@@ -77,6 +79,7 @@ vi.mock('./components/Settings', () => ({
 }));
 
 import App from './App';
+import { setLanguageSetting } from './lib/i18n/store';
 
 beforeEach(() => {
   getSetting.mockReset().mockResolvedValue(null);
@@ -87,6 +90,7 @@ beforeEach(() => {
   getNextImage.mockReset().mockResolvedValue({ kind: 'emptyPlaylist' });
   getPreviousImage.mockReset().mockResolvedValue({ kind: 'noHistory' });
   undoDisplayCount.mockReset().mockResolvedValue(undefined);
+  getOsLocale.mockReset().mockResolvedValue(null); // 既定: OSロケール取得不可 → navigator.languageにフォールバック
   listen.mockReset().mockResolvedValue(() => {});
   invoke.mockReset().mockResolvedValue(undefined);
   exit.mockReset();
@@ -135,7 +139,7 @@ describe('App empty-state notice display (#65 問題1・9: ようこそ/空/接�
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('フォルダに接続できません。再接続をお待ちください…')).toBeTruthy();
+      expect(screen.getByText('フォルダに接続できません。再接続をお待ちください...')).toBeTruthy();
     });
   });
 
@@ -467,5 +471,82 @@ describe('App i18n (#80): language setting resolution', () => {
     await waitFor(() => {
       expect(win.setTitle).toHaveBeenCalledWith('sss - Smart Slide Show');
     });
+  });
+
+  // #82レビューmust: 以前は `initLocale(getSetting).then(...)` に `.catch()` が無く、
+  // `getSetting('language')` がrejectすると`.then()`が一生呼ばれず、
+  // `runStartupSequence`（ようこそ画面等への遷移を含む）が永久に走らなかった
+  // （起動画面のまま固まる）。`initLocale`自身が内部で吸収して常にresolveする
+  // ことを、App全体を通した回帰テストとして固定する。
+  it('does not hang on the loading screen when getSetting("language") rejects (#82 must)', async () => {
+    getSetting.mockImplementation(async (key: string) => {
+      if (key === 'language') throw new Error('db locked');
+      return null;
+    });
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+  });
+
+  // #82レビューshould3: navigator.languageはmacOSのWKWebViewでCFBundleLocalizations
+  // 未設定だとOS設定に関わらずen-US固定になる既知の制約があるため、`auto`解決時は
+  // `getOsLocale`（`get_os_locale`、sys-localeクレート経由）を優先する。
+  it('prefers the OS locale (getOsLocale) over navigator.language when the setting is "auto" (#82 should3)', async () => {
+    // src/test/setup.ts の既定でnavigator.languageは'ja-JP'（→通常はja）だが、
+    // OSロケールがen-USを返せばそちらが勝ってenになるはず。
+    getSetting.mockResolvedValue(null); // language未設定 → 'auto'
+    getOsLocale.mockResolvedValue('en-US');
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Welcome to SSS')).toBeTruthy();
+    });
+    expect(document.documentElement.lang).toBe('en');
+  });
+
+  it('falls back to navigator.language when getOsLocale rejects (#82 should3)', async () => {
+    getSetting.mockResolvedValue(null); // 'auto'
+    getOsLocale.mockRejectedValue(new Error('not supported on this platform'));
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    // navigator.languageは既定でja-JPなので、OSロケール取得に失敗してもjaになる。
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+    expect(document.documentElement.lang).toBe('ja');
+  });
+});
+
+// #82レビューshould1: App.tsxの`directoryError`はraw（バックエンドのエラーコード等）
+// のまま保持し、表示のたびに現在のロケールへ解決する。エラー表示中に言語を
+// 切り替えても、確定済みの旧言語の文言のまま固まらず、新しい言語へ即座に
+// 切り替わることを固定する（新旧言語が混在しないことの回帰テスト）。
+describe('App directoryError follows locale switches without mixing languages (#82 should1)', () => {
+  it('re-resolves the startup directory error message to the new language after switching locale mid-display', async () => {
+    getLastDirectoryPath.mockResolvedValue('/photos');
+    restorePlaylist.mockResolvedValue(false);
+    scanDirectory.mockRejectedValue('directoryNotFound');
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('指定したフォルダが見つかりません: /photos')).toBeTruthy();
+    });
+
+    // 設定画面を介さず、ストアを直接切り替えて言語切替の即時反映を確認する
+    // （LanguageSection自体の検証は別ファイルで行い、ここではApp側の再描画のみ見る）。
+    act(() => {
+      setLanguageSetting('en');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Couldn't find the selected folder: /photos")).toBeTruthy();
+    });
+    // 古い日本語の文言が残っていない（新旧混在しない）。
+    expect(screen.queryByText('指定したフォルダが見つかりません: /photos')).toBeNull();
   });
 });

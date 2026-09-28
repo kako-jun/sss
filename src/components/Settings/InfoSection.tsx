@@ -4,10 +4,20 @@ import { useState } from 'react';
 import { resetAllData } from '../../lib/tauri';
 import { useT, resolveResetAllDataErrorMessage } from '../../lib/i18n';
 
+// #82レビューshould1: 確定済みの文言でなく状態種別＋生のエラーコードを保持し、
+// レンダーのたびに現在のロケールへ変換する（言語切替中の新旧混在防止）。
+type ResetMessageState = { kind: 'resetting' } | { kind: 'error'; raw: string };
+
 export function InfoSection() {
   const t = useT();
   const [isResetting, setIsResetting] = useState(false);
-  const [resetMessage, setResetMessage] = useState('');
+  const [resetMessage, setResetMessage] = useState<ResetMessageState | null>(null);
+  const resetMessageText =
+    resetMessage === null
+      ? ''
+      : resetMessage.kind === 'resetting'
+        ? t('resettingMessage')
+        : t('resetErrorPrefix', { detail: resolveResetAllDataErrorMessage(resetMessage.raw) });
 
   const handleOpenGitHub = async () => {
     try {
@@ -23,7 +33,7 @@ export function InfoSection() {
     }
 
     setIsResetting(true);
-    setResetMessage(t('resettingMessage'));
+    setResetMessage({ kind: 'resetting' });
 
     try {
       // バックエンド（reset_all_data）は初期化が成功すると最後にアプリのプロセス
@@ -36,8 +46,7 @@ export function InfoSection() {
       await resetAllData();
     } catch (err) {
       console.error('Failed to reset settings:', err);
-      const detail = typeof err === 'string' ? resolveResetAllDataErrorMessage(err) : String(err);
-      setResetMessage(t('resetErrorPrefix', { detail }));
+      setResetMessage({ kind: 'error', raw: typeof err === 'string' ? err : String(err) });
       setIsResetting(false);
     }
   };
@@ -78,7 +87,7 @@ export function InfoSection() {
           {isResetting ? t('resettingSettingsLabel') : t('resetSettingsButton')}
         </button>
         {resetMessage && (
-          <div className="mt-2 text-xs text-white/30 whitespace-pre-line">{resetMessage}</div>
+          <div className="mt-2 text-xs text-white/30 whitespace-pre-line">{resetMessageText}</div>
         )}
       </div>
     </div>

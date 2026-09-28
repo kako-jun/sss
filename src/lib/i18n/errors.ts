@@ -62,3 +62,25 @@ export function resolveResetAllDataErrorMessage(raw: string): string {
       return raw;
   }
 }
+
+/**
+ * 起動時の自動スキャン失敗（`App.tsx`の`directoryError`）専用の変換（#82レビュー
+ * nit）。既知のエラーコードは `errorDirectoryNotFound` 等それ自体が既に状況を
+ * 説明する完成した文（例:「指定したフォルダが見つかりません: {path}」）なので、
+ * さらに `startupDirectoryRejected`（「前回のフォルダに接続できませんでした:
+ * {reason}」）で二重に包まない。未知のコード（想定外の内部エラー等、それ単体では
+ * 文脈が分からない断片）だけ `startupDirectoryRejected` で前置きを付ける。
+ */
+export function resolveStartupDirectoryError(raw: string, directory: string): string {
+  const { code } = splitBackendError(raw);
+  switch (code) {
+    case 'scanInProgress':
+      return t('errorScanInProgress');
+    case 'directoryNotFound':
+      return t('errorDirectoryNotFound', { path: directory });
+    case 'directoryUnsafe':
+      return t('errorDirectoryUnsafe', { path: directory });
+    default:
+      return t('startupDirectoryRejected', { reason: raw });
+  }
+}

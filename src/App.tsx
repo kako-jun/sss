@@ -13,6 +13,7 @@ import {
   restorePlaylist,
   scanDirectory,
   getSetting,
+  getOsLocale,
   undoDisplayCount,
 } from './lib/tauri';
 import { runStartupSequence } from './lib/startup';
@@ -20,7 +21,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
 import { X, Settings as SettingsIcon, Minimize2, Maximize2 } from 'lucide-react';
 import logoBg from './assets/logo-bg.webp';
-import { useT, useLocale, initLocale, resolveScanErrorMessage } from './lib/i18n';
+import { useT, useLocale, initLocale, resolveStartupDirectoryError } from './lib/i18n';
 import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL } from './constants';
 
 function App() {
@@ -46,7 +47,13 @@ function App() {
   // 「設定済みだが今アクセスできない/スキャン失敗/空」を区別するために使う。
   const [hasDirectory, setHasDirectory] = useState(false);
   // #65: 起動時自動スキャンで前回ディレクトリが拒否された場合の理由（本文コメント由来）。
-  const [directoryError, setDirectoryError] = useState<string | null>(null);
+  // #82レビューshould1: 表示文言に確定させた文字列でなく、raw（バックエンドの
+  // エラーコード or 任意の文字列）とディレクトリパスを保持する。表示のたびに
+  // `resolveStartupDirectoryError`で現在のロケールへ解決することで、エラー表示中に
+  // 言語を切り替えても新旧の言語が混在しない（前の言語のまま固まらない）。
+  const [directoryError, setDirectoryError] = useState<{ raw: string; directory: string } | null>(
+    null,
+  );
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
   const { isIdle, setIsHovering } = useMouseIdle(3000);
 
@@ -140,7 +147,12 @@ function App() {
 
       // #80: 起動シーケンスより先に言語設定を確定させる（以降の initStatus 表示・
       // 案内画面が最初から正しい言語になるようにするため）。
-      void initLocale(getSetting).then(() => {
+      // #82レビューmust: `initLocale` 自体が内部で例外を吸収し必ずresolveする
+      // （getSetting/getOsLocaleの失敗はどちらも'auto'または既存の解決結果への
+      // フォールバックで飲み込まれる）ため、ここに`.catch()`は不要。以前は無く、
+      // getSettingがrejectすると起動シーケンスが一生呼ばれず起動画面のまま
+      // 止まっていた（テスト担当が発見）。
+      void initLocale(getSetting, getOsLocale).then(() => {
         // #62レビューS1: 起動時の初期化シーケンス（前回状態の復元→可能なら即表示、
         // スキャンはバックグラウンド）は React から切り離した純粋関数に委譲する
         // （src/lib/startup.ts。単体テストしやすくするため）。
@@ -161,10 +173,10 @@ function App() {
           updatePlaylistInfo,
           setHasDirectory,
           onDirectoryError: (err, directory) => {
+            // #82レビューshould1: ここでは文言に確定させず、raw文字列のまま
+            // 保持する（表示側で毎レンダー`resolveStartupDirectoryError`にかける）。
             const raw = err instanceof Error ? err.message : String(err);
-            // #80: バックエンドはエラーコードで返るため、ここでロケールに応じた
-            // 文言へ変換する（未知のコードはそのまま表示するフォールバック）。
-            setDirectoryError(resolveScanErrorMessage(raw, directory));
+            setDirectoryError({ raw, directory });
           },
         });
       });
@@ -352,6 +364,14 @@ function App() {
     return null; // 読込中（初回表示待ち）。ローディング画面はisInitializedの分岐が別途担当。
   })();
 
+  // #82レビューshould1: `directoryError`はraw文字列のまま保持しているため、
+  // 表示文言への変換はレンダーのたびにここで行う（setState時点で固定しない）。
+  // こうすることで、エラー表示中に設定画面から言語を切り替えても、次の
+  // レンダーで新しい言語の文言に更新される（新旧言語が混在したまま固まらない）。
+  const directoryErrorMessage = directoryError
+    ? resolveStartupDirectoryError(directoryError.raw, directoryError.directory)
+    : null;
+
   // #65レビュー修正: 復元成功後のバックグラウンドスキャン失敗は、既に最初の画像を
   // 表示できている（currentImage != null）ため上の全画面案内は出さない。写真を
   // 邪魔しない控えめな通知（下部トースト、数秒で自動的に消える）で理由を出す。
@@ -366,9 +386,7 @@ function App() {
         ? t('loadFailedGaveUp')
         : notice?.kind === 'error'
           ? notice.message
-          : directoryError
-            ? t('startupDirectoryRejected', { reason: directoryError })
-            : null;
+          : directoryErrorMessage;
 
   // directoryError による下部トーストだけは数秒で自動的に消す（notice由来の通知は
   // 次の正常な画像取得時にnoticeがnullへ戻るため対象外。上の全画面案内側は
@@ -452,12 +470,12 @@ function App() {
             {emptyStateContent.subtitle && (
               <div className="text-white/30 text-sm mb-6">{emptyStateContent.subtitle}</div>
             )}
-            {directoryError && (
+            {directoryErrorMessage && (
               <div
                 className="text-red-400/80 font-mono text-xs mb-6 truncate max-w-[90vw] mx-auto"
-                title={t('startupDirectoryRejected', { reason: directoryError })}
+                title={directoryErrorMessage}
               >
-                {t('startupDirectoryRejected', { reason: directoryError })}
+                {directoryErrorMessage}
               </div>
             )}
             <button

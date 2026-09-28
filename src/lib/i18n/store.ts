@@ -13,7 +13,15 @@ export type LanguageSetting = Locale | 'auto';
 type Listener = () => void;
 
 let languageSetting: LanguageSetting = 'auto';
-let locale: Locale = 'ja'; // 起動直後・#80導入前の環境向けの既定値。initLocale()が確定させる。
+// #82レビューshould3: OSロケール（`get_os_locale`、sys-localeクレート経由）で
+// 解決できた結果のキャッシュ。navigator.languageより優先する（macOSのWKWebViewは
+// CFBundleLocalizationsが無いとnavigator.languageがen-US固定になる既知の制約が
+// あるため）。取得できていない/失敗した間はnullのままnavigator.languageを使う。
+let cachedOsLocale: Locale | null = null;
+// #82レビューshould2: 起動直後（initLocale完了前）の最初のレンダーから、決め打ちの
+// 'ja'でなくnavigator.languageベースの推定値を使う（英語OS環境で初回フレームだけ
+// 必ず日本語になっていた問題の修正）。
+let locale: Locale = resolveLocale('auto');
 const listeners = new Set<Listener>();
 
 /** 現在の表示言語（'auto' を解決した後の実際のロケール）。 */
@@ -35,10 +43,14 @@ function detectNavigatorLocale(): Locale {
   return navigator.language.toLowerCase().startsWith('ja') ? 'ja' : 'en';
 }
 
-/** `setting` から実際のロケールを求める（テスト・設定画面のプレビュー用に公開）。 */
+/**
+ * `setting` から実際のロケールを求める（テスト・設定画面のプレビュー用に公開）。
+ * 'auto' の解決は `cachedOsLocale`（`initLocale` がOSロケールを取得できていれば
+ * 設定済み）を優先し、無ければ `navigator.language` にフォールバックする。
+ */
 export function resolveLocale(setting: LanguageSetting): Locale {
   if (setting === 'ja' || setting === 'en') return setting;
-  return detectNavigatorLocale();
+  return cachedOsLocale ?? detectNavigatorLocale();
 }
 
 /** 購読者に変更を通知しつつ、設定とロケールを更新する。 */
@@ -55,13 +67,51 @@ export function subscribeLocale(listener: Listener): () => void {
 }
 
 /**
+ * テスト専用: `cachedOsLocale` をリセットする。モジュール状態がテスト間で
+ * 漏れないよう `src/test/setup.ts` の `beforeEach` から呼ぶ。
+ */
+export function clearOsLocaleCache(): void {
+  cachedOsLocale = null;
+}
+
+/**
  * アプリ起動時、保存済みの `app_settings.language` を読み込んでストアを初期化する。
  * 保存値が無い/不正な場合は 'auto' として扱う。
+ *
+ * #82レビューmust: `getSetting` が reject しても起動シーケンスを止めないよう、
+ * ここで確実に例外を吸収し 'auto' へフォールバックする（このPromiseは
+ * 正常系・異常系のどちらでも必ずresolveする。呼び出し元の `App.tsx` はこの
+ * `.then()` の中で起動シーケンス本体を走らせているため、ここで reject すると
+ * アプリが起動画面のまま永久に止まっていた）。
+ *
+ * `getOsLocale` は任意（#82レビューshould3）。渡された場合、設定が `auto` の
+ * ときだけOSロケールの取得を試み、成功すれば `cachedOsLocale` を更新してから
+ * 改めて解決し直す。取得に失敗しても無視して `navigator.language` ベースの
+ * 解決のまま進む（起動を止めない）。
  */
 export async function initLocale(
   getSetting: (key: string) => Promise<string | null>,
+  getOsLocale?: () => Promise<string | null>,
 ): Promise<void> {
-  const saved = await getSetting('language');
-  const setting: LanguageSetting = saved === 'ja' || saved === 'en' ? saved : 'auto';
+  let setting: LanguageSetting = 'auto';
+  try {
+    const saved = await getSetting('language');
+    setting = saved === 'ja' || saved === 'en' ? saved : 'auto';
+  } catch (err) {
+    console.error('Failed to load the language setting, falling back to "auto":', err);
+    setting = 'auto';
+  }
+
+  if (setting === 'auto' && getOsLocale) {
+    try {
+      const osLocale = await getOsLocale();
+      if (osLocale) {
+        cachedOsLocale = osLocale.toLowerCase().startsWith('ja') ? 'ja' : 'en';
+      }
+    } catch (err) {
+      console.error('Failed to detect the OS locale, falling back to navigator.language:', err);
+    }
+  }
+
   setLanguageSetting(setting);
 }

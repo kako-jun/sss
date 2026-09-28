@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
-import { setLanguageSetting } from '../lib/i18n/store';
+import { setLanguageSetting, clearOsLocaleCache } from '../lib/i18n/store';
 
 // #80: navigator.language をテスト全体でja固定にする（jsdom既定は'en-US'。CI環境の
 // OSロケールにも依存させない）。既存テストの多くは日本語UIをそのまま前提にしており、
@@ -18,9 +18,13 @@ if (typeof navigator !== 'undefined') {
   }
 }
 
-// #80: テスト間でロケール状態が漏れないよう、各テストの前に'auto'へ戻す
+// #80/#82: テスト間でロケール状態が漏れないよう、各テストの前に'auto'へ戻す
 // （navigator.languageの既定は上のja-JP固定なので'ja'に解決される）。
+// `cachedOsLocale`（#82should3: OSロケールのキャッシュ）もリセットしないと、
+// あるテストがinitLocaleにgetOsLocaleを渡して設定した値が後続のテストへ
+// 漏れてしまう。
 beforeEach(() => {
+  clearOsLocaleCache();
   setLanguageSetting('auto');
 });
 

@@ -31,6 +31,9 @@ image = "0.25"
 md5 = "0.7"
 keepawake = "0.4"
 dirs = "5"
+# #82 should3: OSロケール取得（tauri-plugin-osを避けcapabilityを増やさないための
+# 素の#[tauri::command]用）。
+sys-locale = "0.3"
 tauri-plugin-single-instance = { version = "2" }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"

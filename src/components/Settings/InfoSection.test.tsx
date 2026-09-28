@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { setLanguageSetting } from '../../lib/i18n/store';
 
 // #59: tauri-plugin-shell の open() から tauri-plugin-opener の openUrl() への移行。
 // GitHubリンクボタンが openUrl を正しい引数で呼ぶこと、失敗時に既存の catch が
@@ -123,6 +124,35 @@ describe('InfoSection reset button (resetAllData)', () => {
     // ボタンが再度クリックできる状態（disabled解除）に戻ること
     const button = screen.getByText('設定を初期化').closest('button') as HTMLButtonElement;
     expect(button.disabled).toBe(false);
+
+    consoleError.mockRestore();
+  });
+
+  // #82レビューshould1: resetMessageは確定済み文言でなく状態種別＋生コードで保持し、
+  // レンダーのたびに現在のロケールへ解決する。表示中に言語を切り替えても
+  // 新旧混在しないことを固定する。
+  it('re-resolves the reset error message to the new language after switching locale mid-display', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    resetAllData.mockRejectedValue('scanInProgress');
+
+    render(<InfoSection />);
+    fireEvent.click(screen.getByText('設定を初期化'));
+
+    await waitFor(() => {
+      expect(screen.getByText('エラー: スキャン実行中です。完了までお待ちください。')).toBeTruthy();
+    });
+
+    act(() => {
+      setLanguageSetting('en');
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Error: A scan is already in progress. Please wait for it to finish.'),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText('エラー: スキャン実行中です。完了までお待ちください。')).toBeNull();
 
     consoleError.mockRestore();
   });

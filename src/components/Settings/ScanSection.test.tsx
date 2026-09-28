@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { setLanguageSetting } from '../../lib/i18n/store';
 
 // #73: scan_directory が asset scope の安全性チェックで拒否されると Err(String) を返す
 // ようになった。Tauri コマンドの Err(String) は Error インスタンスではなく素の文字列で
@@ -92,6 +93,33 @@ describe('ScanSection scan error display', () => {
     await waitFor(() => {
       expect(screen.getByText('boom')).toBeTruthy();
     });
+  });
+
+  // #82レビューshould1: エラーは確定済み文言でなく生コードで保持し、レンダーの
+  // たびに現在のロケールへ解決する。表示中に言語を切り替えても、旧言語の文言が
+  // 残ったまま固まらず新しい言語へ即座に更新されることを固定する。
+  it('re-resolves the shown error message to the new language after switching locale mid-display (no ja/en mixing)', async () => {
+    scanDirectory.mockRejectedValue('directoryUnsafe');
+    await clickScanOnceDirectoryLoaded();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('セキュリティ上の理由でこのフォルダは使用できません: /photos/existing'),
+      ).toBeTruthy();
+    });
+
+    act(() => {
+      setLanguageSetting('en');
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("This folder can't be used for security reasons: /photos/existing"),
+      ).toBeTruthy();
+    });
+    expect(
+      screen.queryByText('セキュリティ上の理由でこのフォルダは使用できません: /photos/existing'),
+    ).toBeNull();
   });
 });
 

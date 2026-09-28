@@ -125,6 +125,19 @@ export async function getSetting(key: string): Promise<string | null> {
 }
 
 /**
+ * OSのロケール（例: "ja-JP"）を取得する（#82 should3）。
+ *
+ * `navigator.language` はWebViewの実装依存で、macOSのWKWebViewは
+ * `CFBundleLocalizations` にアプリの対応言語として明示していないロケールだと
+ * 実際のOS設定に関わらず `en-US` 固定になる既知の制約がある。`app_settings.language`
+ * が `auto` の場合、`initLocale`（`src/lib/i18n/store.ts`）はこちらを優先し、
+ * 取得できない場合（`null`）だけ `navigator.language` にフォールバックする。
+ */
+export async function getOsLocale(): Promise<string | null> {
+  return await invoke<string | null>('get_os_locale');
+}
+
+/**
  * ピック：画像をPictures/sss-pickedフォルダにコピー
  */
 export async function pickImage(imagePath: string): Promise<string> {
