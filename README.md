@@ -75,13 +75,13 @@ npm run tauri:build
 ### バックエンド (Rust)
 
 - **Tauri v2**: デスクトップアプリフレームワーク（最新版、モバイル対応準備）
-- **rusqlite v0.32**: SQLiteデータベース
+- **rusqlite v0.40**: SQLiteデータベース
 - **rayon v1**: 並列処理
 - **image v0.25**: 画像処理（4Kリサイズ）
 - **kamadak-exif v0.6**: EXIF情報読み取り
-- **md5 v0.7**: キャッシュファイル名ハッシュ生成
+- **md5 v0.8**: キャッシュファイル名ハッシュ生成
 - **globset v0.4**: 除外ルールのglobパターン照合
-- **keepawake v0.4**: スクリーンセーバー抑制
+- **keepawake v0.6**: スクリーンセーバー抑制
 
 ### フロントエンド (React)
 

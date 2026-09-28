@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Smart Slide Show - A photo slideshow application for viewing 100k+ photos"
 authors = ["kako-jun"]
 license = "MIT"
-repository = ""
+repository = "https://github.com/kako-jun/sss"
 edition = "2021"
 
 # lib+bin 分割: バックエンドの芯を結合テスト (tests/golden_e2e.rs) から呼べるように
@@ -21,16 +21,16 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 globset = "0.4"
 walkdir = "2"
 kamadak-exif = "0.6"
-rand = "0.8"
+rand = "0.9"
 rayon = "1"
 image = "0.25"
-md5 = "0.7"
-keepawake = "0.4"
-dirs = "5"
+md5 = "0.8"
+keepawake = "0.6"
+dirs = "7"
 # #82 should3: OSロケール取得（tauri-plugin-osを避けcapabilityを増やさないための
 # 素の#[tauri::command]用）。
 sys-locale = "0.3"

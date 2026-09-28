@@ -12,15 +12,15 @@
 
 - **フレームワーク**: Tauri v2 (最新版、モバイル対応準備)
 - **言語**: Rust (edition 2021)
-- **データベース**: SQLite (rusqlite v0.32, bundled)
+- **データベース**: SQLite (rusqlite v0.40, bundled)
 - **並列処理**: rayon v1
 - **ファイル走査**: walkdir v2
 - **フィルタリング**: globset v0.4
 - **EXIF読み取り**: kamadak-exif v0.6 (画像のみ)
 - **画像処理**: image v0.25
-- **キャッシュ管理**: md5 v0.7 (ファイル名ハッシュ生成)
-- **ランダム生成**: rand v0.8
-- **スクリーンセーバー抑制**: keepawake v0.4 (クロスプラットフォーム対応)
+- **キャッシュ管理**: md5 v0.8 (ファイル名ハッシュ生成)
+- **ランダム生成**: rand v0.9
+- **スクリーンセーバー抑制**: keepawake v0.6 (クロスプラットフォーム対応)
 - **プラグイン**:
   - tauri-plugin-dialog v2 (ダイアログ)
   - tauri-plugin-opener v2 (URLを開く)

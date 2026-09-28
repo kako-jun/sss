@@ -1,5 +1,5 @@
+use rand::rng;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use rand::Rng;
 use std::collections::HashSet;
 
@@ -41,7 +41,7 @@ pub struct Playlist {
 impl Playlist {
     /// 新しいプレイリストを作成（シャッフルあり、まだ何も表示していない状態）
     pub fn new(mut images: Vec<String>) -> Self {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         images.shuffle(&mut rng);
 
         Playlist {
@@ -143,7 +143,7 @@ impl Playlist {
                 // #62: history はパスで保持しているので、直前の shuffled_list の並びに
                 // 依存せず正しい「直前の画像」を取れる。
                 let last_shown = self.history.last().cloned();
-                let mut rng = thread_rng();
+                let mut rng = rng();
                 self.shuffled_list.shuffle(&mut rng);
                 reshuffled = true;
                 // 先頭が直前の画像と同じなら2番目と入れ替えて連続表示を防ぐ
@@ -258,7 +258,7 @@ impl Playlist {
         }
 
         if !new_images.is_empty() {
-            let mut rng = thread_rng();
+            let mut rng = rng();
             let mut new_shuffled = new_images;
             new_shuffled.shuffle(&mut rng);
 
@@ -277,7 +277,7 @@ impl Playlist {
                 let remaining_n = new_iter.len();
                 let take_suffix = remaining_n == 0
                     || (remaining_s > 0
-                        && rng.gen_range(0..(remaining_s + remaining_n)) < remaining_s);
+                        && rng.random_range(0..(remaining_s + remaining_n)) < remaining_s);
                 if take_suffix {
                     merged.push(suffix_iter.next().unwrap());
                 } else {

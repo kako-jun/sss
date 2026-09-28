@@ -75,13 +75,13 @@ A legacy `.sssignore` file (gitignore-style, in your home directory: Windows `%U
 ### Backend (Rust)
 
 - **Tauri v2**: desktop app framework (latest, mobile-ready)
-- **rusqlite v0.32**: SQLite database
+- **rusqlite v0.40**: SQLite database
 - **rayon v1**: parallel processing
 - **image v0.25**: image processing (4K resizing)
 - **kamadak-exif v0.6**: EXIF reading
-- **md5 v0.7**: cache filename hashing
+- **md5 v0.8**: cache filename hashing
 - **globset v0.4**: exclude-rule glob pattern matching
-- **keepawake v0.4**: screensaver suppression
+- **keepawake v0.6**: screensaver suppression
 
 ### Frontend (React)
 
