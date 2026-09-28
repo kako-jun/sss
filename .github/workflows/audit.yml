@@ -1,0 +1,33 @@
+name: Security audit
+
+# push/PR では依存関係が変わった時（Cargo.toml/Cargo.lock）だけ実行し、それ以外は
+# 週次スケジュールで新しく登録された既知脆弱性を検出する（PR#83レビュー S4）。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src-tauri/Cargo.toml'
+      - 'src-tauri/Cargo.lock'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src-tauri/Cargo.toml'
+      - 'src-tauri/Cargo.lock'
+  schedule:
+    - cron: '0 3 * * 1' # 毎週月曜 03:00 UTC
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit Rust dependencies
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
