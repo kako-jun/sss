@@ -509,9 +509,16 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 ## CI/CD
 
-- **CI**: `.github/workflows/ci.yml` — push/PR to main triggers `cargo fmt --check` / `cargo clippy` / `cargo check` + `npm run build`
-- **Release**: `.github/workflows/release.yml` — manual dispatch or tag `v*`, 3-OS matrix (macOS/Linux/Windows), tauri-action
+- **CI**: `.github/workflows/ci.yml` — push/PR to main で2ジョブ実行
+  - `check`（ubuntu-22.04）: `npm run lint` / `npm run format:check` / `npm run build` / `npm test`（vitest）/ `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test`
+  - `cross-platform`（windows-latest / macos-latest）: `cargo clippy --all-targets -- -D warnings` / `cargo test`。`#[cfg(windows)]`/`#[cfg(target_os = "macos")]` 配下のコード・実機限定テストは ubuntu だけでは一度もコンパイルされないため（#63 で発覚した Windows 固有バグの反省）。Windows では `tauri::test::mock_app` 系 integration test が `src-tauri/build.rs` のマニフェスト埋め込みワークアラウンドを必要とする（tauri-apps/tauri#13419 未修正の既知バグ。詳細は architecture.md）
+  - `npm run e2e` は CI に含めない（実ブラウザ/実ファイル前提のため手動実行）
+- **Audit**: `.github/workflows/audit.yml`（ci.yml とは別ファイル）— `rustsec/audit-check` で `src-tauri` の Rust 依存関係を検査。`src-tauri/Cargo.toml`/`Cargo.lock` を変更する push/PR と、毎週月曜03:00 UTC の schedule（新規登録された既知脆弱性の検出用）でのみ実行し、無関係な変更で毎回は回さない
+  - **ignore 方針**: 直せない/直す価値のない advisory（例: 上流未対応の unmaintained warning）が出た場合は、`rustsec/audit-check` の `ignore` 入力に advisory ID を追加し、なぜ ignore するか・いつ見直すかを同じ行にコメントで残す。安易な ignore 追加はせず、まず `cargo update` での解消を優先する
+- **Release**: `.github/workflows/release.yml` — 手動 dispatch。`validate` ジョブで (1) dispatch 元ブランチが `main` であること (2) `version` 入力が `vX.Y.Z`（プレリリース識別子任意）の形式であること (3) 同名タグが未使用であること (4) 入力 version と `tauri.conf.json`/`Cargo.toml`/`package.json` の version 一致 (5) CHANGELOG.md に対応する `[version]` 節が存在すること (6) `npm test`/`cargo test` の通過、を順にチェックし、いずれか失敗で fail。通過後に3-OS matrix（macOS/Linux/Windows）で `tauri-action` がビルドし、release note は CHANGELOG.md の該当節へのリンク。**成果物は署名なし**（macOS Gatekeeper/Windows SmartScreen の回避手順は README に追記予定、#71）
+  - **リリース手順**: 1. `tauri.conf.json` / `src-tauri/Cargo.toml` / `package.json` の version を揃えて更新 2. CHANGELOG.md の `[Unreleased]` を `[X.Y.Z] - YYYY-MM-DD` に改名し、新しい空の `[Unreleased]` を上に用意 3. これらを含む PR を作成し main にマージ 4. GitHub Actions の `Release Build` を `workflow_dispatch` で実行し、`version` に `vX.Y.Z` を入力（main ブランチから実行すること） 5. `validate` → `build` の通過を確認し、GitHub Releases に3プラットフォーム分の成果物が揃ったことを確認する
 - **Pre-commit**: Husky + lint-staged (`eslint --fix` + `prettier` for TS/JS, `prettier` for JSON/CSS/MD) + `cargo fmt`
+- **CHANGELOG.md**: Keep a Changelog 形式。v1.0.0 以降の変更を記録。**本 PR（#70 CI/CD 整備）マージ以降、コード変更を伴う PR は自分の変更を `[Unreleased]` セクションに追記する**
 
 ## TODO: 仕様変更・機能追加
 

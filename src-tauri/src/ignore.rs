@@ -683,4 +683,68 @@ mod tests {
 
         assert!(!filter.should_prune_dir(Path::new("/photos/2023-05-15"), root));
     }
+
+    /// PR#83レビュー: golden_e2e.rs の2件のWindows失敗
+    /// （`incremental_scan_treats_newly_pruned_directory_as_unknown_not_deleted` /
+    /// `incremental_scan_treats_actually_deleted_file_level_excluded_file_as_deleted_not_unknown`）は
+    /// `has_pruned_ancestor_dir` 自体のバグではなく、テスト側が
+    /// `root.join("@eaDir/thumb.jpg")`（`/`区切りを埋め込んだ1つの文字列）で期待パスを
+    /// 組み立てていたことが原因だった。`Path::join` は引数をそのまま1コンポーネントとして
+    /// 連結するだけで埋め込み済みの区切り文字を正規化しないため、Windowsでは
+    /// `root`側の`\`とリテラル`/`が混在した文字列になり、WalkDirが実際に生成する
+    /// 全区切り文字が`\`のパス文字列（`unknown_files`/`deleted_files`の中身）と
+    /// 一致しなくなっていた（テストのみの問題。修正はgolden_e2e.rs側で行い、
+    /// コンポーネントごとに`.join()`するようにした）。
+    ///
+    /// `has_pruned_ancestor_dir`/`should_prune_dir`自体は`Path::parent`/`strip_prefix`/
+    /// `starts_with`という区切り文字非依存のAPIで祖先ディレクトリを辿っており
+    /// （Windowsでは`/`も区切りとして解釈される。globsetも`Candidate`生成時に
+    /// `\`を`/`へ正規化するため、パターン側の区切り文字とも独立している）、
+    /// 本体ロジックには手を入れていない。ここでは正しい組み立て方
+    /// （コンポーネントごとの`.join()`）を使い、`has_pruned_ancestor_dir`に
+    /// 直接ユニットテストを追加して退行を守る（従来ゼロだった直接カバレッジ）。
+    #[test]
+    fn has_pruned_ancestor_dir_detects_pruned_directory_regardless_of_depth() {
+        let rules = vec![IgnoreRule::glob("**/@eaDir/")];
+        let filter = IgnoreFilter::from_rules(&rules);
+        let root = Path::new("/photos");
+
+        let pruned_file = root.join("@eaDir").join("thumb.jpg");
+        assert!(
+            filter.has_pruned_ancestor_dir(&pruned_file, root),
+            "枝刈り対象ディレクトリ直下のファイルは祖先が刈られていると判定されるはず"
+        );
+
+        let nested_pruned = root.join("sub").join("@eaDir").join("thumb.jpg");
+        assert!(
+            filter.has_pruned_ancestor_dir(&nested_pruned, root),
+            "枝刈り対象ディレクトリがどの深さの祖先にあっても検出されるはず"
+        );
+
+        let kept_file = root.join("keep").join("normal.jpg");
+        assert!(
+            !filter.has_pruned_ancestor_dir(&kept_file, root),
+            "枝刈り対象でない祖先しか持たないファイルはfalseのはず"
+        );
+    }
+
+    /// 上と同じ判定を、`std::path::MAIN_SEPARATOR`で明示的に組み立てた文字列から
+    /// `Path::new`した場合でも壊れないことを確認する（実行ホストの区切り文字が
+    /// 何であっても、正しく組み立てた文字列なら一致するという回帰ガード。
+    /// Windows実機では実際に`\`区切りで検証されることになる）。
+    #[test]
+    fn has_pruned_ancestor_dir_works_with_native_separator_strings() {
+        use std::path::MAIN_SEPARATOR;
+
+        let rules = vec![IgnoreRule::glob("**/@eaDir/")];
+        let filter = IgnoreFilter::from_rules(&rules);
+        let root_str = format!("{MAIN_SEPARATOR}photos");
+        let root = Path::new(&root_str);
+
+        let pruned_str = format!("{root_str}{MAIN_SEPARATOR}@eaDir{MAIN_SEPARATOR}thumb.jpg");
+        assert!(filter.has_pruned_ancestor_dir(Path::new(&pruned_str), root));
+
+        let kept_str = format!("{root_str}{MAIN_SEPARATOR}keep{MAIN_SEPARATOR}normal.jpg");
+        assert!(!filter.has_pruned_ancestor_dir(Path::new(&kept_str), root));
+    }
 }

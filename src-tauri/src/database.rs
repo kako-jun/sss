@@ -1013,6 +1013,17 @@ mod tests {
         path
     }
 
+    /// レビュー指摘(PR#83 M1a): `get_file_metadata_under`/`get_all_display_counts_under`
+    /// は `std::path::MAIN_SEPARATOR`（コンパイル時のホストOS依存）でスコープ境界を
+    /// 計算するため、テストのパスを `/` 直書きにすると Windows 実行時は区切り文字が
+    /// 一致せず常に0件になる。ここで `/` をホストOSの区切り文字に変換してから使う。
+    /// Windows形式の区切り文字自体を明示的に検証する
+    /// `directory_scope_bounds_computes_correct_range_for_windows_backslash_separator` は
+    /// 意図的に対象外（そちらは常に `\` を直接渡す）。
+    fn p(s: &str) -> String {
+        s.replace('/', std::path::MAIN_SEPARATOR_STR)
+    }
+
     /// #61 レビュー M1(must) 回帰テスト: 旧スキーマ（`ignore_rules` に `rule_type` 列が
     /// 無い）かつ **空の** `ignore_rules` テーブルを持つDBを `Database::new` で開いても
     /// パニック/エラーにならないこと。マイグレーションがデフォルトルール挿入より先に
@@ -1534,19 +1545,21 @@ mod tests {
         let path = temp_db_path("file_metadata_under_scope");
         let db = Database::new(path.clone()).unwrap();
 
-        db.upsert_file_metadata("/p/foo/a.jpg", 100, 10).unwrap();
-        db.upsert_file_metadata("/p/foo/sub/b.jpg", 200, 20)
+        db.upsert_file_metadata(&p("/p/foo/a.jpg"), 100, 10)
             .unwrap();
-        db.upsert_file_metadata("/p/bar/c.jpg", 300, 30).unwrap();
+        db.upsert_file_metadata(&p("/p/foo/sub/b.jpg"), 200, 20)
+            .unwrap();
+        db.upsert_file_metadata(&p("/p/bar/c.jpg"), 300, 30)
+            .unwrap();
 
-        let under_foo = db.get_file_metadata_under("/p/foo").unwrap();
+        let under_foo = db.get_file_metadata_under(&p("/p/foo")).unwrap();
         let paths: Vec<&str> = under_foo.iter().map(|(p, ..)| p.as_str()).collect();
 
         assert_eq!(under_foo.len(), 2, "/p/foo配下の2件だけが返るはず");
-        assert!(paths.contains(&"/p/foo/a.jpg"));
-        assert!(paths.contains(&"/p/foo/sub/b.jpg"));
+        assert!(paths.contains(&p("/p/foo/a.jpg").as_str()));
+        assert!(paths.contains(&p("/p/foo/sub/b.jpg").as_str()));
         assert!(
-            !paths.contains(&"/p/bar/c.jpg"),
+            !paths.contains(&p("/p/bar/c.jpg").as_str()),
             "別ディレクトリ(/p/bar)のファイルを巻き込んではいけない"
         );
 
@@ -1561,15 +1574,17 @@ mod tests {
         let path = temp_db_path("file_metadata_under_boundary");
         let db = Database::new(path.clone()).unwrap();
 
-        db.upsert_file_metadata("/p/foo/bar.jpg", 100, 10).unwrap();
-        db.upsert_file_metadata("/p/foobar/x.jpg", 200, 20).unwrap();
+        db.upsert_file_metadata(&p("/p/foo/bar.jpg"), 100, 10)
+            .unwrap();
+        db.upsert_file_metadata(&p("/p/foobar/x.jpg"), 200, 20)
+            .unwrap();
 
-        let under_foo = db.get_file_metadata_under("/p/foo").unwrap();
+        let under_foo = db.get_file_metadata_under(&p("/p/foo")).unwrap();
         let paths: Vec<&str> = under_foo.iter().map(|(p, ..)| p.as_str()).collect();
 
-        assert_eq!(paths, vec!["/p/foo/bar.jpg"]);
+        assert_eq!(paths, vec![p("/p/foo/bar.jpg").as_str()]);
         assert!(
-            !paths.contains(&"/p/foobar/x.jpg"),
+            !paths.contains(&p("/p/foobar/x.jpg").as_str()),
             "/p/foo と /p/foobar は別ディレクトリとして区別されるはず"
         );
 
@@ -1585,16 +1600,16 @@ mod tests {
         let path = temp_db_path("file_metadata_under_escape");
         let db = Database::new(path.clone()).unwrap();
 
-        db.upsert_file_metadata("/p/100%_done/a.jpg", 100, 10)
+        db.upsert_file_metadata(&p("/p/100%_done/a.jpg"), 100, 10)
             .unwrap();
         // "%"/"_" が本物のワイルドカードとして働くと、無関係な "/p/100X_done" もヒットする。
-        db.upsert_file_metadata("/p/100X_done/a.jpg", 200, 20)
+        db.upsert_file_metadata(&p("/p/100X_done/a.jpg"), 200, 20)
             .unwrap();
 
-        let under = db.get_file_metadata_under("/p/100%_done").unwrap();
+        let under = db.get_file_metadata_under(&p("/p/100%_done")).unwrap();
         let paths: Vec<&str> = under.iter().map(|(p, ..)| p.as_str()).collect();
 
-        assert_eq!(paths, vec!["/p/100%_done/a.jpg"]);
+        assert_eq!(paths, vec![p("/p/100%_done/a.jpg").as_str()]);
 
         let _ = std::fs::remove_file(&path);
     }
@@ -1659,15 +1674,17 @@ mod tests {
         let path = temp_db_path("case_sensitive_scope");
         let db = Database::new(path.clone()).unwrap();
 
-        db.upsert_file_metadata("/p/foo/a.jpg", 100, 10).unwrap();
-        db.upsert_file_metadata("/p/Foo/b.jpg", 200, 20).unwrap();
+        db.upsert_file_metadata(&p("/p/foo/a.jpg"), 100, 10)
+            .unwrap();
+        db.upsert_file_metadata(&p("/p/Foo/b.jpg"), 200, 20)
+            .unwrap();
 
-        let under_foo = db.get_file_metadata_under("/p/foo").unwrap();
+        let under_foo = db.get_file_metadata_under(&p("/p/foo")).unwrap();
         let paths: Vec<&str> = under_foo.iter().map(|(p, ..)| p.as_str()).collect();
 
-        assert_eq!(paths, vec!["/p/foo/a.jpg"]);
+        assert_eq!(paths, vec![p("/p/foo/a.jpg").as_str()]);
         assert!(
-            !paths.contains(&"/p/Foo/b.jpg"),
+            !paths.contains(&p("/p/Foo/b.jpg").as_str()),
             "/p/foo と /p/Foo は大文字小文字が違う別ディレクトリとして区別されるはず"
         );
 
@@ -1930,11 +1947,11 @@ mod tests {
         let path = temp_db_path("image_counts");
         let db = Database::new(path.clone()).unwrap();
 
-        db.upsert_file_metadata("/p/a.jpg", 100, 10).unwrap();
-        db.upsert_file_metadata("/p/b.jpg", 200, 20).unwrap();
-        db.upsert_file_metadata("/p/c.jpg", 300, 30).unwrap();
-        db.increment_display_count("/p/a.jpg").unwrap();
-        db.increment_display_count("/other/z.jpg").unwrap();
+        db.upsert_file_metadata(&p("/p/a.jpg"), 100, 10).unwrap();
+        db.upsert_file_metadata(&p("/p/b.jpg"), 200, 20).unwrap();
+        db.upsert_file_metadata(&p("/p/c.jpg"), 300, 30).unwrap();
+        db.increment_display_count(&p("/p/a.jpg")).unwrap();
+        db.increment_display_count(&p("/other/z.jpg")).unwrap();
 
         assert_eq!(
             db.get_total_image_count().unwrap(),
@@ -1942,7 +1959,7 @@ mod tests {
             "file_metadataの全件数"
         );
         let displayed_under_p = db
-            .get_all_display_counts_under("/p")
+            .get_all_display_counts_under(&p("/p"))
             .unwrap()
             .into_iter()
             .filter(|(_, count)| *count > 0)
@@ -2080,15 +2097,15 @@ mod tests {
         let path = temp_db_path("all_display_counts");
         let db = Database::new(path.clone()).unwrap();
 
-        db.increment_display_count("/p/b.jpg").unwrap();
-        db.increment_display_count("/p/a.jpg").unwrap();
-        db.increment_display_count("/p/a.jpg").unwrap();
-        db.increment_display_count("/other/z.jpg").unwrap();
+        db.increment_display_count(&p("/p/b.jpg")).unwrap();
+        db.increment_display_count(&p("/p/a.jpg")).unwrap();
+        db.increment_display_count(&p("/p/a.jpg")).unwrap();
+        db.increment_display_count(&p("/other/z.jpg")).unwrap();
 
-        let counts = db.get_all_display_counts_under("/p").unwrap();
+        let counts = db.get_all_display_counts_under(&p("/p")).unwrap();
         assert_eq!(
             counts,
-            vec![("/p/a.jpg".to_string(), 2), ("/p/b.jpg".to_string(), 1)],
+            vec![(p("/p/a.jpg"), 2), (p("/p/b.jpg"), 1)],
             "パス昇順で全件返るはず"
         );
 

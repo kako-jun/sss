@@ -1,5 +1,9 @@
 name: Release Build
 
+# 注意: このワークフローは成果物にコード署名をしない。macOS Gatekeeper /
+# Windows SmartScreen の警告が初回起動時に出るため、回避手順のユーザー向け案内は
+# README に追記予定（#71）。
+
 on:
   workflow_dispatch:
     inputs:
@@ -8,8 +12,106 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    outputs:
+      changelog-anchor: ${{ steps.changelog.outputs.anchor }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate release preconditions
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error::リリースは main ブランチから実行してください（現在: $DISPATCH_REF）"
+            exit 1
+          fi
+
+          if ! [[ "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::version の形式が不正です（例: v1.0.0, v1.0.0-beta.1）: $INPUT_VERSION"
+            exit 1
+          fi
+
+          if git ls-remote --tags origin "refs/tags/$INPUT_VERSION" | grep -q .; then
+            echo "::error::タグ $INPUT_VERSION は既に存在します"
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Check version consistency
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          EXPECTED_VERSION="${INPUT_VERSION#v}"
+          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          CARGO_VERSION=$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          echo "input=$INPUT_VERSION (normalized: $EXPECTED_VERSION)"
+          echo "tauri.conf.json=$TAURI_VERSION Cargo.toml=$CARGO_VERSION package.json=$PACKAGE_VERSION"
+
+          if [ "$EXPECTED_VERSION" != "$TAURI_VERSION" ] || [ "$EXPECTED_VERSION" != "$CARGO_VERSION" ] || [ "$EXPECTED_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "::error::バージョン不一致: input=$INPUT_VERSION(=$EXPECTED_VERSION) tauri.conf.json=$TAURI_VERSION Cargo.toml=$CARGO_VERSION package.json=$PACKAGE_VERSION"
+            exit 1
+          fi
+
+      - name: Resolve CHANGELOG section anchor
+        id: changelog
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          EXPECTED_VERSION="${INPUT_VERSION#v}"
+          HEADING_LINE=$(grep -F -m1 "## [$EXPECTED_VERSION]" CHANGELOG.md || true)
+          if [ -z "$HEADING_LINE" ]; then
+            echo "::error::CHANGELOG.md に [$EXPECTED_VERSION] の節がありません。リリース前に CHANGELOG.md を更新してください。"
+            exit 1
+          fi
+          ANCHOR=$(node -e "
+            const heading = process.argv[1].replace(/^##\s*/, '');
+            const anchor = heading.toLowerCase().replace(/[.\[\]]/g, '').replace(/ /g, '-');
+            console.log(anchor);
+          " "$HEADING_LINE")
+          echo "anchor=$ANCHOR" >> "$GITHUB_OUTPUT"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test
+
   build:
+    needs: validate
     permissions:
       contents: write
     strategy:
@@ -25,10 +127,10 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
@@ -59,7 +161,7 @@ jobs:
         with:
           tagName: ${{ github.event.inputs.version }}
           releaseName: 'sss ${{ github.event.inputs.version }}'
-          releaseBody: 'See the CHANGELOG for details.'
+          releaseBody: 'See https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md#${{ needs.validate.outputs.changelog-anchor }} for details.'
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

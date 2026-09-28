@@ -72,7 +72,7 @@ pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
         Command::new("explorer")
             .args(["/select,", &image_path])
             .spawn()
-            .map_err(|e| format!("Failed to open explorer: {}", e))?;
+            .map_err(|e| format!("Failed to open explorer: {e}"))?;
     }
 
     #[cfg(target_os = "linux")]
@@ -103,7 +103,7 @@ pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
         Command::new("open")
             .args(["-R", &image_path])
             .spawn()
-            .map_err(|e| format!("Failed to open Finder: {}", e))?;
+            .map_err(|e| format!("Failed to open Finder: {e}"))?;
     }
 
     Ok(())

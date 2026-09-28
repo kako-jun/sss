@@ -335,7 +335,10 @@ fn scan_excludes_metachar_named_file_via_escaped_pattern() {
     write_file(&root, "dir [2020]/other.jpg", b"kept-sibling");
     write_file(&root, "normal.jpg", b"kept-normal");
 
-    let excluded_path = root.join("dir [2020]/photo[1].jpg");
+    // PR#83レビュー: 他の2件（@eaDir/secret.jpg）と同種の混在区切り文字を避けるため
+    // コンポーネントごとに`.join()`する（`globset`はWindowsで`\`/`/`を区切りとして
+    // 同一視して正規化するため、こちらは実害は無かったが構築方法を統一する）。
+    let excluded_path = root.join("dir [2020]").join("photo[1].jpg");
     let rule = IgnoreRule::glob(globset::escape(&excluded_path.to_string_lossy()));
 
     let scanner = ImageScanner::new();
@@ -433,7 +436,17 @@ fn incremental_scan_treats_newly_pruned_directory_as_unknown_not_deleted() {
         .scan_directory_incremental_with_progress(&root, previous, &prune_filter, |_, _| {})
         .expect("incremental scan with new prune rule");
 
-    let eadir_path = root.join("@eaDir/thumb.jpg").to_string_lossy().to_string();
+    // PR#83レビュー: `root.join("@eaDir/thumb.jpg")`（`/`区切りを埋め込んだ1つの文字列）
+    // だと、Windowsでは`root`側の`\`とリテラル埋め込みの`/`が混在した文字列になり、
+    // WalkDirが実際に生成する全区切り文字が`\`のパス文字列（`result.unknown_files`の
+    // 中身）と一致しなくなる（`Path::join`は引数を1コンポーネントとしてそのまま
+    // 連結するだけで、埋め込み済みの区切り文字を正規化しない）。コンポーネントごとに
+    // `.join()`すれば常にホストOSの区切り文字で組み立てられる。
+    let eadir_path = root
+        .join("@eaDir")
+        .join("thumb.jpg")
+        .to_string_lossy()
+        .to_string();
 
     assert!(
         !result.deleted_files.contains(&eadir_path),
@@ -541,7 +554,11 @@ fn incremental_scan_treats_actually_deleted_file_level_excluded_file_as_deleted_
 
     // secret.jpgをファイル単位のglobルール（ディレクトリ指定ではない）で除外し、
     // かつ実際にディスクから削除する。
-    let secret_path = root.join("keep/secret.jpg");
+    // PR#83レビュー: `root.join("keep/secret.jpg")`だと、Windowsでは`root`側の`\`と
+    // リテラル埋め込みの`/`が混在し、WalkDirが実際に生成する全区切り文字が`\`の
+    // パス文字列（`result.deleted_files`の中身）と一致しなくなる。コンポーネントごとに
+    // `.join()`する。
+    let secret_path = root.join("keep").join("secret.jpg");
     let secret_str = secret_path.to_string_lossy().to_string();
     let escaped = globset::escape(&secret_str);
     std::fs::remove_file(&secret_path).unwrap();
