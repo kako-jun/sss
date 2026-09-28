@@ -396,7 +396,7 @@ DBリセット・メモリ状態クリア・キャッシュクリアの中核ロ
 - フロントエンドは vitest（`src/lib/tauri.test.ts` / `src/components/Slideshow.test.tsx` 等）。`Slideshow.test.tsx` は `img`/`video` 要素が `crossOrigin`・`image-orientation` を明示指定しない（ブラウザ既定に委ねる）ことをピン留めする（過去に明示していた設計への回帰検知）。`ExcludeRulesSection.test.tsx` は撮影日バッジ表示と、不正なglob追加時のエラーメッセージ表示（#61レビュー S2）を検証する。
 - **実ブラウザ e2e**（`e2e/`、`npm run e2e`、#65レビュー）— vitest+jsdomでは `<img>`/`<video>` の実際の読み込み・再生（`play()`・`onload`）が発生しないため検出できなかった2件のmust不具合（M1: `AnimatePresence mode="wait"` の退場アニメーション完了待ちで新しい`<video>`への`play()`が一度も呼ばれない、M2: 1件プレイリストで同じpathが連続するとDOM要素が使い回されて`onLoad`/`onEnded`が再発火しない）を、playwright-core（devDependency、ブラウザ本体は同梱せず`channel`指定でシステムのChrome/Edgeを使う）で実際に再現・固定する。`e2e/init.js`が`window.__TAURI_INTERNALS__`を薄くモックし、Tauriランタイム無しで`vite dev`単体から`App.tsx`を実ブラウザで動かす。可視判定は実ブラウザの`getComputedStyle`で行う（CLAUDE.md絶対ルール1）。CIには組み込まない（システムへのブラウザインストールが要るローカル専用ツール）。詳細・実行方法は`e2e/README.md`参照。
 
-CI（`.github/workflows/ci.yml`）が push/PR で `cargo fmt --check` / `clippy -- -D warnings` / `cargo test` / フロント vitest を回す。`e2e/`はCI対象外。
+CI（`.github/workflows/ci.yml`）が push/PR で2ジョブ実行する。`check`（ubuntu-22.04）は `npm run lint` / `npm run format:check` / `npm run build` / フロント vitest / `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test`。`cross-platform`（windows-latest / macos-latest）は `cargo clippy --all-targets -- -D warnings` / `cargo test` を実行し、`#[cfg(windows)]`/`#[cfg(target_os = "macos")]` 配下のコードと `asset_scope.rs` の実機限定テストを実際にコンパイル・実行する（#63 で発覚した Windows 固有バグが ubuntu 単独の CI では検出できなかったことの反省）。Rust 依存関係の脆弱性検査は `.github/workflows/audit.yml` に分離し、`Cargo.toml`/`Cargo.lock` 変更時と週次 schedule でのみ実行する。`e2e/`はCI対象外。CI/CD 全体の詳細（ジョブ構成・release.yml のバリデーション・リリース手順）は CLAUDE.md の「CI/CD」節を正本とする。
 
 ---
 
