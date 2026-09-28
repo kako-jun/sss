@@ -25,11 +25,11 @@ describe('LanguageSection (#80)', () => {
 
   it('shows all three options and highlights "auto" as selected by default', () => {
     render(<LanguageSection />);
-    expect(screen.getByText('自動（OSの設定に従う）')).toBeTruthy();
+    expect(screen.getByText('自動（システム）')).toBeTruthy();
     expect(screen.getByText('日本語')).toBeTruthy();
     expect(screen.getByText('English')).toBeTruthy();
 
-    const autoButton = screen.getByText('自動（OSの設定に従う）').closest('button')!;
+    const autoButton = screen.getByText('自動（システム）').closest('button')!;
     expect(autoButton.className).toContain('bg-white/15');
   });
 

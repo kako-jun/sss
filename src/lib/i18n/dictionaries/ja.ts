@@ -159,7 +159,8 @@ export const ja = {
 
   // === 言語設定 ===
   languageLabel: '言語',
-  languageAuto: '自動（OSの設定に従う）',
+  // #82レビュー2巡目nit: en側の'Auto (system)'と長さ・トーンを揃えて短縮。
+  languageAuto: '自動（システム）',
   languageJa: '日本語',
   languageEn: 'English',
 } as const;
