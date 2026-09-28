@@ -93,48 +93,85 @@ Inter is loaded offline (WOFF2, OFL licensed). No Google Fonts dependency.
 
 ## 4. Component Stylings
 
+### Buttons — Primary (#66)
+
+The one main action on a screen (Scan, Add exclude pattern, Select Folder on the
+welcome screen). A filled white button is still monochrome — it's white at high
+opacity as a background, black text — and reads as "this is the button to press"
+without introducing hue:
+
+```
+bg-white/90 hover:bg-white
+text-black font-medium
+disabled:bg-white/10 disabled:text-white/30 disabled:cursor-not-allowed
+rounded-lg
+transition-colors text-sm
+```
+
+There is at most one primary button per view. Everything else is Standard or Ghost.
+
 ### Buttons — Standard
 
 ```
 bg-white/8 hover:bg-white/15
 text-white/60 hover:text-white/80
-border border-white/8
-rounded
+rounded-lg
 transition-colors text-sm
 ```
+
+Borders are optional here now (#66) — prefer the background contrast alone against
+`bg-neutral-950`/`bg-black` panels. Add `border border-white/8` only where the
+button sits directly on bare black with no panel behind it.
 
 ### Buttons — Disabled
 
 ```
 bg-black/20
-disabled:text-white/20 disabled:border-white/5
+disabled:text-white/20
 disabled:opacity-30 disabled:cursor-not-allowed
 ```
 
-### Buttons — Icon
+### Buttons — Icon (#66)
+
+Interactive icon buttons (playback controls, top-right chrome, overlay actions)
+need to read clearly at a glance, not just on hover — the pre-#66 default
+(`text-white/20` to `/30`) was too faint to be usable without hovering first:
 
 ```
-text-white/30 hover:text-white/60
-hover:bg-white/5
-p-2 rounded
+text-white/60 hover:text-white/90
+hover:bg-white/10 focus-visible:text-white/90
+p-2 rounded-lg (or rounded-full inside a pill container)
 ```
+
+Reserve the older faint treatment (`text-white/20` to `/30`) for genuinely passive/
+decorative glyphs that aren't standalone interactive targets (e.g. the small
+in-thumbnail map pin icon, which sits on its own clickable thumbnail).
 
 ### Buttons — Ghost
 
+Secondary actions next to a Primary button (e.g. "Select Folder" next to "Scan"):
+
 ```
-text-white/20 hover:text-white/50
-(no background)
+text-white/50 hover:text-white/80
+hover:bg-white/8
+rounded-lg
+(no background at rest)
 ```
 
 ### Input Fields
 
 ```
 bg-black/40 text-white/60
-rounded border border-white/8
+rounded-lg border border-white/8
 focus:outline-none focus:border-white/20
 px-3 py-2 text-sm
 placeholder: text-white/30
 ```
+
+Read-only fields that display a filesystem path (scan folder, pick destination)
+add `truncate` and `title={value}` (#66) — a path is often longer than the field,
+and an `<input>` clips it without an ellipsis or a way to read the rest unless
+both are set explicitly.
 
 ### Range Sliders
 
@@ -149,20 +186,107 @@ w-4 h-4 rounded border-white/20
 bg-white/5 accent-white/50
 ```
 
-### Panels & Cards
+### Panels & Cards (#66: background over border)
+
+Prefer letting the background contrast do the grouping instead of drawing a
+border around every list row, result box, or subsection — a modal already has an
+edge (its own border/shadow); repeating thin borders on everything inside it
+adds visual noise without adding information. Drop the border where the
+background already differs from its parent (a `bg-black/40` row inside a
+`bg-neutral-950` modal is legible on its own).
 
 ```
-Standard:  bg-black/40 rounded border border-white/8
-Info:      bg-black/30 rounded border border-white/5
-Dark:      bg-black/80 rounded border border-white/8
-Modal:     bg-neutral-950 rounded-xl border border-white/8 shadow-2xl
+Standard:  bg-black/40 rounded-lg
+Info:      bg-black/20 rounded-lg
+Dark:      bg-black/80 rounded-lg
+Modal:     bg-neutral-950 rounded-2xl border border-white/10 shadow-2xl
 ```
+
+Keep a border only when there's no background difference to rely on (an input
+field on bare black, a thumbnail image that needs a defined edge) — see Input
+Fields below.
+
+### Settings Section Rhythm (#66)
+
+Every settings tab is a vertical stack of sections (`space-y-8` between them).
+Each section itself follows the same three-part rhythm:
+
+```
+<div>
+  <h3 className="text-sm font-medium text-white/70">{heading}</h3>
+  <p className="text-xs text-white/40 mt-1">{description}</p>  {/* optional */}
+</div>
+<div className="mt-4">{control(s)}</div>          {/* via the outer space-y-4 */}
+```
+
+The description is optional but preferred wherever the heading alone doesn't
+make the control's effect obvious (e.g. "Display Interval" needs "5–60s, before
+switching to the next photo" — "EXIF rotation" checkbox label is already
+self-explanatory and doesn't need one). Headings dropped the earlier
+`uppercase tracking-wider text-white/50` treatment (#66) — plain sentence case
+at `text-white/70` reads calmer and matches the rest of the type scale better.
+
+### Settings Navigation: underline tabs, not a sidebar (#66)
+
+Considered switching the 7 settings tabs to a left sidebar for a more "modern
+app" feel, but kept the underline tab row and refined it instead (brighter
+`border-b-2` indicator, `font-medium` on the active tab, transparent
+placeholder border on inactive tabs so nothing shifts on selection). Reasons:
+
+- The modal is `max-w-2xl` (672px). A sidebar wide enough for the longest label
+  ("Exclude Rules"/"除外ルール") would eat roughly a quarter of that, which is
+  a much bigger cost at 720px window width than at 1280px — exactly the width
+  #66 had to verify against.
+- The underline row already has an e2e-verified, working solution for narrow
+  widths (`overflow-x-auto`, `flex-shrink-0`, `whitespace-nowrap` — #82): it
+  wraps to horizontal scroll instead of breaking, and was confirmed not to
+  regress at 720px before this pass even started.
+- A sidebar redesign touches the tablist/tabpanel ARIA wiring, the focus trap's
+  tab order, and every e2e selector keyed on `.overflow-x-auto` — a much larger
+  surface of risk for a lateral (not clearly better) navigation pattern change.
+
+### Icon Pill Group (#66)
+
+Small clusters of icon-only buttons that used to be individual bordered squares
+(the top-right window chrome: shortcuts / window mode / settings / exit) are one
+pill-shaped glass container instead. Buttons inside have no border or background
+of their own at rest — only the pill does:
+
+```
+Container: flex items-center gap-0.5 bg-black/50 backdrop-blur-md
+           rounded-full border border-white/10 p-1 shadow-2xl
+Button:    p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10
+```
+
+### Floating Control Bar (#66)
+
+The bottom overlay is a single compact bar that floats above the photo, not a
+full-width two-row grid. It fades with the same idle rule as before. Layout is
+three flex clusters — info (truncating, `flex-1 min-w-0`) · primary transport
+controls (fixed) · secondary actions (fixed):
+
+```
+Container: fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-xl
+Bar:       flex items-center gap-1 bg-black/50 backdrop-blur-md
+           rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl
+```
+
+Only show what's actually there — no "No location" / "No date" placeholder
+boxes (#66). The GPS thumbnail renders only when the photo has coordinates; the
+date only when EXIF has one. File size, display count, and last-displayed time
+move from always-visible text into the filename's `title` tooltip — still one
+hover away, but not competing for space in the compact bar with the things that
+are always present (filename, position).
+
+Progress no longer lives inside the bar. It's an independent full-width hairline
+at the very bottom edge of the screen (`fixed bottom-0 left-0 right-0 h-0.5`),
+so it always spans the whole photo regardless of the bar's own max-width.
 
 ### Submenus/Dropdowns
 
 ```
-bg-black/90 rounded shadow-xl border border-white/8
-p-2 space-y-1 backdrop-blur-sm
+bg-black/90 rounded-xl shadow-2xl border border-white/10
+p-1.5 space-y-0.5 backdrop-blur-md
 ```
 
 ### Hover-reveal Controls (#66)
@@ -198,25 +322,34 @@ non-text contrast requires 3:1). An earlier 0.15-opacity ring failed this test.
 
 ### Spacing Scale
 
-| Token           | Value         |
-| --------------- | ------------- |
-| Icon button pad | `p-1` (4px)   |
-| Close button    | `p-1.5` (6px) |
-| Cell content    | `p-2` (8px)   |
-| Form inputs     | `p-3` (12px)  |
-| Panel content   | `p-4` (16px)  |
-| Modal padding   | `p-7` (28px)  |
+| Token             | Value         |
+| ----------------- | ------------- |
+| Icon pill pad     | `p-1` (4px)   |
+| Icon button pad   | `p-2` (8px)   |
+| Close button      | `p-1.5` (6px) |
+| Cell content      | `p-2` (8px)   |
+| Form inputs       | `p-3` (12px)  |
+| Panel content     | `p-4` (16px)  |
+| Modal padding     | `p-7` (28px)  |
+| Heading → desc    | `mt-1` (4px)  |
+| Desc → control    | `mt-4` (16px) |
+| Section → section | `space-y-8`   |
 
-### Grid
+### Floating Bar Layout (#66)
 
-- Bottom info overlay: `grid grid-cols-4 gap-px`
-- Bottom controls: `grid grid-cols-5 gap-px`
-- `gap-px` = 1px borders between cells
+The bottom overlay and the top-right chrome are both flex-based pill/bar
+containers now, not CSS grids with hairline dividers between cells. See
+"Floating Control Bar" and "Icon Pill Group" above for the exact classes —
+there's no separate grid system to document.
 
 ### Key Dimensions
 
-- Modal: `max-w-2xl w-full mx-8`
-- Icon sizes: `w-4 h-4` (16px), `w-5 h-5` (20px)
+- Modal: `max-w-2xl w-full mx-8`, `max-h-[80vh]` (content area `min-h-[260px]`,
+  #66 — shrinks to fit short tabs, scrolls past 80vh instead of always
+  reserving half the screen)
+- Floating control bar: `w-[calc(100%-2rem)] max-w-xl` (#66)
+- Icon sizes: `w-4 h-4` (16px) standard, `w-5 h-5` (20px) for the center
+  play/pause emphasis
 
 ## 6. Depth & Elevation
 
@@ -229,17 +362,25 @@ non-text contrast requires 3:1). An earlier 0.15-opacity ring failed this test.
 
 Minimal. Glassmorphism relies on blur, not shadows.
 
-- `shadow-xl` — submenus
-- `shadow-2xl` — modal
+- `shadow-2xl` — submenus, modal, floating control bar, icon pill group (#66)
 - `drop-shadow-lg` — map icon hover
-- Cards/panels: none (border only)
+- Cards/panels: none (background contrast only, #66 — see "Panels & Cards")
 
-### Border Radius
+### Border Radius (#66)
 
-| Context  | Radius              |
-| -------- | ------------------- |
-| Standard | `rounded` (4px)     |
-| Modal    | `rounded-xl` (12px) |
+| Context                         | Radius               |
+| ------------------------------- | -------------------- |
+| Small tags/badges               | `rounded` (4px)      |
+| Buttons, inputs, cards          | `rounded-lg` (8px)   |
+| Floating control bar, dropdowns | `rounded-2xl` (16px) |
+| Modal, notice cards             | `rounded-2xl` (16px) |
+| Icon pill groups, status pills  | `rounded-full`       |
+
+Everything that is a clickable control or a data container uses `rounded-lg`;
+everything that is a floating/glass surface (bars, dropdowns, modals, pills)
+uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
+`rounded` (4px) survives only for tiny inline badges (the date-rule tag, the
+`?`/`Esc` key badges).
 
 ### Scrollbar
 
@@ -253,21 +394,34 @@ Minimal. Glassmorphism relies on blur, not shadows.
 ### Do
 
 - Use only black/white at varying opacity. The monochrome constraint is absolute
+  (a solid white-fill Primary button is still black/white — it's opacity as a
+  _background_ rather than as _text_, not a new hue)
 - Apply `backdrop-blur-md` to all panels overlaying photo content
-- Use `font-mono` for all numerical data, file paths, and timestamps
-- Keep borders thin (`border-white/8` or `/10`)
+- Use `font-mono` for numerical data, file paths, and timestamps that remain
+  visible in the UI (#66: several of these moved into `title` tooltips instead
+  of being always-visible — see "Floating Control Bar")
+- Prefer a background-contrast difference over a border for grouping (#66 —
+  see "Panels & Cards"). Keep borders for floating surfaces (modals, dropdowns,
+  the control bar, input fields) and genuinely bare-black elements
 - Use `transition-colors` for hover states
-- Make icons faint by default (`text-white/20` to `/40`) and brighten on hover
+- Make _interactive_ icons legible by default (`text-white/60`, hover `/90`,
+  #66) — only genuinely passive/decorative glyphs stay faint (`/20`–`/30`)
+- Only ever have one Primary (white-fill) button per screen; everything else is
+  Standard or Ghost
+- Only show information that's actually present — no "No date" / "No location"
+  placeholder boxes for absent EXIF data (#66)
 - Set `pointer-events: none` on idle UI (`opacity: 0` when idle)
 
 ### Don't
 
-- Add colorful accent colors. Red-400/80 is only for errors
+- Add colorful accent colors. Red-400/80 is only for errors/destructive actions
 - Use thick borders or strong box-shadows
 - Create large, dramatic buttons or hover effects
 - Add a light theme
 - Import custom fonts beyond Inter
 - Use opacity values outside standard increments (/5, /8, /10, /15, /20, /25, /30, etc.)
+- Reach for `rounded` (4px) on anything but a tiny inline badge — buttons/cards
+  are `rounded-lg`, floating surfaces are `rounded-2xl`/`rounded-full` (#66)
 
 ### Transitions
 
@@ -314,12 +468,20 @@ Error only:   text-red-400/80
 
 ### When generating UI for this project
 
-- Pure monochrome. Black background, white text at opacity. Zero hue
+- Pure monochrome. Black background, white text/fills at opacity. Zero hue
 - Glassmorphism via `backdrop-blur-md` on overlays. This is the primary depth cue
-- UI must be invisible when idle. Photo content is always the star
-- Inter font only, loaded offline. `font-mono` for data
-- Icons from Lucide React, small (14-18px), faint (`text-white/20` to `/40`)
-- Rounded corners are minimal: `rounded` (4px) standard, `rounded-xl` (12px) for modals
+- UI must be invisible when idle (including the cursor and the top-right chrome
+  pill, #66). Photo content is always the star
+- Inter font only, loaded offline. `font-mono` for data that stays on-screen
+- Icons from Lucide React, small (14-20px). Interactive icons default to
+  `text-white/60` (hover `/90`, #66) — legible without hovering first. Only
+  passive/decorative glyphs stay faint (`/20`–`/30`)
+- Two radius families (#66): `rounded-lg` (8px) for buttons/inputs/cards,
+  `rounded-2xl`/`rounded-full` for floating surfaces (bars, modals, pills,
+  dropdowns). `rounded` (4px) survives only for tiny inline badges
+- Prefer background-contrast over borders for grouping list rows/cards (#66)
+- One Primary (white-fill) button per screen at most; the rest are Standard/Ghost
+- Don't render a placeholder for information that isn't there (#66)
 - No gradients, no colored accents, no decorative elements
 - Framer Motion for image transitions (500ms easeInOut)
 - `transition-colors` for hover states (300ms)

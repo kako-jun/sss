@@ -97,12 +97,13 @@ A legacy `.sssignore` file (gitignore-style, in your home directory: Windows `%U
 
 ## Overlay UI info
 
-Shown when you move the mouse:
+Shown in the rounded bar that floats at the bottom center when you move the mouse
+(#66: nothing is shown for information that isn't there):
 
-- 🗺️ Location (a map thumbnail when GPS data is available, click to open Google Maps; "No location" otherwise)
-- 📅 Date taken (from EXIF, images only)
-- 📁 File name and file size (hover for the full path as a tooltip)
-- 📊 Playlist position (e.g. 1,234 / 100,000) and display count
+- 🗺️ Location (a small map thumbnail, only when the photo has GPS data; click to open Google Maps)
+- 📅 Date taken (only when EXIF has one)
+- 📁 File name and playlist position (e.g. 1,234 / 100,000)
+- File size, display count, and last-shown time are one hover away, in the filename's tooltip
 
 Per-photo display counts and last-shown times are available in Settings → History and Settings → Stats.
 
