@@ -150,11 +150,12 @@ sss は、10万枚規模の写真・動画コレクションを **完全平等�
 
 ### settings（設定）
 
-| コマンド                  | 役割                                                                                                                                                                                                 |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `save_setting`            | キー/値で設定を保存する。副作用: `share_directory_path` の場合、解決先を `sanitize_allow_dir` で検証後 asset scope へ即時許可。#63で非同期コマンド化（DBロック待ちでメインスレッドをブロックしない） |
-| `get_setting`             | キーで設定値を取得する。#63で非同期コマンド化                                                                                                                                                        |
-| `get_last_directory_path` | 前回スキャンしたディレクトリパスを返す                                                                                                                                                               |
+| コマンド                  | 役割                                                                                                                                                                                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `save_setting`            | キー/値で設定を保存する。副作用: `share_directory_path` の場合、解決先を `sanitize_allow_dir` で検証後 asset scope へ即時許可。#63で非同期コマンド化（DBロック待ちでメインスレッドをブロックしない）                                        |
+| `get_setting`             | キーで設定値を取得する。#63で非同期コマンド化                                                                                                                                                                                               |
+| `get_last_directory_path` | 前回スキャンしたディレクトリパスを返す                                                                                                                                                                                                      |
+| `get_os_locale`           | OSのロケール（例: `"ja-JP"`）を`sys-locale`クレート経由で返す。capability不要の素の`#[tauri::command]`（`tauri-plugin-os`は使わない）。`app_settings.language`が`auto`かどうかによらず、起動時に毎回`initLocale`から呼ばれる。詳細は §6-(g) |
 
 ### system（システム）
 
@@ -377,6 +378,40 @@ DBリセット・メモリ状態クリア・キャッシュクリアの中核ロ
   に「直近に `increment_display_count` を実際に呼んだパス」を保持し、
   `undo_display_count` はこれと `path` が一致した時だけ1回減らして即座にクリアする
   （同じ `onError` が2回届いても2回目は不一致で無視される）よう修正した。
+
+### (g) 表示言語（`auto`）はOSロケールを優先して解決する（#80/#82）
+
+`app_settings.language`（`'ja'|'en'|'auto'`）が`auto`の時、実際に表示する言語
+（`'ja'|'en'`）を決めるロジック。フロントは `src/lib/i18n/store.ts` の
+`initLocale()`/`resolveLocale()` が管理する。
+
+- **OSロケールを`navigator.language`より優先する**: macOSのWKWebViewは
+  `CFBundleLocalizations`（Info.plist）にアプリの対応言語として明示していない
+  ロケールだと、`navigator.language`が実際のOS設定に関わらず`en-US`固定になる
+  既知の制約がある。これを避けるため、バックエンドの`get_os_locale`コマンド
+  （`src-tauri/src/commands/settings.rs`、`sys-locale`クレート）でOS本来の
+  ロケールを取得し、取得できた場合はこちらを使う。取得できない（`None`/
+  例外）場合だけ`navigator.language`にフォールバックする。
+- **`tauri-plugin-os`は使わない**: プラグイン全体を追加するとcapability許可
+  （`os:allow-locale`）が増える。素の`#[tauri::command]`（capability不要）+
+  `sys-locale`クレートで最小限に実装した。
+- **`initLocale`は保存値にかかわらず毎回`get_os_locale`を呼ぶ**
+  （`cachedOsLocale`に結果をキャッシュする）。以前は保存値が`auto`の時だけ
+  呼んでいたが、`ja`/`en`を明示保存している間はキャッシュが空のままになり、
+  後から設定画面で「自動」に切り替えた直後は`navigator.language`ベースの
+  解決にしかならず、OSロケールへ切り替えるにはアプリの再起動が要った
+  （#82レビュー2巡目 should2）。常に取得しておくことで、`auto`への切替直後
+  から再起動なしでOSロケールが反映される。
+- **`initLocale`は`getSetting`/`getOsLocale`のどちらが失敗（reject）しても
+  内部で吸収し必ずresolveする**（#82レビュー must）。`App.tsx`はこの
+  `.then()`の中で起動シーケンス本体を走らせているため、ここでrejectすると
+  起動画面のまま永久に止まる。
+- **ロケールタグの正規化**（`normalizeLocaleTag`、`/^ja([-_.@]|$)/i`）:
+  `navigator.language`（`ja-JP`のような`-`区切り）と`get_os_locale`の返り値
+  （`ja_JP.UTF-8`のような`_`区切り、`ja@euro`のようなmodifier付き、`C`のような
+  ロケール未設定を表す値等）の両方を同じ基準で判定する。「`ja`で始まる」の
+  単純な前方一致だと、ジャマイカ・クレオール英語のISO 639-3コード`jam`まで
+  日本語と誤判定するため、直後が区切り文字か文字列終端であることも要求する。
 
 ## 7. テスト
 

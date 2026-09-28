@@ -77,9 +77,10 @@ pub async fn get_last_directory_path(state: State<'_, AppState>) -> Result<Optio
 /// `navigator.language` はWebViewの実装依存で、macOSのWKWebViewは
 /// `CFBundleLocalizations`（Info.plist）にアプリが対応言語として明示していない
 /// ロケールだと実際のOS設定に関わらず`en-US`固定になる既知の制約がある
-/// （詳細は `docs/architecture.md` の国際化節）。そのため `app_settings.language`
-/// が `auto` の場合、フロントはこのコマンドの結果を優先し、取得できない場合
-/// （`None`）だけ `navigator.language` にフォールバックする。
+/// （詳細は `docs/architecture.md` 6-(g)「表示言語（auto）はOSロケールを優先して
+/// 解決する」）。フロントはこのコマンドの結果を優先し、取得できない場合
+/// （`None`）だけ `navigator.language` にフォールバックする（保存値が `auto`
+/// かどうかによらず、`initLocale` は起動時に毎回このコマンドを呼ぶ）。
 ///
 /// `tauri-plugin-os` を丸ごと追加するとcapability許可（`os:allow-locale`）が
 /// 増えるため、素の `#[tauri::command]`（capability不要）+ `sys-locale`

@@ -125,13 +125,15 @@ export async function getSetting(key: string): Promise<string | null> {
 }
 
 /**
- * OSのロケール（例: "ja-JP"）を取得する（#82 should3）。
+ * OSのロケール（例: "ja-JP"）を取得する（#82 should3。詳細は
+ * `docs/architecture.md` 6-(g)「表示言語（auto）はOSロケールを優先して解決する」）。
  *
  * `navigator.language` はWebViewの実装依存で、macOSのWKWebViewは
  * `CFBundleLocalizations` にアプリの対応言語として明示していないロケールだと
- * 実際のOS設定に関わらず `en-US` 固定になる既知の制約がある。`app_settings.language`
- * が `auto` の場合、`initLocale`（`src/lib/i18n/store.ts`）はこちらを優先し、
- * 取得できない場合（`null`）だけ `navigator.language` にフォールバックする。
+ * 実際のOS設定に関わらず `en-US` 固定になる既知の制約がある。`initLocale`
+ * （`src/lib/i18n/store.ts`）は保存値が `auto` かどうかによらず起動時に毎回
+ * こちらを優先して呼び、取得できない場合（`null`）だけ `navigator.language`
+ * にフォールバックする（#82レビュー2巡目 should2）。
  */
 export async function getOsLocale(): Promise<string | null> {
   return await invoke<string | null>('get_os_locale');
