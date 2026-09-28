@@ -14,6 +14,7 @@
     "tauri:build": "tauri build",
     "test": "vitest run",
     "e2e": "node e2e/run.js",
+    "screenshots": "node e2e/screenshots.js",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",

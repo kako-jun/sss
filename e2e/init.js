@@ -128,6 +128,20 @@
           return ++cb;
         case 'plugin:window|is_fullscreen':
           return true;
+        // #66: 設定モーダルの各タブ（除外ルール/ピック/履歴/統計グラフ/共有先）を
+        // e2e/screenshots.jsで開くと、これらのコマンドが未定義のままdefault(null)を
+        // 返し、配列/オブジェクトを期待するコンポーネント側がnullで例外を投げて
+        // Reactツリーごとクラッシュしていた（エラーバウンダリが無いため白画面化）。
+        // 各タブが単独で開けることを確認するため、空の既定値を返す。
+        case 'get_ignore_patterns':
+        case 'get_picked_images':
+        case 'get_recent_images':
+        case 'get_display_stats':
+          return [];
+        case 'get_stats':
+          return { totalImages: (seqs[sc] || seqs.slides).length, displayedImages: 0 };
+        case 'get_default_share_directory':
+          return '/tmp/sss-picked';
         default:
           return null;
       }

@@ -162,6 +162,17 @@ async function countCalls(page, cmd) {
   return page.evaluate((c) => window.__e2eLog.filter((l) => l[1] === c).length, cmd);
 }
 
+/** 設定ボタン（lucideのgearアイコン、ロケール非依存）をクリックして開く。#66用。 */
+async function openSettingsModal(page) {
+  await page.evaluate(() => {
+    const icon = document.querySelector('svg.lucide-settings');
+    const btn = icon && icon.closest('button');
+    if (!btn) throw new Error('設定ボタンが見つからない');
+    btn.click();
+  });
+  await page.waitForTimeout(350);
+}
+
 const scenarios = [
   {
     // #65レビューM1(must): 画像→動画→動画→画像と回すあいだ、動画が
@@ -552,6 +563,231 @@ const scenarios = [
     locale: 'en-US',
     async run(page) {
       return measureSettingsTabRowAtWidths(page);
+    },
+  },
+  {
+    // #66 問題1: 設定を開いている間のESCはモーダルを閉じるだけで、exit_appは
+    // 呼ばない（以前はフェーズに関わらず常にexit_appを呼んでいた）。
+    name: 'Escape closes the Settings modal instead of exiting the app while it is open (#66 問題1)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+      const tabRowVisibleBefore = await page.evaluate(
+        () => !!document.querySelector('.overflow-x-auto'),
+      );
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      const tabRowVisibleAfter = await page.evaluate(
+        () => !!document.querySelector('.overflow-x-auto'),
+      );
+      const exitCalls = await countCalls(page, 'exit_app');
+      const pass = tabRowVisibleBefore && !tabRowVisibleAfter && exitCalls === 0;
+      return {
+        pass,
+        detail: `tabRowVisibleBefore=${tabRowVisibleBefore} tabRowVisibleAfter=${tabRowVisibleAfter} exitCalls=${exitCalls}`,
+      };
+    },
+  },
+  {
+    name: 'Escape calls exit_app when nothing (Settings/Shortcuts) is open (#66 問題1)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(200);
+      const exitCalls = await countCalls(page, 'exit_app');
+      return { pass: exitCalls === 1, detail: `exitCalls=${exitCalls}` };
+    },
+  },
+  {
+    // #66 問題2: 旧実装はホバーで自動一時停止する`isPlaying`をアイコンにそのまま
+    // 使っていたため、ボタンが見える間(=マウスがオーバーレイ上)は常に▶固定に
+    // 見えていた。Space操作後、実ブラウザで▶/⏸ツールチップが正しく切り替わる
+    // ことを確認する。
+    name: 'Space toggles the pause/play icon+tooltip in the overlay (#66 問題2・4)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(1000);
+      // ⏸/▶ボタンはtitle属性でしか文言を持たない(SVGアイコンのみ)ため、
+      // isVisible()（可視のテキストノード検索）ではなくDOM属性で直接判定する。
+      const initiallyPlaying = await page.evaluate(
+        () => !!document.querySelector('button[title="一時停止"]'),
+      );
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(200);
+      const nowPaused = await page.evaluate(() => !!document.querySelector('button[title="再生"]'));
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(200);
+      const backToPlaying = await page.evaluate(
+        () => !!document.querySelector('button[title="一時停止"]'),
+      );
+      const pass = initiallyPlaying && nowPaused && backToPlaying;
+      return {
+        pass,
+        detail: `initiallyPlaying=${initiallyPlaying} nowPaused=${nowPaused} backToPlaying=${backToPlaying}`,
+      };
+    },
+  },
+  {
+    name: 'F toggles fullscreen via setFullscreen/setDecorations IPC calls (#66 問題4)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      const before = await countCalls(page, 'plugin:window|set_fullscreen');
+      await page.keyboard.press('f');
+      await page.waitForTimeout(300);
+      const after = await countCalls(page, 'plugin:window|set_fullscreen');
+      const decorationCalls = await countCalls(page, 'plugin:window|set_decorations');
+      const pass = after === before + 1 && decorationCalls >= 1;
+      return {
+        pass,
+        detail: `set_fullscreen before=${before} after=${after} set_decorations=${decorationCalls}`,
+      };
+    },
+  },
+  {
+    // #66 問題4: `?`でショートカット一覧を開閉できる。Escapeで閉じる時はアプリを
+    // 終了しない。
+    name: '? opens the shortcuts overlay; Escape closes it without exiting (#66 問題4)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await page.keyboard.press('?');
+      await page.waitForTimeout(300);
+      const shownAfterOpen = await isVisible(page, 'キーボードショートカット');
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      const shownAfterClose = await isVisible(page, 'キーボードショートカット');
+      const exitCalls = await countCalls(page, 'exit_app');
+      const pass = shownAfterOpen && !shownAfterClose && exitCalls === 0;
+      return {
+        pass,
+        detail: `shownAfterOpen=${shownAfterOpen} shownAfterClose=${shownAfterClose} exitCalls=${exitCalls}`,
+      };
+    },
+  },
+  {
+    // #66 問題3・10: idle（3秒間マウス非操作）でカーソルと右上の常設ボタン列の
+    // 両方が消え、マウスを動かすと両方復帰することを実ブラウザのcomputed style
+    // で確認する（CLAUDE.md絶対ルール1）。
+    name: 'idle hides the cursor and the top-right button row; moving the mouse restores both (#66 問題3・10)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(1000); // 最初の画像表示を待つ（idleは初期状態でtrueのまま）
+      await page.waitForTimeout(2500); // 合計3.5秒超、マウスは一度も動かさない
+      const idleState = await page.evaluate(() => {
+        const root = document.querySelector('.w-screen.h-screen.bg-black');
+        const btnRow = [...document.querySelectorAll('div')].find(
+          (el) => el.querySelector('svg.lucide-settings') && el.className.includes('fixed'),
+        );
+        return {
+          cursor: root ? getComputedStyle(root).cursor : null,
+          buttonRowOpacity: btnRow ? Number(getComputedStyle(btnRow).opacity) : null,
+        };
+      });
+      await page.mouse.move(300, 300);
+      await page.mouse.move(320, 320);
+      await page.waitForTimeout(300);
+      const activeState = await page.evaluate(() => {
+        const root = document.querySelector('.w-screen.h-screen.bg-black');
+        const btnRow = [...document.querySelectorAll('div')].find(
+          (el) => el.querySelector('svg.lucide-settings') && el.className.includes('fixed'),
+        );
+        return {
+          cursor: root ? getComputedStyle(root).cursor : null,
+          buttonRowOpacity: btnRow ? Number(getComputedStyle(btnRow).opacity) : null,
+        };
+      });
+      const pass =
+        idleState.cursor === 'none' &&
+        idleState.buttonRowOpacity === 0 &&
+        activeState.cursor !== 'none' &&
+        activeState.buttonRowOpacity === 1;
+      return {
+        pass,
+        detail: `idle=${JSON.stringify(idleState)} active=${JSON.stringify(activeState)}`,
+      };
+    },
+  },
+  {
+    // #66 問題9(a11y): 設定モーダルにrole=dialog/aria-modal、タブにrole=tab/
+    // aria-selectedが付いていることを実ブラウザのDOMで確認する。
+    name: 'Settings modal exposes role=dialog/aria-modal and tabs expose role=tab/aria-selected (#66 a11y)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+      const result = await page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        const tabs = [...document.querySelectorAll('[role="tab"]')];
+        const selected = tabs.filter((t) => t.getAttribute('aria-selected') === 'true');
+        return {
+          hasDialog: !!dialog,
+          ariaModal: dialog ? dialog.getAttribute('aria-modal') : null,
+          tabCount: tabs.length,
+          selectedCount: selected.length,
+        };
+      });
+      const pass =
+        result.hasDialog &&
+        result.ariaModal === 'true' &&
+        result.tabCount === 7 &&
+        result.selectedCount === 1;
+      return { pass, detail: JSON.stringify(result) };
+    },
+  },
+  {
+    // #66 問題9(a11y): モーダル内でTabを繰り返し押しても、フォーカスがモーダルの
+    // 外（背後のオーバーレイ等）へ漏れない（フォーカストラップ）。
+    name: 'Settings modal traps Tab focus inside the dialog (#66 a11y)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+      for (let i = 0; i < 12; i++) {
+        await page.keyboard.press('Tab');
+      }
+      const stillInside = await page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        return !!dialog && dialog.contains(document.activeElement);
+      });
+      return { pass: stillInside, detail: `stillInside=${stillInside}` };
+    },
+  },
+  {
+    // #66 問題9(#61レビュー由来): 除外ルールの解除ボタンがhoverのみで表示され、
+    // キーボード/タッチで見えなかった。既定でも薄く(opacity>0)見えることを確認する。
+    name: 'Exclude rule remove button is visible (opacity>0) without hovering (#66 問題9)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const tabs = [...document.querySelectorAll('[role="tab"], .overflow-x-auto > button')];
+        const excludeTab = tabs.find((b) => b.textContent.includes('除外ルール'));
+        if (!excludeTab) throw new Error('除外ルールタブが見つからない');
+        excludeTab.click();
+      });
+      await page.waitForTimeout(200);
+      await page.fill('input[placeholder*="パターン"]', '*.e2etest');
+      await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find((b) =>
+          b.textContent.includes('追加'),
+        );
+        if (!btn) throw new Error('追加ボタンが見つからない');
+        btn.click();
+      });
+      await page.waitForTimeout(300);
+      const opacity = await page.evaluate(() => {
+        const row = [...document.querySelectorAll('span')].find((s) =>
+          s.textContent.includes('*.e2etest'),
+        );
+        const removeBtn = row ? row.closest('div').parentElement.querySelector('button') : null;
+        return removeBtn ? Number(getComputedStyle(removeBtn).opacity) : null;
+      });
+      const pass = opacity !== null && opacity > 0;
+      return { pass, detail: `opacity=${opacity}` };
     },
   },
 ];
