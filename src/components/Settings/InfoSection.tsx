@@ -1,6 +1,7 @@
 import { ExternalLink, RotateCcw } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { useState } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
+import { useState, useEffect } from 'react';
 import { resetAllData } from '../../lib/tauri';
 import { useT, resolveResetAllDataErrorMessage } from '../../lib/i18n';
 
@@ -12,6 +13,17 @@ export function InfoSection() {
   const t = useT();
   const [isResetting, setIsResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState<ResetMessageState | null>(null);
+  // #66 問題7: バージョンを「1.0.0」でハードコードしていたのを、Tauriの
+  // `getVersion()`（`tauri.conf.json`のバージョンを返す）から取得するようにする。
+  const [version, setVersion] = useState<string>('');
+
+  useEffect(() => {
+    getVersion()
+      .then(setVersion)
+      .catch((err) => {
+        console.error('Failed to get app version:', err);
+      });
+  }, []);
   const resetMessageText =
     resetMessage === null
       ? ''
@@ -57,7 +69,7 @@ export function InfoSection() {
       <div className="space-y-3">
         <h3 className="text-base font-medium text-white/70">Smart Slide Show (sss)</h3>
         <div className="text-white/30 text-sm space-y-1">
-          <div>{t('versionLabel', { version: '1.0.0' })}</div>
+          <div>{t('versionLabel', { version: version || '…' })}</div>
           <div>{t('appDescription')}</div>
         </div>
       </div>
