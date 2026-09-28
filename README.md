@@ -22,8 +22,8 @@ _[Read this in English](README.en.md)_
 
 ### 必要なもの
 
-- Node.js (v18以上)
-- Rust (rustup経由)
+- Node.js (v20.19以上、Vite 7の要件)
+- Rust (v1.90以上、rustup経由。tauri 2.12のMSRV)
 
 ### セットアップ
 

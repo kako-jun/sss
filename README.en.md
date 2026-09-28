@@ -22,8 +22,8 @@ A slideshow app that shows 100,000+ photos fairly.
 
 ### Requirements
 
-- Node.js (v18+)
-- Rust (via rustup)
+- Node.js (v20.19+, required by Vite 7)
+- Rust (v1.90+, via rustup; MSRV of tauri 2.12)
 
 ### Setup
 

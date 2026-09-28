@@ -14,7 +14,7 @@ Dates use `YYYY-MM-DD`.
 
 ### Changed
 
-- 依存関係を更新。npm の high 脆弱性を 0 件に、Tauri 関連パッケージ（Rust の `tauri` / JS の `@tauri-apps/*`）を同じマイナーバージョンに揃えて起動時のバージョン不一致警告を解消。Rust 側の `rand`/`rusqlite`/`dirs`/`md5`/`keepawake` も破壊的変更に追従しつつ最新化（アプリの挙動に変更なし） (#69)
+- 依存関係を更新。npm の high 脆弱性を 0 件に、Tauri 関連パッケージ（Rust の `tauri` / JS の `@tauri-apps/*`）を同じマイナーバージョンに揃えて起動時のバージョン不一致警告を解消。Rust 側の `rand`/`rusqlite`/`dirs`/`md5`/`keepawake` も破壊的変更に追従しつつ最新化し、`rand` の整数範囲サンプリングを厳密一様（`unbiased`）な方式に変更（完全平等ランダム表示の理論上のバイアスをさらに排除。表示結果への体感差はなし） (#69)
 
 ### Fixed
 
