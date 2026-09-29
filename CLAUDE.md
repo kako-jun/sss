@@ -365,7 +365,7 @@ CREATE TABLE scan_history (
 
 ### src-tauri/src/thumbnail.rs
 
-- 設定画面（履歴・ピック済み）用の長辺256pxのJPEGサムネイル生成（#67）。保存先は`<cache_dir>/thumbs/{md5(パス:更新日時:サイズ)}.jpg`（asset scope許可済み。起動・リセット時の`clear_cache_dir`で掃除され、次回は再生成）。EXIF Orientationは常に焼き込み、透過は黒背景に合成。巨大画像のデコードが並列で走らないよう静的Mutexで直列化し、`cache_worker::write_atomic`で原子的に書く
+- 設定画面（履歴・ピック済み）用の長辺256pxのJPEGサムネイル生成（#67）。保存先は`<cache_dir>/thumbs/{md5(パス:更新日時:サイズ)}.jpg`（asset scope許可済み。起動・リセット時の`clear_cache_dir`で掃除され、次回は再生成）。EXIF Orientationは常に焼き込み、透過は黒背景に合成。巨大画像のデコードが並列で走らないよう静的Mutexで直列化し、`cache_worker::write_atomic`で原子的に書く。キャッシュキーの更新日時は**秒精度**（同一秒内の同サイズ差し替えは検出しない。実運用では無視できる仕様）。`thumbs/`は本体キャッシュの2GB上限（`cache_dir`直下のみ計上）の外なので、**専用上限`THUMBS_MAX_BYTES`(256MB)**で管理し、50枚生成ごとに`enforce_cache_limit`で古い順に削除する（直前に書いた1枚は残す）
 
 ### src-tauri/src/cache_worker.rs
 

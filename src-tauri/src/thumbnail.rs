@@ -8,7 +8,9 @@
 //! `clear_cache_dir` で他のキャッシュと同様に掃除される（次回は再生成されるだけ）。
 
 use crate::image_processor::load_and_orient;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
@@ -16,6 +18,20 @@ use std::time::UNIX_EPOCH;
 pub const THUMB_MAX_EDGE: u32 = 256;
 const THUMB_JPEG_QUALITY: u8 = 80;
 const THUMBS_SUBDIR: &str = "thumbs";
+
+/// `<cache_dir>/thumbs/` 専用のサイズ上限（256MB。256px の JPEG なら1万数千枚分）。
+/// 本体のキャッシュ上限（[`crate::cache_worker::CACHE_MAX_BYTES`]）は `cache_dir` 直下の
+/// ファイルだけを数えるため、サムネイルは別枠でここで抑える。起動時の `clear_cache_dir`
+/// が効くのは次回起動時なので、それまでの1セッション中に履歴・ピックを見続けても
+/// 無制限には増えない。
+pub const THUMBS_MAX_BYTES: u64 = 256 * 1024 * 1024;
+
+/// 上限チェックの間隔（サムネイルを何枚生成するごとに走査するか）。毎回ディレクトリを
+/// 走査するのは無駄なので、キャッシュワーカーと同様にまとめて確認する。
+const THUMBS_ENFORCE_INTERVAL: u32 = 50;
+
+/// 生成したサムネイル枚数（プロセス全体）。
+static THUMBS_WRITTEN: AtomicU32 = AtomicU32::new(0);
 
 /// 巨大画像のデコードが同時に何本も走ってメモリを食わないよう直列化する。
 static GENERATION_LOCK: Mutex<()> = Mutex::new(());
@@ -96,7 +112,37 @@ pub fn ensure_thumbnail(source: &Path, cache_dir: &Path) -> Result<PathBuf, Stri
     }
     crate::cache_worker::write_atomic(&dest, &buffer)
         .map_err(|e| format!("Failed to write thumbnail: {e}"))?;
+    if let Some(parent) = dest.parent() {
+        maybe_enforce_thumbs_limit(
+            parent,
+            &dest,
+            &THUMBS_WRITTEN,
+            THUMBS_ENFORCE_INTERVAL,
+            THUMBS_MAX_BYTES,
+        );
+    }
     Ok(dest)
+}
+
+/// `counter` を1つ進め、`interval` 枚ごとに `thumbs_dir` の合計が `max_bytes` 以下に
+/// なるよう mtime の古いものから削除する。いま書いた `just_written` は消さない。
+/// 失敗してもサムネイル生成自体は成功扱い（上限管理は付随処理）。
+fn maybe_enforce_thumbs_limit(
+    thumbs_dir: &Path,
+    just_written: &Path,
+    counter: &AtomicU32,
+    interval: u32,
+    max_bytes: u64,
+) {
+    let written = counter.fetch_add(1, Ordering::Relaxed) + 1;
+    if !written.is_multiple_of(interval) {
+        return;
+    }
+    let mut exclude = HashSet::new();
+    exclude.insert(just_written.to_path_buf());
+    if let Err(e) = crate::cache_worker::enforce_cache_limit(thumbs_dir, max_bytes, &exclude) {
+        eprintln!("thumbnail: failed to enforce thumbs limit: {e}");
+    }
 }
 
 #[cfg(test)]
@@ -193,6 +239,62 @@ mod tests {
                 .next()
                 .is_some();
         assert!(!written);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn write_aged(dir: &Path, name: &str, age_secs: u64) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, b"0123456789").unwrap();
+        let mtime = std::time::SystemTime::now() - std::time::Duration::from_secs(age_secs);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+        path
+    }
+
+    /// #67: `<cache_dir>/thumbs/` は本体キャッシュの上限管理の外にあったため、
+    /// 専用の上限で古い順に削除する（interval 枚ごとにだけ走査する）。
+    #[test]
+    fn thumbs_dir_is_trimmed_oldest_first_only_on_the_interval() {
+        let dir = workspace("trim");
+        let thumbs = dir.join("thumbs");
+        std::fs::create_dir_all(&thumbs).unwrap();
+        for (i, age) in [500u64, 400, 300, 200].iter().enumerate() {
+            write_aged(&thumbs, &format!("t{i}.jpg"), *age);
+        }
+        let newest = write_aged(&thumbs, "new.jpg", 1);
+        let counter = AtomicU32::new(0);
+
+        // 1 枚目（interval=2 の途中）は走査しない。上限超過でも何も消えない。
+        maybe_enforce_thumbs_limit(&thumbs, &newest, &counter, 2, 20);
+        assert_eq!(std::fs::read_dir(&thumbs).unwrap().count(), 5);
+
+        // 2 枚目で走査。合計 50B を 20B 以下にするため古い 3 枚が消える。
+        maybe_enforce_thumbs_limit(&thumbs, &newest, &counter, 2, 20);
+        let mut left: Vec<String> = std::fs::read_dir(&thumbs)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["new.jpg", "t3.jpg"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn thumbs_trim_never_deletes_the_thumbnail_just_written() {
+        let dir = workspace("trim_keep");
+        let thumbs = dir.join("thumbs");
+        std::fs::create_dir_all(&thumbs).unwrap();
+        write_aged(&thumbs, "old.jpg", 100);
+        let newest = write_aged(&thumbs, "new.jpg", 1);
+        // 上限 0 でも、いま書いたものは返り値のパスとして使われるので消さない。
+        maybe_enforce_thumbs_limit(&thumbs, &newest, &AtomicU32::new(0), 1, 0);
+        assert!(newest.exists());
+        assert!(!thumbs.join("old.jpg").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
