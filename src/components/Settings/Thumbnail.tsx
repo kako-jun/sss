@@ -23,7 +23,11 @@ function baseName(path: string): string {
  */
 export function Thumbnail({ path }: { path: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [state, setState] = useState<ThumbState>({ status: 'idle' });
+  // 結果は「どのパスのものか」と一緒に持つ。`path` prop が変わったとき（リスト再利用で
+  // キーが変わらない場合など）に、前のパスのサムネイル/動画ラベルを新しいパスの下に
+  // 出し続けない（別ファイルの画像を見せる誤表示になる）。
+  const [loaded, setLoaded] = useState<{ path: string; state: ThumbState } | null>(null);
+  const state: ThumbState = loaded?.path === path ? loaded.state : { status: 'idle' };
   // IntersectionObserver が無い環境（jsdom 等）では最初から読み込む。
   const [visible, setVisible] = useState(() => typeof window.IntersectionObserver === 'undefined');
 
@@ -49,15 +53,17 @@ export function Thumbnail({ path }: { path: string }) {
     getThumbnail(path)
       .then((result) => {
         if (cancelled) return;
-        setState(
-          result.kind === 'image'
-            ? { status: 'image', src: convertFileSrc(result.path) }
-            : { status: 'video' },
-        );
+        setLoaded({
+          path,
+          state:
+            result.kind === 'image'
+              ? { status: 'image', src: convertFileSrc(result.path) }
+              : { status: 'video' },
+        });
       })
       .catch((err) => {
         console.error('Failed to load thumbnail:', err);
-        if (!cancelled) setState({ status: 'failed' });
+        if (!cancelled) setLoaded({ path, state: { status: 'failed' } });
       });
     return () => {
       cancelled = true;
