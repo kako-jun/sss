@@ -635,7 +635,7 @@ describe('App keyboard shortcuts: Space, F, ? (#66 問題4)', () => {
     expect(invoke).not.toHaveBeenCalledWith('exit_app');
   });
 
-  it('does not toggle pause when Space is pressed while a button has focus (avoids double-firing the native click)', async () => {
+  it('does not toggle pause when Space is pressed while a button has real keyboard (:focus-visible) focus (avoids double-firing the native click)', async () => {
     useRestoredStartupPath();
     getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
     render(<App />);
@@ -650,9 +650,154 @@ describe('App keyboard shortcuts: Space, F, ? (#66 問題4)', () => {
     fireEvent.keyDown(settingsButton, { key: ' ' });
 
     // フォーカスがボタンにある間はグローバルのSpaceショートカットを発火しない
-    // （ボタン自身のネイティブなクリック相当の挙動に譲る）。
+    // （ボタン自身のネイティブなクリック相当の挙動に譲る）。jsdomは
+    // `:focus-visible`を「今フォーカスされているか」だけで判定する（実際に
+    // .focus()されたこのボタンはtrueになる）ため、追加のスタブ無しでこの
+    // ケースを再現できる。
     await Promise.resolve();
     expect(screen.getByTitle('一時停止')).toBeTruthy();
+  });
+
+  // #66レビューmust2(b): 実ブラウザ(Chromium/WebView2)では「前へ/次へ」等の
+  // ボタンをマウスでクリックした後もそのボタンにフォーカスが残り続けるが、
+  // それは`:focus-visible`にならない（キーボード操作等で意図的にフォーカス
+  // された場合だけ真になる）。この「クリック直後の残留フォーカス」を
+  // シミュレートするため、実際に.focus()する前に`matches`を明示的にfalseへ
+  // スタブする（jsdomの`:focus-visible`は「フォーカスの有無」だけで判定して
+  // しまい、この違いを自然には再現できないため）。
+  //
+  // #66レビューmust2(b)追加修正: 実ブラウザ検証で、Spaceのkeydownハンドラの
+  // 中で毎回`:focus-visible`を判定し直す実装だと、Spaceキー入力自体が
+  // 「キーボード操作」とみなされて判定中に`:focus-visible`がtrueへ反転して
+  // しまうことが分かった（App.tsxの`focusVisibleAtFocusTimeRef`参照）。
+  // そのため、このテストでは`matches`のスタブを**先に**仕込んでから
+  // `.focus()`を呼ぶ（フォーカス獲得時に発火する`focusin`でスナップショット
+  // される値を、意図した`false`にするため）。
+  it('still toggles pause via Space when a button has residual (non-:focus-visible) focus from a prior mouse click (#66レビューmust2b)', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+
+    const nextButton = screen.getByTitle('次へ (→)');
+    vi.spyOn(nextButton, 'matches').mockReturnValue(false);
+    nextButton.focus();
+
+    fireEvent.keyDown(nextButton, { key: ' ' });
+
+    await waitFor(() => {
+      expect(screen.getByTitle('再生')).toBeTruthy();
+    });
+  });
+});
+
+// #66レビューmust1: キーボードハンドラが参照する値をrefで持つようにしたことの
+// 回帰テスト。以前はhandleToggleWindowMode（とその中のisFullscreen）がeffectの
+// deps配列に無く、初回レンダー時点のクロージャに固定されたままだったため、
+// Fキーを複数回押しても実際には毎回同じ`!isFullscreen`（常に同じ値）しか
+// 計算されず、2回目以降で正しく切り替わらなかった（実ブラウザで再現確認済み）。
+describe('App keyboard shortcut F toggles correctly across repeated presses (#66レビューmust1)', () => {
+  it('alternates true/false/true across three separate F presses (not stuck after the first)', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(win.isFullscreen).toHaveBeenCalled();
+    });
+
+    // 初期値はtrue（win.isFullscreen()の解決値）＝「ウィンドウモードに切り替え」
+    // ツールチップが出ている状態。各回、tooltipのテキスト変化（＝isFullscreen
+    // stateの更新が実際にコミットされたこと）を待ってから次のFを押す。
+    // #66レビューmust1の核心: 以前はhandleToggleWindowMode（と中のisFullscreen）
+    // がeffectのdepsに無く初回レンダーのクロージャに固定されていたため、
+    // 2回目以降のFで実際には毎回同じ`!true`=falseが計算され続け、
+    // win.setFullscreenに(2, true)ではなく(2, false)のような重複値が渡っていた。
+    await waitFor(() => {
+      expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
+    });
+    expect(win.setFullscreen).toHaveBeenNthCalledWith(1, false);
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
+    });
+    expect(win.setFullscreen).toHaveBeenNthCalledWith(2, true);
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
+    });
+    expect(win.setFullscreen).toHaveBeenNthCalledWith(3, false);
+  });
+});
+
+// #66レビューmust2: meta/ctrl/altのいずれかを伴う場合、アプリ側のショートカット
+// として扱わない（Cmd+F/Ctrl+F等、OS/ブラウザ標準のショートカットとの衝突を
+// 避ける）。
+describe('App keyboard shortcuts ignore modifier-key combinations (#66レビューmust2)', () => {
+  it('does not toggle fullscreen for Cmd+F or Ctrl+F', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'f', metaKey: true });
+    fireEvent.keyDown(document, { key: 'f', ctrlKey: true });
+    await Promise.resolve();
+
+    expect(win.setFullscreen).not.toHaveBeenCalled();
+  });
+
+  it('does not exit the app for Ctrl+Escape', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'Escape', ctrlKey: true });
+    await Promise.resolve();
+
+    expect(invoke).not.toHaveBeenCalledWith('exit_app');
+  });
+});
+
+// #66レビューshould: オーバーレイの「…」メニュー（除外サブメニュー含む）が
+// 開いている間のESCは、それを閉じるだけにする。
+describe('App Escape closes the overlay "…" menu without exiting (#66レビューshould)', () => {
+  it('closes the more-menu on Escape instead of calling exit_app', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    expect(screen.getByText('ファイルマネージャーで開く')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByText('ファイルマネージャーで開く')).toBeNull();
+    });
+    expect(invoke).not.toHaveBeenCalledWith('exit_app');
   });
 });
 

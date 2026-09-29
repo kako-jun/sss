@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
+import type { OverlayUIHandle } from './components/OverlayUI';
 import { Settings } from './components/Settings';
 import type { TabType } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
@@ -23,7 +24,7 @@ import { X, Settings as SettingsIcon, Minimize2, Maximize2, Keyboard } from 'luc
 import logoBg from './assets/logo-bg.webp';
 import { useT, useLocale, initLocale, resolveStartupDirectoryError } from './lib/i18n';
 import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL, idleFadeClassName } from './constants';
-import { isTypingTarget } from './lib/keyboardShortcuts';
+import { isTypingTarget, isFocusVisible, hasModifierKey } from './lib/keyboardShortcuts';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 
 function App() {
@@ -64,6 +65,7 @@ function App() {
     null,
   );
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
+  const overlayRef = useRef<OverlayUIHandle>(null);
   const { isIdle, setIsHovering } = useMouseIdle(3000);
 
   // #65 問題4: isPlaying はこのフックの内部状態ではなく、ここで導出した派生値にする。
@@ -248,102 +250,6 @@ function App() {
     })();
   };
 
-  // キーボードショートカット
-  useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      // #65: キーリピート(押しっぱなし)による多重発火を無視する（問題3関連）。
-      if (e.repeat) return;
-
-      // ESCキー（#66 問題1）: 設定を開いている間は「閉じる」、それ以外は終了。
-      // 入力欄（input/textarea/contentEditable）にフォーカスがある間はどちらも
-      // 行わず、ブラウザの既定動作（テキスト編集の取消等）に任せる。以前は
-      // フェーズに関わらず常にexit_appを呼んでいたため、設定画面で除外パターンを
-      // 打ち消そうとESCを押しただけでアプリごと終了していた。
-      if (e.key === 'Escape') {
-        if (isTypingTarget(e.target)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        if (isSettingsOpen) {
-          setIsSettingsOpen(false);
-          return;
-        }
-        if (isShortcutsOpen) {
-          setIsShortcutsOpen(false);
-          return;
-        }
-        try {
-          await invoke('exit_app');
-        } catch (err) {
-          console.error('Failed to exit app:', err);
-        }
-        return;
-      }
-
-      // 以降のショートカットは、設定モーダルを開いている間は入力欄との衝突を
-      // 避けるため無効化する（矢印キーの既存挙動と同じ方針）。
-      if (isSettingsOpen) return;
-
-      // 左矢印キーで前の画像へ
-      if (e.key === 'ArrowLeft' && canGoBack) {
-        e.preventDefault();
-        await handlePrevious();
-        return;
-      }
-
-      // 右矢印キーで次の画像へ
-      if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        handleNext();
-        return;
-      }
-
-      // #66 問題4: `?` でショートカット一覧の表示を切り替える。
-      if (e.key === '?') {
-        e.preventDefault();
-        setIsShortcutsOpen((prev) => !prev);
-        return;
-      }
-
-      if (isShortcutsOpen) return;
-
-      // #66 問題4: Space で一時停止/再開をトグルする。フォーカスが操作可能な
-      // 要素（ボタン等）にある場合はその要素の既定動作（クリック相当）を優先し、
-      // 二重に作用しないようにする。
-      if (e.key === ' ' && !isTypingTarget(e.target) && e.target === document.body) {
-        e.preventDefault();
-        setIsPausedByUser((prev) => !prev);
-        return;
-      }
-
-      // #66 問題4: F / F11 でフルスクリーンとウィンドウモードを切り替える。
-      if (e.key === 'f' || e.key === 'F' || e.key === 'F11') {
-        e.preventDefault();
-        await handleToggleWindowMode();
-        return;
-      }
-    };
-
-    // captureフェーズで最優先でキャッチ
-    document.addEventListener('keydown', handleKeyDown, true);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown, true);
-    };
-    // handleNext/handlePrevious/handleToggleWindowMode は毎レンダーで再生成される
-    // が deps に含めるとリスナーが毎回張り直されるため意図的に除外
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canGoBack, isSettingsOpen, isShortcutsOpen]);
-
-  const openSettings = (tab: TabType = 'scan') => {
-    setSettingsInitialTab(tab);
-    setSettingsKey((k) => k + 1);
-    setIsSettingsOpen(true);
-  };
-
-  const handleSettings = () => openSettings('scan');
-  const handleOpenPickTab = () => openSettings('pick');
-
   const handleToggleWindowMode = async () => {
     try {
       const win = getCurrentWindow();
@@ -357,6 +263,179 @@ function App() {
       console.error('Failed to toggle window mode:', err);
     }
   };
+
+  // #66レビューmust1: キーボードハンドラが参照する値
+  // （handlePrevious/handleNext/handleToggleWindowMode と、canGoBack/isSettingsOpen/
+  // isShortcutsOpen）を「最新のref」として保持する。以前はこれらの一部だけを
+  // effectのdeps配列に入れていたため、depsに無い値（handleToggleWindowMode、
+  // ひいてはその中で読むisFullscreen）が初回レンダー時点の値に固定されたまま
+  // 更新されず、Fキーが1回しか正しく切り替わらない不具合があった（実ブラウザで
+  // 再現確認済み）。ここで全てをrefにまとめ、キーボードリスナー自体は1回だけ
+  // 登録する（deps=[]）ことで、この種のstale closure問題を構造的に無くす。
+  const keydownHandlersRef = useRef({
+    canGoBack,
+    isSettingsOpen,
+    isShortcutsOpen,
+    handlePrevious,
+    handleNext,
+    handleToggleWindowMode,
+  });
+  useEffect(() => {
+    keydownHandlersRef.current = {
+      canGoBack,
+      isSettingsOpen,
+      isShortcutsOpen,
+      handlePrevious,
+      handleNext,
+      handleToggleWindowMode,
+    };
+  });
+
+  // #66レビューmust2(b)追加修正: 実機検証（実ブラウザe2e）で、Spaceキーの
+  // ハンドラ内でその場ごとに`isFocusVisible(document.activeElement)`を
+  // 判定する方式には見落としがあった。Chromium系ブラウザは、マウスクリックで
+  // 得た残留フォーカス中の要素に対してキーを押すと、そのキー入力自体が
+  // 「キーボード操作があった」という判定材料になり、押している最中に
+  // `:focus-visible`がtrueへ切り替わってしまう（Spaceを押す前はfalse、
+  // 押している間のkeydownハンドラ内では既にtrueという、まさにこの判定を
+  // 無意味にする形で反転する）。そのため、フォーカスを実際に獲得した瞬間
+  // （`focusin`イベント。これより後にキーが押されるまでは`:focus-visible`は
+  // まだ安定している）に`:focus-visible`かどうかをスナップショットしておき、
+  // Spaceハンドラはその保存済みの値だけを参照する（その場で再判定しない）。
+  const focusVisibleAtFocusTimeRef = useRef(false);
+  useEffect(() => {
+    const handleFocusIn = (e: FocusEvent) => {
+      focusVisibleAtFocusTimeRef.current =
+        e.target instanceof Element ? isFocusVisible(e.target) : false;
+    };
+    window.addEventListener('focusin', handleFocusIn);
+    return () => window.removeEventListener('focusin', handleFocusIn);
+  }, []);
+
+  // キーボードショートカット
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      // #65: キーリピート(押しっぱなし)による多重発火を無視する（問題3関連）。
+      if (e.repeat) return;
+      // #66レビューmust2: meta/ctrl/altのいずれかを伴う場合は無視する
+      // （Cmd+F/Ctrl+F等、OS/ブラウザ標準のショートカットとの衝突を避ける。
+      // 実ブラウザで「Cmd+FがOSのフルスクリーンAPIも呼んでしまう」ことを確認）。
+      if (hasModifierKey(e)) return;
+
+      const h = keydownHandlersRef.current;
+
+      // ESCキー（#66 問題1）: 設定を開いている間は「閉じる」、それ以外は終了。
+      // 自由テキストを打ち込める入力欄にフォーカスがある間はモーダルを閉じたり
+      // アプリを終了したりせず、代わりにフォーカスを外す（#66レビューshould:
+      // 編集を取り消す一般的なESCの挙動に寄せる。checkbox/range/number等の
+      // 非テキスト系inputはこの対象外＝通常通りモーダルを閉じる）。
+      if (e.key === 'Escape') {
+        if (isTypingTarget(e.target)) {
+          (e.target as HTMLElement).blur();
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (h.isSettingsOpen) {
+          setIsSettingsOpen(false);
+          return;
+        }
+        if (h.isShortcutsOpen) {
+          setIsShortcutsOpen(false);
+          return;
+        }
+        // #66レビューshould: オーバーレイの「…」メニュー（除外サブメニュー含む）が
+        // 開いている間のESCは、それを閉じるだけにする。
+        if (overlayRef.current?.isMenuOpen()) {
+          overlayRef.current.closeMenu();
+          return;
+        }
+        try {
+          await invoke('exit_app');
+        } catch (err) {
+          console.error('Failed to exit app:', err);
+        }
+        return;
+      }
+
+      // 以降のショートカットは、設定モーダルを開いている間は入力欄との衝突を
+      // 避けるため無効化する（矢印キーの既存挙動と同じ方針）。
+      if (h.isSettingsOpen) return;
+
+      // 左矢印キーで前の画像へ
+      if (e.key === 'ArrowLeft' && h.canGoBack) {
+        e.preventDefault();
+        await h.handlePrevious();
+        return;
+      }
+
+      // 右矢印キーで次の画像へ
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        h.handleNext();
+        return;
+      }
+
+      // #66 問題4: `?` でショートカット一覧の表示を切り替える。
+      if (e.key === '?') {
+        e.preventDefault();
+        setIsShortcutsOpen((prev) => !prev);
+        return;
+      }
+
+      if (h.isShortcutsOpen) return;
+
+      // #66 問題4: Space で一時停止/再開をトグルする。
+      // #66レビューmust2(b): 以前は`e.target === document.body`のみを見ていたが、
+      // 実ブラウザ(Chromium/WebView2)では「前へ/次へ」等のボタンをマウスで
+      // クリックした後もそのボタンにフォーカスが残り続け、target がbodyでは
+      // なくなる。その状態でSpaceを押すと、このガードに阻まれてアプリの一時停止が
+      // 発火しないばかりか、フォーカスが残ったボタン自身がネイティブな
+      // クリック相当の挙動（＝そのボタンを再度押す）を引き起こしていた
+      // （「次へ」ボタンにフォーカスが残ったままSpaceで一時停止したつもりが、
+      // 実際は写真が再度進んでしまう）。`focusVisibleAtFocusTimeRef`
+      // （フォーカス獲得の瞬間にスナップショットした`:focus-visible`）で
+      // 判定することで、クリック起因の残留フォーカスはアプリの一時停止として
+      // 扱い、実際にキーボードでボタンへフォーカスしている場合だけそのボタン
+      // 自身のネイティブな挙動（Enter/Space起動）に譲る。
+      if (e.key === ' ' && !isTypingTarget(e.target)) {
+        const activeElement = document.activeElement;
+        const isKeyboardFocused =
+          !!activeElement && activeElement !== document.body && focusVisibleAtFocusTimeRef.current;
+        if (!isKeyboardFocused) {
+          e.preventDefault();
+          setIsPausedByUser((prev) => !prev);
+        }
+        return;
+      }
+
+      // #66 問題4: F / F11 でフルスクリーンとウィンドウモードを切り替える。
+      if (e.key === 'f' || e.key === 'F' || e.key === 'F11') {
+        e.preventDefault();
+        await h.handleToggleWindowMode();
+        return;
+      }
+    };
+
+    // captureフェーズで最優先でキャッチ。#66レビューmust1: ハンドラ内部は
+    // 全てkeydownHandlersRef経由で最新値を読むため、このeffect自体はマウント時に
+    // 1度だけ登録すればよい（isFullscreen等の変化のたびに張り直す必要が無い）。
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []);
+
+  const openSettings = (tab: TabType = 'scan') => {
+    setSettingsInitialTab(tab);
+    setSettingsKey((k) => k + 1);
+    setIsSettingsOpen(true);
+  };
+
+  const handleSettings = () => openSettings('scan');
+  const handleOpenPickTab = () => openSettings('pick');
 
   const handleOverlayMouseEnter = () => {
     setIsOverlayHovered(true);
@@ -508,9 +587,11 @@ function App() {
     <div
       // #66 問題3: idle（3秒間マウス非操作）中はカーソルも隠す。写真が主役の
       // 鑑賞アプリなので、操作UIだけでなくカーソル自体も消して邪魔しない。
-      // 設定モーダルを開いている間はUIを操作中なので対象外にする。
+      // 設定モーダル・ショートカット一覧を開いている間はUIを操作中なので対象外
+      // にする（#66レビューshould: ショートカット一覧を読んでいる間にカーソルが
+      // 消えるのは不自然）。
       className={`w-screen h-screen bg-black overflow-hidden${
-        isIdle && !isSettingsOpen ? ' cursor-none' : ''
+        isIdle && !isSettingsOpen && !isShortcutsOpen ? ' cursor-none' : ''
       }`}
     >
       {/* スライドショー */}
@@ -526,9 +607,15 @@ function App() {
       {/* 右上の常設ボタン（終了・ショートカット・ウィンドウモード・設定）。
           #66視覚刷新: 枠線付き四角ボタン4つの並びから、枠線なしアイコンを1つの
           ガラス調ピル（DESIGN.md「Icon Pill Group」）にまとめた。idle時は
-          オーバーレイ同様にフェードアウトする（focus-within時は例外的に可視の
-          まま。キーボードでTab移動して見えなくなるのを防ぐ）。 */}
-      <div className={`fixed top-4 right-4 z-50 ${idleFadeClassName(isIdle)}`}>
+          オーバーレイ同様にフェードアウトする（実際にキーボードでフォーカスして
+          いる間は例外的に可視のまま。キーボードでTab移動して見えなくなるのを
+          防ぐ）。#66レビューshould: マウスでホバーしている間もidleタイマーを
+          止める（オーバーレイと同じ挙動。再生の自動一時停止は伴わない）。 */}
+      <div
+        className={`fixed top-4 right-4 z-50 ${idleFadeClassName(isIdle)}`}
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
+      >
         <div className="flex items-center gap-0.5 bg-black/50 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
           <button
             onClick={() => setIsShortcutsOpen(true)}
@@ -585,13 +672,18 @@ function App() {
           プライマリボタン・ショートカットヒントを添える。 */}
       {!currentImage && !isLoading && !isSettingsOpen && emptyStateContent && (
         <div className="fixed inset-0 flex items-center justify-center z-40 px-6">
-          <div className="text-center max-w-sm w-full bg-black/30 backdrop-blur-md border border-white/10 rounded-2xl px-8 py-10">
+          {/* #66レビューshould: max-w-smは日本語の説明文（特に長い方の文言）が
+              不自然な位置で折り返っていた。max-w-mdに広げ、`text-balance`
+              （Tailwind `text-wrap: balance`）で行の折返し位置を均等にする。 */}
+          <div className="text-center max-w-md w-full bg-black/30 backdrop-blur-md border border-white/10 rounded-2xl px-8 py-10">
             {!hasDirectory && (
               <img src={logoBg} alt="" aria-hidden="true" className="w-14 h-14 mx-auto mb-5" />
             )}
             <div className="text-white/85 text-xl font-medium mb-2">{emptyStateContent.title}</div>
             {emptyStateContent.subtitle && (
-              <div className="text-white/50 text-sm mb-6">{emptyStateContent.subtitle}</div>
+              <div className="text-white/50 text-sm mb-6 text-balance">
+                {emptyStateContent.subtitle}
+              </div>
             )}
             {directoryErrorMessage && (
               <div
@@ -609,7 +701,7 @@ function App() {
               {hasDirectory ? t('openSettings') : t('selectFolder')}
             </button>
             {!hasDirectory && (
-              <div className="mt-6 flex items-center justify-center gap-1.5 text-white/30 text-xs">
+              <div className="mt-6 flex items-center justify-center gap-1.5 text-white/50 text-xs">
                 <span
                   className="font-mono px-1.5 py-0.5 bg-white/8 border border-white/10 rounded"
                   aria-hidden="true"
@@ -634,25 +726,27 @@ function App() {
         </div>
       )}
 
-      {/* オーバーレイUI（フェードイン/アウト） */}
-      <div className={idleFadeClassName(isIdle)}>
-        <OverlayUI
-          image={currentImage}
-          canGoBack={canGoBack}
-          currentPosition={currentPosition}
-          totalImages={totalImages}
-          progress={progressPercent}
-          progressDurationMs={progressDurationMs}
-          isPausedByUser={isPausedByUser}
-          onPrevious={handlePrevious}
-          onNext={handleNext}
-          onOpenPickTab={handleOpenPickTab}
-          onMouseEnter={handleOverlayMouseEnter}
-          onMouseLeave={handleOverlayMouseLeave}
-          onTogglePause={handleTogglePause}
-          onExcluded={handleExcluded}
-        />
-      </div>
+      {/* オーバーレイUI（プログレスラインは常時表示、バー/ステータスはidleで
+          フェード。#66レビューshould: idle中に一時停止していても手がかりを
+          残すため、フェードの制御はOverlayUI内部に持たせisIdleを直接渡す）。 */}
+      <OverlayUI
+        ref={overlayRef}
+        image={currentImage}
+        canGoBack={canGoBack}
+        currentPosition={currentPosition}
+        totalImages={totalImages}
+        progress={progressPercent}
+        progressDurationMs={progressDurationMs}
+        isPausedByUser={isPausedByUser}
+        isIdle={isIdle}
+        onPrevious={handlePrevious}
+        onNext={handleNext}
+        onOpenPickTab={handleOpenPickTab}
+        onMouseEnter={handleOverlayMouseEnter}
+        onMouseLeave={handleOverlayMouseLeave}
+        onTogglePause={handleTogglePause}
+        onExcluded={handleExcluded}
+      />
 
       {/* ショートカット一覧（#66 問題4） */}
       <ShortcutsOverlay isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />

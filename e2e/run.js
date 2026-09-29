@@ -173,6 +173,45 @@ async function openSettingsModal(page) {
   await page.waitForTimeout(350);
 }
 
+/**
+ * #66レビューmust2: idle中は操作バー・右上ピルにpointer-events-noneが付き
+ * （constants.tsのIDLE_FADE_HIDDEN）、本物のマウスクリック（下記
+ * realMouseClickByTitle）はヒットテストに失敗してタイムアウトする。JSの
+ * `.click()`（openSettingsModal等）はDOMメソッド直呼びのためpointer-events を
+ * 無視して素通りするが、must2の各シナリオは「本物のマウス操作で得た残留
+ * フォーカスが:focus-visibleにならない」ことそのものを検証したいので、事前に
+ * 実際のマウス移動でidleを解除しクリック可能な状態にしてから使う。
+ */
+async function wakeFromIdle(page) {
+  await page.mouse.move(640, 400);
+  await page.mouse.move(641, 401);
+  await page.waitForTimeout(400); // IDLE_FADE_BASEのtransition-opacity(300ms)+余裕
+}
+
+/**
+ * 本物のマウス操作でボタンをクリックする（Playwrightの`click()`は実ブラウザの
+ * pointerdown/mousedown/mouseup/clickイベント一式を発火する）。#66レビュー
+ * must2: JSの`.click()`と違い、実ブラウザの`:focus-visible`ヒューリスティックが
+ * 本物のマウス操作と同じ扱いになる（＝マウスでクリックしたボタンは
+ * `:focus-visible`にならない）ことを前提にする検証にはこちらを使う。
+ */
+async function realMouseClickByTitle(page, title) {
+  await page.click(`button[title="${title}"]`);
+}
+
+/**
+ * フローティング操作バー（`.bottom-6`）を包むidleフェード用ラッパー要素の
+ * 実際のcomputed opacityを返す。CLAUDE.md絶対ルール1: 可視判定はプロパティ
+ * ではなく実ブラウザのcomputed styleで行う。
+ */
+async function getOverlayBarWrapperOpacity(page) {
+  return page.evaluate(() => {
+    const bar = document.querySelector('.bottom-6');
+    const wrapper = bar ? bar.parentElement : null;
+    return wrapper ? Number(getComputedStyle(wrapper).opacity) : null;
+  });
+}
+
 const scenarios = [
   {
     // #65レビューM1(must): 画像→動画→動画→画像と回すあいだ、動画が
@@ -643,6 +682,141 @@ const scenarios = [
       return {
         pass,
         detail: `set_fullscreen before=${before} after=${after} set_decorations=${decorationCalls}`,
+      };
+    },
+  },
+  {
+    // #66レビューmust1: App.tsxのkeydown effectがdeps不足で、古いisFullscreenを
+    // 閉じ込めるstale closureになっており、Fキーが1回しか正しく切り替わらな
+    // かった（2回目以降が無反応/巻き戻る）。handlersRef経由に直したことで、
+    // Fを3回押すたびに前回と逆の値へ交互に切り替わり続けることを確認する
+    // （App.tsxはisFullscreen初期値=trueで起動するため、実際の並びは
+    // false→true→falseになる。「1回目の値で固定されず、毎回反転すること」を
+    // 検証するのが主眼で、初期値そのものはこのテストの対象外）。
+    name: 'F pressed three times alternates fullscreen each press, not stuck after the first press (#66レビューmust1)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      const values = [];
+      for (let i = 0; i < 3; i++) {
+        const before = await countCalls(page, 'plugin:window|set_fullscreen');
+        await page.keyboard.press('f');
+        const deadline = Date.now() + 3000;
+        let after = before;
+        while (Date.now() < deadline) {
+          after = await countCalls(page, 'plugin:window|set_fullscreen');
+          if (after > before) break;
+          await page.waitForTimeout(50);
+        }
+        const lastArgsJson = await page.evaluate(() => {
+          const calls = window.__e2eLog.filter((l) => l[1] === 'plugin:window|set_fullscreen');
+          return calls.length > 0 ? calls[calls.length - 1][2] : null;
+        });
+        values.push(lastArgsJson ? JSON.parse(lastArgsJson).value : null);
+        await page.waitForTimeout(200);
+      }
+      const alternates =
+        values.length === 3 &&
+        values.every((v) => typeof v === 'boolean') &&
+        values[0] !== values[1] &&
+        values[1] !== values[2] &&
+        values[0] === values[2];
+      return { pass: alternates, detail: `values=${JSON.stringify(values)}` };
+    },
+  },
+  {
+    // #66レビューmust2(a): Chromium(WebView2)実機で、マウスクリック後にボタンへ
+    // 残るフォーカスがidle判定を妨げ、idleになっても操作バーが消えなかった
+    // （IDLE_FADE_BASEがfocus-within基準だったため）。マウスで「次へ」ボタンを
+    // クリックした後、バーの外へマウスを離してidleになれば、そのボタンが
+    // フォーカスを保持したままでも（実ブラウザで:focus-visibleにならないので）
+    // バーが実際に消える（computed opacity===0）ことを確認する。
+    name: 'idle fade actually hides the bar even while a mouse-clicked button still holds residual focus (#66レビューmust2(a))',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.waitForTimeout(100);
+      // バーの外（画面左上）へマウスを離す。mouseleaveでisHoveringがfalseに
+      // 戻り、idleタイマーが再開する。
+      await page.mouse.move(20, 20);
+      await page.waitForTimeout(3600);
+      const opacity = await getOverlayBarWrapperOpacity(page);
+      const focusState = await page.evaluate(() => {
+        const el = document.activeElement;
+        return {
+          title: el && el.tagName === 'BUTTON' ? el.title : null,
+          focusVisible: el ? el.matches(':focus-visible') : null,
+        };
+      });
+      const pass =
+        opacity === 0 && focusState.title === '次へ (→)' && focusState.focusVisible === false;
+      return { pass, detail: `opacity=${opacity} focusState=${JSON.stringify(focusState)}` };
+    },
+  },
+  {
+    // #66レビューmust2(b): 旧実装は、マウスで「次へ」ボタンをクリックして
+    // フォーカスが残ったまま次にSpaceを押すと、ブラウザネイティブの
+    // 「フォーカス中のbuttonはSpaceで再クリックされる」挙動が働いてしまい、
+    // アプリの一時停止/再生ではなく「次へ」が意図せず再発火していた。マウス
+    // クリック後のSpaceは、そのボタンを再発火せずアプリの一時停止として
+    // 扱われることを確認する。
+    name: 'Space after a mouse click on the Next button pauses the app instead of re-triggering Next (#66レビューmust2(b))',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.waitForTimeout(150);
+      const nextsBefore = await countCalls(page, 'get_next_image');
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(200);
+      const nextsAfter = await countCalls(page, 'get_next_image');
+      const pausedNow = await page.evaluate(() => !!document.querySelector('button[title="再生"]'));
+      const pass = nextsAfter === nextsBefore && pausedNow;
+      return {
+        pass,
+        detail: `nextsBefore=${nextsBefore} nextsAfter=${nextsAfter} pausedNow=${pausedNow}`,
+      };
+    },
+  },
+  {
+    // #66レビューmust2(c): 歯車をマウスでクリックして設定を開き、Escapeで
+    // 閉じると、旧実装は同じ歯車ボタンへフォーカスを復帰させていた。その状態で
+    // Spaceを押すと、ネイティブなbuttonのSpaceクリック相当の挙動で設定が
+    // 再度開いてしまっていた。マウス操作で開いた場合はフォーカスを復帰しない
+    // （blurする）ことで、Escape後のSpaceが設定を再オープンしないことを
+    // 確認する。
+    name: 'gear (mouse click) → Escape → Space does not reopen Settings (#66レビューmust2(c))',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await wakeFromIdle(page);
+      // #66視覚刷新: ようこそ画面の中央CTAボタン（「フォルダを選択」/「設定を
+      // 開く」）も統一感のため同じ歯車アイコン(SettingsIcon)を内包しており、
+      // `svg.lucide-settings`だけでは右上の歯車ボタンと曖昧になる
+      // （strict modeで2要素ヒット）。右上の歯車ボタンだけが持つ
+      // `title="設定"`で一意に選ぶ。
+      await page.click('button[title="設定"]');
+      await page.waitForTimeout(300);
+      const openedAfterClick = await page.evaluate(
+        () => !!document.querySelector('[role="dialog"]'),
+      );
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      const closedAfterEscape = await page.evaluate(
+        () => !document.querySelector('[role="dialog"]'),
+      );
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(300);
+      const stillClosedAfterSpace = await page.evaluate(
+        () => !document.querySelector('[role="dialog"]'),
+      );
+      const pass = openedAfterClick && closedAfterEscape && stillClosedAfterSpace;
+      return {
+        pass,
+        detail: `openedAfterClick=${openedAfterClick} closedAfterEscape=${closedAfterEscape} stillClosedAfterSpace=${stillClosedAfterSpace}`,
       };
     },
   },

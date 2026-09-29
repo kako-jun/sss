@@ -54,8 +54,11 @@ describe('clampDisplayInterval boundaries (#65 問題7)', () => {
 
 // #66 問題10: 右上の常設ボタン列・オーバーレイの両方がidle時にフェードアウトする
 // 共通クラスを組み立てるヘルパー。opacity/pointer-eventsの対がidle状態に応じて
-// 正しく入れ替わり、focus-within時の可視化クラスは常に含まれることを固定する。
-describe('idleFadeClassName (#66 問題10)', () => {
+// 正しく入れ替わり、`:focus-visible`時の可視化クラスは常に含まれることを固定する。
+// #66レビューmust2(a): 以前は`focus-within`（マウスクリックの残留フォーカスにも
+// 反応する）だったが、`has-[:focus-visible]`（実際にキーボード操作等で
+// フォーカスされた場合だけ真になる）に変更した。
+describe('idleFadeClassName (#66 問題10, #66レビューmust2)', () => {
   it('hides (opacity-0, pointer-events-none) when idle', () => {
     const className = idleFadeClassName(true);
     expect(className).toContain('opacity-0');
@@ -69,8 +72,13 @@ describe('idleFadeClassName (#66 問題10)', () => {
     expect(className).not.toContain('opacity-0');
   });
 
-  it('always includes focus-within escape hatches regardless of idle state', () => {
-    expect(idleFadeClassName(true)).toContain('focus-within:opacity-100');
-    expect(idleFadeClassName(false)).toContain('focus-within:opacity-100');
+  it('always includes has-[:focus-visible] escape hatches regardless of idle state', () => {
+    expect(idleFadeClassName(true)).toContain('has-[:focus-visible]:opacity-100');
+    expect(idleFadeClassName(false)).toContain('has-[:focus-visible]:opacity-100');
+  });
+
+  it('does not use the old focus-within variant (residual mouse-click focus must not keep it visible)', () => {
+    expect(idleFadeClassName(true)).not.toContain('focus-within');
+    expect(idleFadeClassName(false)).not.toContain('focus-within');
   });
 });

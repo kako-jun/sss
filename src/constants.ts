@@ -23,12 +23,21 @@ export const MODAL_ANIMATION_DURATION = 0.2; // 秒
 /**
  * idle（マウス非操作）時にフェードアウトする要素の共通クラス（#66）。
  * オーバーレイUIと右上の常設ボタン（終了・ウィンドウモード・設定・ショートカット）の
- * 両方に使う。`focus-within:opacity-100`により、キーボードでTab移動して内部の
+ * 両方に使う。
+ *
+ * `has-[:focus-visible]:opacity-100`により、キーボードで実際にTab移動して内部の
  * ボタンにフォーカスが当たっている間は idle 判定に関わらず可視化する
  * （フォーカスされたのに見えない、というa11y上の欠陥を避けるため）。
+ *
+ * #66レビューmust2: 以前は`focus-within`（マウスクリックによる残留フォーカスにも
+ * 反応する）を使っていたため、ボタンをマウスでクリックしただけでその後ずっと
+ * idle時にバーが消えなくなる不具合があった（実ブラウザで再現確認済み）。
+ * `:focus-visible`はブラウザが「キーボード操作等で意図的にフォーカスされた」と
+ * 判定した場合だけ真になり、クリック直後の残留フォーカスでは真にならないため、
+ * `has-[:focus-visible]`にすることでこの誤検知を避ける。
  */
 export const IDLE_FADE_BASE =
-  'transition-opacity duration-300 focus-within:opacity-100 focus-within:pointer-events-auto';
+  'transition-opacity duration-300 has-[:focus-visible]:opacity-100 has-[:focus-visible]:pointer-events-auto';
 export const IDLE_FADE_HIDDEN = 'opacity-0 pointer-events-none';
 export const IDLE_FADE_VISIBLE = 'opacity-100 pointer-events-auto';
 
