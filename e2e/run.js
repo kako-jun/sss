@@ -1265,6 +1265,153 @@ const scenarios = [
     },
   },
   {
+    // #67: 一度も表示していない（全件0回）プレイリストでも統計タブが壊れず、
+    // 0回の棒1本・均等バッジ・「0 / 総数」・表1行になる（ビンが1つでも軸が潰れない）。
+    name: 'Stats tab for a never-shown playlist shows a single 0-count bar, even badge and 0/total (#67)',
+    hash: 'statszero',
+    async run(page) {
+      await page.waitForTimeout(600);
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const tabs = [...document.querySelectorAll('.overflow-x-auto > button')];
+        const statsTab = tabs.find((b) => b.textContent.includes('統計'));
+        if (!statsTab) throw new Error('統計タブが見つからない');
+        statsTab.click();
+      });
+      await page.waitForSelector('.u-over', { timeout: 3000 });
+      await page.click('summary');
+      const m = await page.evaluate(() => {
+        const canvas = document.querySelector('.uplot canvas');
+        const rect = canvas ? canvas.getBoundingClientRect() : null;
+        const badge = document.querySelector('[data-testid="fairness-badge"]');
+        const rows = [...document.querySelectorAll('tbody tr')];
+        const noData = [...document.querySelectorAll('div')].some((d) =>
+          d.textContent.includes('データがありません'),
+        );
+        return {
+          canvasW: rect ? Math.round(rect.width) : 0,
+          badge: badge ? badge.textContent : null,
+          rows: rows.map((r) => r.textContent),
+          noData,
+          viewed: document.body.textContent.includes('0 / 500'),
+        };
+      });
+      const pass =
+        m.canvasW > 300 &&
+        m.badge !== null &&
+        m.badge.includes('均等') &&
+        m.rows.length === 1 &&
+        m.rows[0] === '0500100.0%' &&
+        !m.noData &&
+        m.viewed;
+      return { pass, detail: JSON.stringify(m) };
+    },
+  },
+  {
+    // #67: ピック済みタブは静止画と動画が混在する。静止画はサムネイル <img>（縮小済み。
+    // モックは 160x120 の代役で naturalWidth<=256 かつ実際にデコードされる）、動画は
+    // フィルムアイコン+ファイル名（computed style で実際に見えている）を出す。
+    name: 'Pick tab shows an image thumbnail and, for a video, the film icon with its file name (#67)',
+    hash: 'thumbs',
+    async run(page) {
+      await page.waitForTimeout(600);
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const tabs = [...document.querySelectorAll('.overflow-x-auto > button')];
+        const tab = tabs.find((b) => b.textContent.includes('ピック'));
+        if (!tab) throw new Error('ピックタブが見つからない');
+        tab.click();
+      });
+      await page.waitForSelector('svg.lucide-film', { timeout: 3000 });
+      await page.waitForFunction(
+        () => {
+          const img = document.querySelector('[role="dialog"] img');
+          return !!img && img.complete && img.naturalWidth > 0;
+        },
+        null,
+        { timeout: 3000 },
+      );
+      const m = await page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        const img = dialog.querySelector('img');
+        const film = dialog.querySelector('svg.lucide-film');
+        const label = [...dialog.querySelectorAll('span')].find((s) =>
+          s.textContent.includes('v.webm'),
+        );
+        const visible = (el) => {
+          if (!el) return false;
+          const cs = getComputedStyle(el);
+          const r = el.getBoundingClientRect();
+          return cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+        };
+        return {
+          imgs: dialog.querySelectorAll('img').length,
+          naturalWidth: img.naturalWidth,
+          filmVisible: visible(film),
+          labelVisible: visible(label),
+          labelText: label ? label.textContent : null,
+        };
+      });
+      const pass =
+        m.imgs === 1 &&
+        m.naturalWidth > 0 &&
+        m.naturalWidth <= 256 &&
+        m.filmVisible &&
+        m.labelVisible &&
+        m.labelText === 'v.webm';
+      return { pass, detail: JSON.stringify(m) };
+    },
+  },
+  {
+    // #67: 履歴タブでも同様に、静止画=サムネイル・動画=フィルム+ファイル名・表示回数バッジ。
+    // サムネイルは画面に入った分だけ get_thumbnail を要求する（2 件とも見えているので 2 回）。
+    name: 'History tab shows thumbnails and video labels and requests each visible thumbnail once (#67)',
+    hash: 'thumbs',
+    async run(page) {
+      await page.waitForTimeout(600);
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const tabs = [...document.querySelectorAll('.overflow-x-auto > button')];
+        const tab = tabs.find((b) => b.textContent.includes('履歴'));
+        if (!tab) throw new Error('履歴タブが見つからない');
+        tab.click();
+      });
+      await page.waitForSelector('svg.lucide-film', { timeout: 3000 });
+      await page.waitForFunction(
+        () => {
+          const img = document.querySelector('[role="dialog"] img');
+          return !!img && img.complete && img.naturalWidth > 0;
+        },
+        null,
+        { timeout: 3000 },
+      );
+      const m = await page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        const img = dialog.querySelector('img');
+        const label = [...dialog.querySelectorAll('span')].find((s) =>
+          s.textContent.includes('v.webm'),
+        );
+        const labelVisible =
+          !!label &&
+          getComputedStyle(label).display !== 'none' &&
+          label.getBoundingClientRect().width > 0;
+        return {
+          naturalWidth: img.naturalWidth,
+          labelVisible,
+          counts: dialog.textContent.includes('\u00d73') && dialog.textContent.includes('\u00d71'),
+          thumbCalls: window.__e2eLog.filter((e) => e[1] === 'get_thumbnail').length,
+        };
+      });
+      const pass =
+        m.naturalWidth > 0 &&
+        m.naturalWidth <= 256 &&
+        m.labelVisible &&
+        m.counts &&
+        m.thumbCalls === 2;
+      return { pass, detail: JSON.stringify(m) };
+    },
+  },
+  {
     // #66 問題9(#61レビュー由来): 除外ルールの解除ボタンがhoverのみで表示され、
     // キーボード/タッチで見えなかった。既定でも薄く(opacity>0)見えることを確認する。
     name: 'Exclude rule remove button is visible (opacity>0) without hovering (#66 問題9)',
