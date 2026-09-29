@@ -11,6 +11,7 @@ pub mod commands;
 pub mod database;
 pub mod ignore;
 pub mod image_processor;
+pub mod pick;
 pub mod playlist;
 pub mod scanner;
 pub mod thumbnail;

@@ -415,7 +415,7 @@ CREATE TABLE scan_history (
   9. `exit_app`: アプリケーション終了
   10. `save_setting`: 設定を保存
   11. `get_setting`: 設定を取得
-  12. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー
+  12. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で上書きしない。#67）
   13. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。
       即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
@@ -448,8 +448,8 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
   18. `remove_ignore_pattern`: 除外ルールを削除
   19. `add_ignore_pattern`: 除外ルールを手動追加
   20. `get_recent_images`: 最近表示した画像一覧（最新100件、除外済み除く）
-  21. `get_picked_images`: ピック済み画像一覧
-  22. `delete_picked_image`: ピック済み画像を削除
+  21. `get_picked_images`: ピック済みメディア一覧（画像＋動画、スキャナと同じ拡張子定義。#67）
+  22. `delete_picked_image`: ピック済み画像を削除（ピックフォルダ内の通常のメディアファイルのみ。検証は`pick::validate_picked_delete_target`）
   23. `reset_all_display_counts`: 全画像の表示回数をリセット
   24. `get_thumbnail`: 設定画面用サムネイル（静止画は縮小済みJPEGのパス、動画は`{kind:'video'}`。#67）
 

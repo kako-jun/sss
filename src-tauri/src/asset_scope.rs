@@ -9,11 +9,21 @@
 
 use std::path::{Path, PathBuf};
 
+/// 既定のピック先フォルダ名（`<pictures>/sss-picked`）。
+const DEFAULT_PICK_DIR_NAME: &str = "sss-picked";
+
+/// 既定のピック先ディレクトリ（`<pictures>/sss-picked`）。設定が無いときの解決先であり、
+/// 設定画面が「既定に戻す」で表示するパスでもある（#67: 以前は呼び出し側が
+/// "sss-picked" を個別に持っていた）。
+pub fn default_share_directory(pictures_dir: &Path) -> PathBuf {
+    pictures_dir.join(DEFAULT_PICK_DIR_NAME)
+}
+
 /// ピック先ディレクトリを解決する（設定済みならそれを、無ければ `<pictures>/sss-picked`）。
 pub fn resolve_share_directory(pictures_dir: &Path, saved_setting: Option<&str>) -> PathBuf {
     match saved_setting {
         Some(path) if !path.is_empty() => PathBuf::from(path),
-        _ => pictures_dir.join("sss-picked"),
+        _ => default_share_directory(pictures_dir),
     }
 }
 
