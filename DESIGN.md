@@ -329,6 +329,59 @@ outline-offset: 2px;
 0.6-opacity white against the black canvas meets ~7:1 contrast (WCAG 2.4.11
 non-text contrast requires 3:1). An earlier 0.15-opacity ring failed this test.
 
+**Suppressing it on a specific element (#66レビュー3巡目should)**: the global
+rule is `[tabindex]:focus-visible { outline: ...; }` — an attribute selector +
+pseudo-class, specificity (0,2,0). Tailwind's plain `outline-none` utility is
+just a class selector, specificity (0,1,0), so it **loses** to the global rule
+and the ring still shows. Use the important-modifier `!outline-none` to force
+it (confirmed in real-browser e2e). Also: Tailwind's `outline-none` doesn't set
+`outline-style: none` — it sets `outline: 2px solid transparent` (kept
+non-`none` on purpose, for Windows High Contrast Mode/forced-colors visibility)
+— so don't check `outlineStyle`/`outlineWidth` to verify "no visible ring" in
+tests; check `outlineColor` is transparent instead. `Settings`/`ShortcutsOverlay`
+use this on the panel itself (see below, and `useFocusTrap`'s `openedViaMouse`).
+
+**Focus target depends on how the modal was opened (#66レビュー3巡目should)**:
+`useFocusTrap(ref, isOpen, openedViaMouse)` normally focuses the first
+focusable element (the close button) on open — but a delayed
+`requestAnimationFrame`-based `.focus()` call is disconnected in time from the
+click that triggered it, so real Chromium can't attribute it to mouse modality
+and defaults to matching `:focus-visible` anyway, drawing a ring on the close
+button even when the user opened the modal with a mouse. When the caller knows
+the open was mouse-triggered (`event.detail > 0` on the triggering `onClick`),
+it passes `openedViaMouse={true}` and the hook focuses the **panel itself**
+(`tabIndex={-1}`, `!outline-none`) instead — invisible either way, so the
+mouse-vs-keyboard distinction stops mattering visually. A genuine keyboard open
+(`event.detail === 0`, or the `?` key) still focuses the close button as
+before, and correctly shows its ring.
+
+### Fixed-Position Overlays Nested Inside a Transformed Ancestor (#66レビュー3巡目must)
+
+A `position: fixed` descendant is normally sized/positioned relative to the
+viewport — **unless** an ancestor has `transform`, `filter`, `backdrop-filter`,
+`perspective`, or `will-change: transform` set to a non-default value, in which
+case that ancestor becomes the fixed descendant's containing block instead
+(CSS spec behavior, not a bug in this codebase, but easy to trip over). Two
+places in this app nest a `fixed inset-0` click-to-close backdrop inside such
+an ancestor:
+
+- `OverlayUI`'s "…" menu backdrop, inside the floating bar (`-translate-x-1/2`
+  transform + `backdrop-blur-md` on the bar itself)
+- `HistorySection`'s per-item exclude-menu backdrop, inside the Settings
+  modal's panel (a framer-motion `motion.div` with `animate={{ scale: 1 }}` —
+  Motion keeps `transform: scale(1)` applied via inline style even at rest,
+  which still counts as "a transform is set")
+
+In both cases the backdrop's `inset: 0` resolved against that ancestor's own
+box instead of the viewport, so clicking outside the ancestor's rectangle
+(e.g. anywhere on the photo) never reached the backdrop and the menu stayed
+open — a real-browser-only regression invisible in jsdom (jsdom doesn't
+compute containing blocks at all). Fix: `createPortal(<backdrop/>,
+document.body)` so the backdrop element is a direct child of `<body>`,
+unaffected by any ancestor's transform/filter. If you add another
+click-to-close-anything `fixed` element nested inside a transformed/blurred/
+animated ancestor, portal it the same way.
+
 ## 5. Layout Principles
 
 ### Container
@@ -489,6 +542,18 @@ This is a Tauri desktop app — no mobile breakpoints. The UI adapts to window r
   slideshow is showing (not while the Settings modal or the Shortcuts overlay is
   open, #66レビューshould) — a photo-viewing app should not leave a static cursor
   sitting on top of the image (#66)
+- Every `<button>` inside the floating bar and the top-right pill has its own
+  `onMouseDown={createButtonFocusGuard(containerRef)}` (`lib/keyboardShortcuts.ts`,
+  #66レビュー2巡目must1 → 3巡目nit): `preventDefault()` stops the click from
+  giving that button focus at all (so a later keypress can't flip a residual
+  click-focus into `:focus-visible`, see must2(a) above). This guard is attached
+  **per button**, not on the container (an earlier version put it on the
+  container and accidentally also blocked drag-selecting the filename text).
+  The same handler also `blur()`s whatever OTHER element inside the container
+  currently holds real keyboard focus (e.g. Tab-focused a moment ago) — without
+  this, clicking a different button doesn't touch that stale focus at all (since
+  `preventDefault()` stops the new button from stealing it), so it would linger
+  and keep `has-[:focus-visible]` true forever, and the bar would never fade
 
 ### Touch Targets
 
