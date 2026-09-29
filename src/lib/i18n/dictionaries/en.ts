@@ -150,12 +150,12 @@ export const en = {
   excludeThisFolder: 'Exclude this folder',
 
   // === Settings: Stats ===
-  seriesFileId: 'File ID',
+  seriesFileCount: 'Files',
   seriesDisplayCount: 'Display Count',
-  axisFileIdSorted: 'File ID (sorted A-Z)',
+  axisDisplayCount: 'Times shown',
   noStatsData: 'No data yet. Run a scan first.',
   viewedFilesCountLabel: 'Files shown at least once:',
-  displayCountPerImageTitle: 'Display Count per Image',
+  displayCountDistributionTitle: 'Display Count per Image',
   fairnessExplanation:
     'If the fair-shuffle algorithm is working correctly, every photo gets shown equally often.',
   resettingLabel: 'Resetting...',

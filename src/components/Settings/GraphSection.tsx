@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getDisplayStats, getStats, resetAllDisplayCounts } from '../../lib/tauri';
-import type { Stats } from '../../types';
+import type { DisplayStats, Stats } from '../../types';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import { useT, useLocale } from '../../lib/i18n';
@@ -11,7 +11,7 @@ export function GraphSection() {
   // 起こす）なので、下のチャート再構築effectを言語切替に追従させるには
   // `locale` 自体を依存配列に含める必要がある。
   const locale = useLocale();
-  const [displayStats, setDisplayStats] = useState<Array<[string, number]>>([]);
+  const [displayStats, setDisplayStats] = useState<DisplayStats | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isResetting, setIsResetting] = useState(false);
@@ -50,7 +50,7 @@ export function GraphSection() {
   };
 
   useEffect(() => {
-    if (!chartRef.current || displayStats.length === 0 || isLoading) {
+    if (!chartRef.current || !displayStats || displayStats.files === 0 || isLoading) {
       return;
     }
 
@@ -60,10 +60,9 @@ export function GraphSection() {
       plotRef.current = null;
     }
 
-    // X軸: ファイルID (0, 1, 2, ...)
-    const xData = displayStats.map((_, i) => i);
-    // Y軸: 表示回数
-    const yData = displayStats.map(([, count]) => count);
+    // X軸: 表示回数 / Y軸: その回数のファイル数（ヒストグラム。#67）
+    const xData = displayStats.bins.map((bin) => bin.count);
+    const yData = displayStats.bins.map((bin) => bin.files);
 
     const data: uPlot.AlignedData = [xData, yData];
 
@@ -72,21 +71,21 @@ export function GraphSection() {
       height: 300,
       series: [
         {
-          label: t('seriesFileId'),
+          label: t('seriesDisplayCount'),
         },
         {
-          label: t('seriesDisplayCount'),
+          label: t('seriesFileCount'),
           stroke: 'rgba(255, 255, 255, 0.5)',
           fill: 'rgba(255, 255, 255, 0.05)',
           width: 1,
           points: {
-            show: displayStats.length <= 50, // 50ファイル以下の場合のみポイント表示
+            show: true,
           },
         },
       ],
       axes: [
         {
-          label: t('axisFileIdSorted'),
+          label: t('axisDisplayCount'),
           stroke: 'rgba(255,255,255,0.3)',
           labelFont: '11px sans-serif',
           labelSize: 12,
@@ -102,7 +101,7 @@ export function GraphSection() {
           values: (_u: uPlot, vals: number[]) => vals.map((v: number) => Math.round(v).toString()), // 整数のみ表示
         },
         {
-          label: t('seriesDisplayCount'),
+          label: t('seriesFileCount'),
           stroke: 'rgba(255,255,255,0.3)',
           labelFont: '11px sans-serif',
           labelSize: 12,
@@ -120,7 +119,7 @@ export function GraphSection() {
       scales: {
         x: {
           time: false,
-          range: [0, displayStats.length - 1], // データ範囲を正確に設定
+          range: [displayStats.min - 0.5, displayStats.max + 0.5],
         },
       },
       legend: {
@@ -160,7 +159,7 @@ export function GraphSection() {
     );
   }
 
-  if (displayStats.length === 0) {
+  if (!displayStats || displayStats.files === 0) {
     return (
       <div className="p-4 bg-black/30 rounded text-center text-white/30 text-sm border border-white/5">
         {t('noStatsData')}
@@ -181,7 +180,7 @@ export function GraphSection() {
 
       <div className="bg-black/30 rounded p-4 border border-white/5">
         <h3 className="text-sm font-medium text-white/50 mb-4 uppercase tracking-wider">
-          {t('displayCountPerImageTitle')}
+          {t('displayCountDistributionTitle')}
         </h3>
         <div ref={chartRef} className="w-full" />
         <div className="mt-3 text-xs text-white/25">{t('fairnessExplanation')}</div>

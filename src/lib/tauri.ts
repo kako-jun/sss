@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type {
+  DisplayStats,
   ExcludeOutcome,
   IgnoreRule,
   ImageNavigationResult,
@@ -160,10 +161,11 @@ export async function excludeImage(
 }
 
 /**
- * 統計データを取得（グラフ用）
+ * 表示回数の分布を取得（グラフ用、#67）。全件の一覧ではなく、バックエンドで
+ * 集計した要約とヒストグラムだけが返る。
  */
-export async function getDisplayStats(): Promise<Array<[string, number]>> {
-  return await invoke<Array<[string, number]>>('get_display_stats');
+export async function getDisplayStats(): Promise<DisplayStats> {
+  return await invoke<DisplayStats>('get_display_stats');
 }
 
 /**

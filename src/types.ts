@@ -39,6 +39,24 @@ export interface Stats {
   displayedImages: number;
 }
 
+// 表示回数ヒストグラムの1階級（`count` 回表示されたファイルが `files` 件、#67）
+export interface DisplayCountBin {
+  count: number;
+  files: number;
+}
+
+// 表示回数の分布（統計グラフ用、#67）。バックエンドの `DisplayStats` と対応。
+// 全ファイルの (パス, 回数) 一覧ではなく、集計済みの要約とヒストグラムだけを受け取る。
+export interface DisplayStats {
+  // 集計対象のファイル数（プレイリストのメンバー数）
+  files: number;
+  min: number;
+  max: number;
+  mean: number;
+  // 表示回数の昇順。ファイルが1件も無い階級は含まれない（疎な表現）
+  bins: DisplayCountBin[];
+}
+
 // 最近表示した画像
 export interface RecentImage {
   path: string;

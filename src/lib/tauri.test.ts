@@ -23,6 +23,7 @@ import type {
   Stats,
   RecentImage,
   IgnoreRule,
+  DisplayStats,
 } from '../types';
 
 beforeEach(() => {
@@ -154,15 +155,20 @@ describe('tauri command wrappers', () => {
     });
   });
 
-  it('getDisplayStats returns the [label, count] pairs', async () => {
-    invoke.mockResolvedValue([
-      ['2024-01', 5],
-      ['2024-02', 8],
-    ]);
-    expect(await tauri.getDisplayStats()).toEqual([
-      ['2024-01', 5],
-      ['2024-02', 8],
-    ]);
+  it('getDisplayStats returns the aggregated histogram (not a per-file list, #67)', async () => {
+    const stats: DisplayStats = {
+      files: 3,
+      min: 1,
+      max: 2,
+      mean: 5 / 3,
+      bins: [
+        { count: 1, files: 1 },
+        { count: 2, files: 2 },
+      ],
+    };
+    invoke.mockResolvedValue(stats);
+    expect(await tauri.getDisplayStats()).toEqual(stats);
+    expect(invoke).toHaveBeenCalledWith('get_display_stats');
   });
 
   it('getIgnorePatterns returns rules with pattern + ruleType (glob/date)', async () => {

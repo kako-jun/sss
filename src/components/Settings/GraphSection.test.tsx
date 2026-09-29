@@ -28,10 +28,16 @@ beforeEach(() => {
 
 describe('GraphSection i18n (#80)', () => {
   it('renders translated labels (title, legend, reset button) in the default (ja) locale', async () => {
-    getDisplayStats.mockResolvedValue([
-      ['/a.jpg', 1],
-      ['/b.jpg', 2],
-    ]);
+    getDisplayStats.mockResolvedValue({
+      files: 2,
+      min: 1,
+      max: 2,
+      mean: 1.5,
+      bins: [
+        { count: 1, files: 1 },
+        { count: 2, files: 1 },
+      ],
+    });
     getStats.mockResolvedValue({ totalImages: 2, displayedImages: 2 });
 
     const { container } = render(<GraphSection />);
@@ -44,13 +50,13 @@ describe('GraphSection i18n (#80)', () => {
     // flakyだった（実ブラウザ差ではなくレンダー完了タイミングの問題）。waitForに
     // 入れてuPlotの構築を待つ。
     await waitFor(() => {
-      expect(container.querySelector('.u-legend .u-label')?.textContent).toBe('表示回数');
+      expect(container.querySelector('.u-legend .u-label')?.textContent).toBe('ファイル数');
     });
     expect(screen.getByText('表示回数をリセット')).toBeTruthy();
   });
 
   it('shows the translated "no stats" message when there is no display data yet', async () => {
-    getDisplayStats.mockResolvedValue([]);
+    getDisplayStats.mockResolvedValue({ files: 0, min: 0, max: 0, mean: 0, bins: [] });
     getStats.mockResolvedValue({ totalImages: 0, displayedImages: 0 });
 
     render(<GraphSection />);
@@ -67,17 +73,23 @@ describe('GraphSection i18n (#80)', () => {
   // uPlot自身が再構築されチャートのlegendラベルも追従することを固定する
   // （`locale`を依存配列から外すと本テストは落ちることを確認済み）。
   it('rebuilds the uPlot chart (legend labels) when the locale changes without remounting', async () => {
-    getDisplayStats.mockResolvedValue([
-      ['/a.jpg', 1],
-      ['/b.jpg', 2],
-    ]);
+    getDisplayStats.mockResolvedValue({
+      files: 2,
+      min: 1,
+      max: 2,
+      mean: 1.5,
+      bins: [
+        { count: 1, files: 1 },
+        { count: 2, files: 1 },
+      ],
+    });
     getStats.mockResolvedValue({ totalImages: 2, displayedImages: 2 });
 
     const { container } = render(<GraphSection />);
     const legendText = () => container.querySelector('.u-legend .u-label')?.textContent;
 
     await waitFor(() => {
-      expect(legendText()).toBe('表示回数');
+      expect(legendText()).toBe('ファイル数');
     });
 
     act(() => {
@@ -85,7 +97,7 @@ describe('GraphSection i18n (#80)', () => {
     });
 
     await waitFor(() => {
-      expect(legendText()).toBe('Display Count');
+      expect(legendText()).toBe('Files');
     });
     expect(screen.getByText('Display Count per Image')).toBeTruthy();
     expect(screen.getByText('Reset Display Counts')).toBeTruthy();

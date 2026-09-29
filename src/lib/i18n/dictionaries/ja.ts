@@ -153,12 +153,12 @@ export const ja = {
   excludeThisFolder: 'このフォルダを除外',
 
   // === 設定画面: 統計グラフ ===
-  seriesFileId: 'ファイルID',
+  seriesFileCount: 'ファイル数',
   seriesDisplayCount: '表示回数',
-  axisFileIdSorted: 'ファイルID (A-Z順)',
+  axisDisplayCount: '表示回数',
   noStatsData: 'データがありません。スキャンを実行してください。',
   viewedFilesCountLabel: '1回でも表示済みのファイル数:',
-  displayCountPerImageTitle: '画像ごとの表示回数',
+  displayCountDistributionTitle: '画像ごとの表示回数',
   fairnessExplanation:
     '完全平等ランダムアルゴリズムが正しく動作していれば、全てのファイルが均等に表示されます',
   resettingLabel: 'リセット中...',

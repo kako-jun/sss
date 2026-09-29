@@ -136,8 +136,10 @@
         case 'get_ignore_patterns':
         case 'get_picked_images':
         case 'get_recent_images':
-        case 'get_display_stats':
           return [];
+        case 'get_display_stats':
+          // #67: 集計済みのヒストグラム（全件一覧ではない）。
+          return { files: 0, min: 0, max: 0, mean: 0, bins: [] };
         case 'get_stats':
           return { totalImages: (seqs[sc] || seqs.slides).length, displayedImages: 0 };
         case 'get_default_share_directory':
