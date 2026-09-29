@@ -260,24 +260,68 @@ describe('OverlayUI "…" menu accessibility + imperative handle (#66レビュ�
 // #66レビューshould: idle中に一時停止していても手がかりを残すため、プログレス
 // ラインはバー/ステータスメッセージとは独立して常時表示する（isIdleの影響を
 // 受けない）。
-describe('OverlayUI progress line stays independent of the idle fade (#66レビューshould)', () => {
-  it('does not put opacity-0 on the progress line container when isIdle is true', () => {
+describe('OverlayUI progress line fade rule (#66レビューshould→2巡目should1)', () => {
+  // #66レビュー2巡目should1: 当初は「プログレスラインは常時表示（idleでも
+  // フェードしない）」だったが、再生中にidleへ入ってもバーだけ消えて進捗線が
+  // 動き続けているのは中途半端という指摘を受け、「再生中のidleはバーと同様に
+  // フェードし、一時停止中のidleだけ手がかりとして残す」に変更した。
+  it('fades the progress line on idle while playing (isPausedByUser=false)', () => {
     const image = makeImage();
-    const { container } = render(<OverlayUI image={image} {...requiredProps} isIdle={true} />);
+    const { container } = render(
+      <OverlayUI image={image} {...requiredProps} isIdle={true} isPausedByUser={false} />,
+    );
 
-    // プログレスラインは`bottom-0`の専用コンテナ（バー本体は`bottom-6`）。
+    const progressLine = container.querySelector('.bottom-0');
+    expect(progressLine).toBeTruthy();
+    expect(progressLine?.className).toContain('opacity-0');
+  });
+
+  it('keeps the progress line visible on idle while paused (isPausedByUser=true)', () => {
+    const image = makeImage();
+    const { container } = render(
+      <OverlayUI image={image} {...requiredProps} isIdle={true} isPausedByUser={true} />,
+    );
+
     const progressLine = container.querySelector('.bottom-0');
     expect(progressLine).toBeTruthy();
     expect(progressLine?.className).not.toContain('opacity-0');
   });
 
-  it('puts opacity-0 on the bar/status wrapper (not the progress line) when isIdle is true', () => {
+  it('never fades the progress line while not idle, regardless of pause state', () => {
     const image = makeImage();
-    const { container } = render(<OverlayUI image={image} {...requiredProps} isIdle={true} />);
+    const { container } = render(
+      <OverlayUI image={image} {...requiredProps} isIdle={false} isPausedByUser={false} />,
+    );
+
+    const progressLine = container.querySelector('.bottom-0');
+    expect(progressLine?.className).not.toContain('opacity-0');
+  });
+
+  it('puts opacity-0 on the bar/status wrapper when isIdle is true regardless of pause state', () => {
+    const image = makeImage();
+    const { container } = render(
+      <OverlayUI image={image} {...requiredProps} isIdle={true} isPausedByUser={true} />,
+    );
 
     const barPositionDiv = container.querySelector('.bottom-6');
     const fadeWrapper = barPositionDiv?.parentElement;
     expect(fadeWrapper?.className).toContain('opacity-0');
+  });
+});
+
+describe('OverlayUI floating bar suppresses focus-stealing on mouse click (#66レビュー2巡目must1案a)', () => {
+  // jsdomはmousedown/clickだけでは要素にフォーカスを与えないため（実ブラウザ
+  // と異なり.focus()を明示しない限りactiveElementは変化しない）、「フォーカス
+  // が移らないこと」自体はここでは検証できない（実ブラウザe2eが担当）。ここでは
+  // `onMouseDown`のpreventDefault()が実際に呼ばれているかを、イベントの
+  // defaultPrevented（dispatchEventの戻り値がfalseになること）で直接確認する。
+  it('calls preventDefault() on mousedown for a button inside the floating bar', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const nextButton = screen.getByTitle('次へ (→)');
+    const notCancelled = fireEvent.mouseDown(nextButton);
+    expect(notCancelled).toBe(false);
   });
 });
 

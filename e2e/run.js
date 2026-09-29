@@ -605,6 +605,48 @@ const scenarios = [
     },
   },
   {
+    // #66レビュー2巡目should2: 垂直中央寄せ(items-center)だと、タブ切替で
+    // 内容の高さが変わるたびにモーダル自体の上端位置（＝ヘッダー・タブ行の
+    // 位置）が上下に動いてしまっていた。上寄せ(items-start + pt-[12vh])に
+    // 変更したことで、内容量が大きく異なるタブ（フォルダ=長い/情報=短い等）へ
+    // 切り替えてもタブ行の画面上でのY座標（getBoundingClientRect().top）が
+    // 変わらないことを確認する。
+    name: 'Settings modal tab row top position does not move when switching between tabs of different content height (#66レビュー2巡目should2)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+
+      const tabRowTop = () =>
+        page.evaluate(() => {
+          const row = document.querySelector('.overflow-x-auto');
+          return row ? row.getBoundingClientRect().top : null;
+        });
+      const clickTabByLabel = (label) =>
+        page.evaluate((l) => {
+          const tabs = [...document.querySelectorAll('[role="tab"]')];
+          const tab = tabs.find((t) => t.textContent.includes(l));
+          if (!tab) throw new Error(`タブ「${l}」が見つからない`);
+          tab.click();
+        }, label);
+
+      const initialTop = await tabRowTop();
+      // 内容量が大きく異なるタブを順に回る（フォルダ=スキャン結果表示で
+      // 縦に長め、情報=短め、除外ルール=中間）。
+      const tops = { initial: initialTop };
+      for (const label of ['情報', 'フォルダ', '除外ルール', 'オプション']) {
+        await clickTabByLabel(label);
+        await page.waitForTimeout(150);
+        tops[label] = await tabRowTop();
+      }
+
+      const allTops = Object.values(tops);
+      // 1px未満の丸め誤差は許容する。
+      const allSame = allTops.every((t) => t !== null && Math.abs(t - initialTop) < 1);
+      return { pass: allSame, detail: JSON.stringify(tops) };
+    },
+  },
+  {
     // #66 問題1: 設定を開いている間のESCはモーダルを閉じるだけで、exit_appは
     // 呼ばない（以前はフェーズに関わらず常にexit_appを呼んでいた）。
     name: 'Escape closes the Settings modal instead of exiting the app while it is open (#66 問題1)',
@@ -725,34 +767,34 @@ const scenarios = [
     },
   },
   {
-    // #66レビューmust2(a): Chromium(WebView2)実機で、マウスクリック後にボタンへ
-    // 残るフォーカスがidle判定を妨げ、idleになっても操作バーが消えなかった
-    // （IDLE_FADE_BASEがfocus-within基準だったため）。マウスで「次へ」ボタンを
-    // クリックした後、バーの外へマウスを離してidleになれば、そのボタンが
-    // フォーカスを保持したままでも（実ブラウザで:focus-visibleにならないので）
-    // バーが実際に消える（computed opacity===0）ことを確認する。
-    name: 'idle fade actually hides the bar even while a mouse-clicked button still holds residual focus (#66レビューmust2(a))',
+    // #66レビューmust2(a)→2巡目must1（案a）: 当初はChromium(WebView2)実機で、
+    // マウスクリック後にボタンへ残るフォーカスがidle判定を妨げ、idleになっても
+    // 操作バーが消えない不具合があった。個々のキーを見る対症療法
+    // （focusVisibleAtFocusTimeRef）では別のキーで同じ穴が再現するため、
+    // 根本対策として操作バーのコンテナに`onMouseDown`でpreventDefaultし、
+    // マウスクリックがそもそもボタンへフォーカスを与えないようにした（実際に
+    // フォーカスが残らないので、以降どんなキーが押されても:focus-visible化の
+    // 心配が無い）。マウスで「次へ」ボタンをクリックした直後、実際に
+    // どの要素にもフォーカスが移っていない（document.activeElement===body）
+    // ことと、バーの外へマウスを離してidleになれば操作バーが実際に消える
+    // （computed opacity===0）ことを確認する。
+    name: 'clicking Next does not steal focus, and idle fade still hides the bar afterward (#66レビューmust2(a)→2巡目must1)',
     hash: 'slides',
     async run(page) {
       await page.waitForTimeout(500);
       await wakeFromIdle(page);
       await realMouseClickByTitle(page, '次へ (→)');
+      const focusRightAfterClick = await page.evaluate(
+        () => document.activeElement === document.body,
+      );
       await page.waitForTimeout(100);
       // バーの外（画面左上）へマウスを離す。mouseleaveでisHoveringがfalseに
       // 戻り、idleタイマーが再開する。
       await page.mouse.move(20, 20);
       await page.waitForTimeout(3600);
       const opacity = await getOverlayBarWrapperOpacity(page);
-      const focusState = await page.evaluate(() => {
-        const el = document.activeElement;
-        return {
-          title: el && el.tagName === 'BUTTON' ? el.title : null,
-          focusVisible: el ? el.matches(':focus-visible') : null,
-        };
-      });
-      const pass =
-        opacity === 0 && focusState.title === '次へ (→)' && focusState.focusVisible === false;
-      return { pass, detail: `opacity=${opacity} focusState=${JSON.stringify(focusState)}` };
+      const pass = focusRightAfterClick && opacity === 0;
+      return { pass, detail: `focusRightAfterClick=${focusRightAfterClick} opacity=${opacity}` };
     },
   },
   {
@@ -779,6 +821,63 @@ const scenarios = [
         pass,
         detail: `nextsBefore=${nextsBefore} nextsAfter=${nextsAfter} pausedNow=${pausedNow}`,
       };
+    },
+  },
+  {
+    // #66レビュー2巡目must1（案a）: 個々のキー（Space等）だけを特別扱いする
+    // 対症療法では、別のキー（矢印キー等）で同じ「マウスクリック後にキーを
+    // 押すと:focus-visibleが反転してidleでもバーが消えない」問題が再現する。
+    // 根本対策（操作バー・右上ピルへのonMouseDownでのpreventDefault、マウス
+    // クリックそのものでフォーカスを与えない）を入れたことで、クリック後に
+    // 何のキーを押しても（ここではSpace）idleへ入れば必ずバーが消えることを
+    // 確認する。
+    name: '次へクリック→Space→4秒待つとidleへ入りバーが消える (#66レビュー2巡目must1)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.keyboard.press('Space');
+      // クリック直後はマウスカーソルがバー上に残っており、バーの
+      // onMouseEnterでisHoveringがtrueのままだとidleタイマー自体が止まって
+      // 一生idleにならない（これはアプリの意図した挙動＝ホバー中は操作バーを
+      // 隠さない、であってmust1のバグではない）。この検証の主眼はあくまで
+      // 「クリック後に何かキーを押しても、後でidleに入れば正しくバーが消える
+      // か」なので、実際のユーザー操作同様にマウスをバーの外へ離してから待つ。
+      await page.mouse.move(20, 20);
+      await page.waitForTimeout(4000);
+      const opacity = await getOverlayBarWrapperOpacity(page);
+      const focusState = await page.evaluate(() => {
+        const el = document.activeElement;
+        return { isBody: el === document.body, tag: el ? el.tagName : null };
+      });
+      const pass = opacity === 0 && focusState.isBody;
+      return { pass, detail: `opacity=${opacity} focusState=${JSON.stringify(focusState)}` };
+    },
+  },
+  {
+    // #66レビュー2巡目must1（案a）: 上と同じ検証をSpace以外のキー（矢印キー）
+    // でも行う。個別のキー対応ではなく「マウスクリックでフォーカスを与えない」
+    // という根本対策になっていることを、Space専用ではない別のキーで確認する
+    // ことが目的。
+    name: '次へクリック→→キー→4秒待つとidleへ入りバーが消える (#66レビュー2巡目must1)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.keyboard.press('ArrowRight');
+      // 上のSpaceシナリオと同じ理由でマウスをバーの外へ離してから待つ
+      // （ホバー中はidleタイマーが止まる仕様自体は意図した挙動）。
+      await page.mouse.move(20, 20);
+      await page.waitForTimeout(4000);
+      const opacity = await getOverlayBarWrapperOpacity(page);
+      const focusState = await page.evaluate(() => {
+        const el = document.activeElement;
+        return { isBody: el === document.body, tag: el ? el.tagName : null };
+      });
+      const pass = opacity === 0 && focusState.isBody;
+      return { pass, detail: `opacity=${opacity} focusState=${JSON.stringify(focusState)}` };
     },
   },
   {

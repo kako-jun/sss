@@ -280,37 +280,22 @@ function App() {
     handleNext,
     handleToggleWindowMode,
   });
-  useEffect(() => {
-    keydownHandlersRef.current = {
-      canGoBack,
-      isSettingsOpen,
-      isShortcutsOpen,
-      handlePrevious,
-      handleNext,
-      handleToggleWindowMode,
-    };
-  });
-
-  // #66レビューmust2(b)追加修正: 実機検証（実ブラウザe2e）で、Spaceキーの
-  // ハンドラ内でその場ごとに`isFocusVisible(document.activeElement)`を
-  // 判定する方式には見落としがあった。Chromium系ブラウザは、マウスクリックで
-  // 得た残留フォーカス中の要素に対してキーを押すと、そのキー入力自体が
-  // 「キーボード操作があった」という判定材料になり、押している最中に
-  // `:focus-visible`がtrueへ切り替わってしまう（Spaceを押す前はfalse、
-  // 押している間のkeydownハンドラ内では既にtrueという、まさにこの判定を
-  // 無意味にする形で反転する）。そのため、フォーカスを実際に獲得した瞬間
-  // （`focusin`イベント。これより後にキーが押されるまでは`:focus-visible`は
-  // まだ安定している）に`:focus-visible`かどうかをスナップショットしておき、
-  // Spaceハンドラはその保存済みの値だけを参照する（その場で再判定しない）。
-  const focusVisibleAtFocusTimeRef = useRef(false);
-  useEffect(() => {
-    const handleFocusIn = (e: FocusEvent) => {
-      focusVisibleAtFocusTimeRef.current =
-        e.target instanceof Element ? isFocusVisible(e.target) : false;
-    };
-    window.addEventListener('focusin', handleFocusIn);
-    return () => window.removeEventListener('focusin', handleFocusIn);
-  }, []);
+  // #66レビュー2巡目must2: 以前はこの代入を`useEffect(() => {...})`（deps無し、
+  // 毎レンダー後に走るpassive effect）で行っていたが、passive effectはReactの
+  // コミット後に非同期に（他の作業を挟んで）flushされるため、ある種のテスト
+  // 環境や高負荷なタイミングでは、実際のレンダー結果とrefの内容が一瞬ズレる
+  // 余地があった（CI限定のflakyの一因）。レンダー本体で直接代入すれば、
+  // このrefは常に「今まさにコミットされようとしているレンダー」の値と完全に
+  // 同期する（読み取り専用の同期用refであり、代入そのものが画面表示に影響
+  // しないため、レンダー中の副作用としても安全）。
+  keydownHandlersRef.current = {
+    canGoBack,
+    isSettingsOpen,
+    isShortcutsOpen,
+    handlePrevious,
+    handleNext,
+    handleToggleWindowMode,
+  };
 
   // キーボードショートカット
   useEffect(() => {
@@ -387,22 +372,26 @@ function App() {
       if (h.isShortcutsOpen) return;
 
       // #66 問題4: Space で一時停止/再開をトグルする。
-      // #66レビューmust2(b): 以前は`e.target === document.body`のみを見ていたが、
-      // 実ブラウザ(Chromium/WebView2)では「前へ/次へ」等のボタンをマウスで
-      // クリックした後もそのボタンにフォーカスが残り続け、target がbodyでは
-      // なくなる。その状態でSpaceを押すと、このガードに阻まれてアプリの一時停止が
-      // 発火しないばかりか、フォーカスが残ったボタン自身がネイティブな
-      // クリック相当の挙動（＝そのボタンを再度押す）を引き起こしていた
-      // （「次へ」ボタンにフォーカスが残ったままSpaceで一時停止したつもりが、
-      // 実際は写真が再度進んでしまう）。`focusVisibleAtFocusTimeRef`
-      // （フォーカス獲得の瞬間にスナップショットした`:focus-visible`）で
-      // 判定することで、クリック起因の残留フォーカスはアプリの一時停止として
-      // 扱い、実際にキーボードでボタンへフォーカスしている場合だけそのボタン
-      // 自身のネイティブな挙動（Enter/Space起動）に譲る。
+      // #66レビューmust2(b)→2巡目must1: 以前は`e.target === document.body`のみを
+      // 見ていたが、実ブラウザ(Chromium/WebView2)では「前へ/次へ」等のボタンを
+      // マウスでクリックした後もそのボタンにフォーカスが残り続け、target が
+      // bodyではなくなる。その状態でSpaceを押すと、このガードに阻まれてアプリの
+      // 一時停止が発火しないばかりか、フォーカスが残ったボタン自身がネイティブな
+      // クリック相当の挙動（＝そのボタンを再度押す）を引き起こしていた。
+      // 一度は`:focus-visible`をフォーカス獲得の瞬間にスナップショットする方式
+      // （focusVisibleAtFocusTimeRef）で対処したが、根本原因である「マウス
+      // クリックでボタンにフォーカスが残ること」自体を、操作バー・右上ピルの
+      // コンテナに`onMouseDown={e => e.preventDefault()}`を付けて無くしたため
+      // （2巡目must1案a）、マウスクリック後は`document.activeElement`が
+      // 元々フォーカスされていた要素（通常はbody）のまま変わらなくなり、
+      // このスナップショット機構は不要になった。単純に、今
+      // `document.activeElement`が実際にキーボードで`:focus-visible`な状態か
+      // をその場で判定するだけでよい（Tabで意図的にボタンへフォーカスして
+      // いる場合は、そのボタンへネイティブなSpace起動を譲る）。
       if (e.key === ' ' && !isTypingTarget(e.target)) {
         const activeElement = document.activeElement;
         const isKeyboardFocused =
-          !!activeElement && activeElement !== document.body && focusVisibleAtFocusTimeRef.current;
+          !!activeElement && activeElement !== document.body && isFocusVisible(activeElement);
         if (!isKeyboardFocused) {
           e.preventDefault();
           setIsPausedByUser((prev) => !prev);
@@ -610,11 +599,16 @@ function App() {
           オーバーレイ同様にフェードアウトする（実際にキーボードでフォーカスして
           いる間は例外的に可視のまま。キーボードでTab移動して見えなくなるのを
           防ぐ）。#66レビューshould: マウスでホバーしている間もidleタイマーを
-          止める（オーバーレイと同じ挙動。再生の自動一時停止は伴わない）。 */}
+          止める（オーバーレイと同じ挙動。再生の自動一時停止は伴わない）。
+          #66レビュー2巡目must1（案a）: OverlayUIの操作バーと同じ理由で、
+          マウスクリックがこのピル内のボタンへフォーカスを残さないように
+          `onMouseDown`でpreventDefaultする（Tabでのキーボード操作には影響
+          しない）。 */}
       <div
         className={`fixed top-4 right-4 z-50 ${idleFadeClassName(isIdle)}`}
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
+        onMouseDown={(e) => e.preventDefault()}
       >
         <div className="flex items-center gap-0.5 bg-black/50 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
           <button

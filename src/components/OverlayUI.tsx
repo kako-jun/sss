@@ -269,8 +269,16 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
       {/* プログレスライン（写真下端の極細線）。#66視覚刷新: フローティングバーの
           最大幅に制約されず常に画面幅いっぱいに表示するため、バーとは独立した
           要素にした。#65 問題6: 60fpsのJS setIntervalポーリングを廃止し、CSS
-          transition(transform scaleX)にブラウザ側の補間を任せる。 */}
-      <div className="fixed bottom-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden z-40">
+          transition(transform scaleX)にブラウザ側の補間を任せる。
+          #66レビュー2巡目should1: 再生中にidleへ入った場合はバー同様にフェード
+          する（進行しているのに操作バーだけ消えて進捗線だけ残るのは中途半端）。
+          一時停止中にidleへ入った場合だけは、フェードさせずに残す（進捗が動いて
+          いないこと自体が「止まっている」手がかりになる。idleFadeClassNameは
+          「今フェードして隠すべきか」のboolean一つだけを見るヘルパーなので、
+          バーとは別の条件（isIdle && !isPausedByUser）を渡して使い回す）。 */}
+      <div
+        className={`fixed bottom-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden z-40 ${idleFadeClassName(isIdle && !isPausedByUser)}`}
+      >
         <div
           className="h-full w-full bg-white/50 origin-left"
           style={{
@@ -282,8 +290,9 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
       </div>
 
       {/* ステータスメッセージ・フローティングの操作バー。idleでフェードする
-          （プログレスラインだけは上で独立させ常時表示、#66レビューshould:
-          idle中に一時停止していても何かの手がかりを残す）。 */}
+          （#66レビューshould: プログレスラインの一時停止中の扱いは上で独立
+          させている。こちらは再生中/一時停止中のどちらでも、idleになれば
+          常にフェードする）。 */}
       <div className={idleFadeClassName(isIdle)}>
         {/* ステータスメッセージ（フローティングバーの上に表示）。#66レビューnit:
             長いパス（ピック完了メッセージ等）が狭い画面幅からはみ出さないよう
@@ -300,11 +309,26 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
         {/* フローティングの操作バー。#66視覚刷新: 画面幅いっぱいの2段グリッドバーを
             やめ、下中央に浮かぶ角丸のコンパクトなガラス調バー1本にした
             （DESIGN.md「Floating Control Bar」）。左=情報、中央=主要操作、
-            右=副次操作の3クラスタ構成。 */}
+            右=副次操作の3クラスタ構成。
+            #66レビュー2巡目must1（案a・メイン決定）: 実ブラウザではマウス
+            クリックでボタンにフォーカスが残り、その後の何らかのキー押下で
+            `:focus-visible`が真に反転してしまう（Chromiumの仕様。押されたキー
+            自体が「キーボード操作があった」証拠になるため）ことが実機で確認
+            された。個々のキー（Space等）だけ特別扱いする対症療法では別のキー
+            （矢印キー等）で同じ穴が再現するため、根本的に「マウスクリックでは
+            そもそもフォーカスを取らせない」方針に変更した
+            （macOSのWKWebViewの既定挙動と同じ）。`mousedown`で`preventDefault()`
+            するとブラウザの既定動作（クリックされた要素へフォーカスを移す）が
+            起きなくなる。バー内の全ボタンをこのコンテナが包んでいるため、
+            ここ1箇所への設置で内部の全ボタン（前へ/一時停止/次へ/ピック/…
+            メニュー・サブメニュー含む）に効く。Tabキーによるフォーカス移動は
+            `mousedown`を経由しないため影響を受けず、キーボード操作は従来通り
+            機能する。 */}
         <div
           className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-xl"
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
+          onMouseDown={(e) => e.preventDefault()}
         >
           <div className="flex items-center gap-1 bg-black/50 backdrop-blur-md rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl">
             {/* 左: 情報クラスタ（GPSサムネ[任意] + ファイル名 · 撮影日 · 位置n/N） */}

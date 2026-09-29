@@ -108,26 +108,42 @@ async function launchSystemBrowser() {
   throw new Error(`システムに Chrome も Edge も見つからなかった: ${lastError?.message}`);
 }
 
+/**
+ * #66レビュー2巡目nit: JSの`.click()`（DOMメソッド直呼び）は実ブラウザだと
+ * mousedown/mouseupを経由しないため、OverlayUI/右上ピルに付けた
+ * `onMouseDown={e => e.preventDefault()}`（#66レビュー2巡目must1）が効かず、
+ * ボタンにフォーカスリングが残ったまま撮影されてしまうことがあった
+ * （実際のユーザー操作と乖離した見た目になる）。撮影用のクリックは必ず
+ * Playwrightの本物のマウスクリック（mousedown/mouseup/clickイベント一式）で
+ * 行う。
+ */
+async function realClick(page, selector) {
+  await page.locator(selector).click();
+}
+
+/**
+ * idle中（既定でマウス未操作）はオーバーレイ・右上ピルに`pointer-events:none`
+ * が付いており、本物のマウスクリックはヒットテストに失敗してタイムアウト
+ * する（JSの`.click()`はこれを素通りしていたため今まで問題にならなかった）。
+ * 本物のクリックへ切り替えたことで、先に実際のマウス移動でidleを解除する
+ * 必要がある（e2e/run.jsのwakeFromIdleと同じ理由）。
+ */
+async function wakeFromIdle(page) {
+  await page.mouse.move(640, 400);
+  await page.mouse.move(641, 401);
+  await page.waitForTimeout(400); // IDLE_FADE_BASEのtransition-opacity(300ms)+余裕
+}
+
 /** 設定を開く（gearアイコンのlucideクラス名で選ぶ。ロケールに左右されない）。 */
 async function openSettings(page) {
-  await page.evaluate(() => {
-    const icon = document.querySelector('svg.lucide-settings');
-    const btn = icon && icon.closest('button');
-    if (!btn) throw new Error('設定ボタンが見つからない');
-    btn.click();
-  });
+  await wakeFromIdle(page);
+  await realClick(page, 'button:has(svg.lucide-settings)');
   await page.waitForTimeout(350); // モーダルのopenアニメーション(200ms)待ち
 }
 
 /** タブ行の中のN番目のタブボタンをクリックする（役割は無い場合もあるので位置で選ぶ）。 */
 async function clickTabByIndex(page, index) {
-  await page.evaluate((i) => {
-    const row = document.querySelector('.overflow-x-auto');
-    const buttons = row ? [...row.querySelectorAll(':scope > button')] : [];
-    const btn = buttons[i];
-    if (!btn) throw new Error(`タブボタン[${i}]が見つからない`);
-    btn.click();
-  }, index);
+  await realClick(page, `.overflow-x-auto > button:nth-child(${index + 1})`);
   await page.waitForTimeout(200);
 }
 

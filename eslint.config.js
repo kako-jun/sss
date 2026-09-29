@@ -41,7 +41,6 @@ export default [
         React: 'readonly',
         EventTarget: 'readonly',
         Element: 'readonly',
-        FocusEvent: 'readonly',
         requestAnimationFrame: 'readonly',
         cancelAnimationFrame: 'readonly',
       },

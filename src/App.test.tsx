@@ -662,17 +662,18 @@ describe('App keyboard shortcuts: Space, F, ? (#66 問題4)', () => {
   // ボタンをマウスでクリックした後もそのボタンにフォーカスが残り続けるが、
   // それは`:focus-visible`にならない（キーボード操作等で意図的にフォーカス
   // された場合だけ真になる）。この「クリック直後の残留フォーカス」を
-  // シミュレートするため、実際に.focus()する前に`matches`を明示的にfalseへ
+  // シミュレートするため、実際に.focus()した上で`matches`を明示的にfalseへ
   // スタブする（jsdomの`:focus-visible`は「フォーカスの有無」だけで判定して
   // しまい、この違いを自然には再現できないため）。
   //
-  // #66レビューmust2(b)追加修正: 実ブラウザ検証で、Spaceのkeydownハンドラの
-  // 中で毎回`:focus-visible`を判定し直す実装だと、Spaceキー入力自体が
-  // 「キーボード操作」とみなされて判定中に`:focus-visible`がtrueへ反転して
-  // しまうことが分かった（App.tsxの`focusVisibleAtFocusTimeRef`参照）。
-  // そのため、このテストでは`matches`のスタブを**先に**仕込んでから
-  // `.focus()`を呼ぶ（フォーカス獲得時に発火する`focusin`でスナップショット
-  // される値を、意図した`false`にするため）。
+  // #66レビュー2巡目must1（案a）: 実際の根本対策は、操作バー・右上ピルの
+  // コンテナに`onMouseDown={e => e.preventDefault()}`を付け、マウスクリックが
+  // そもそもボタンへフォーカスを残さないようにしたこと（実ブラウザではこの
+  // シナリオ自体が起きなくなった）。このテストはSpaceハンドラ自身のロジック
+  // （`document.activeElement`が実際に`:focus-visible`かどうかをその場で判定
+  // する、という単純な形に戻した）に対する保険的な単体テストとして残す
+  // （何らかの経路でボタンに非キーボード的な残留フォーカスが生じても、Space
+  // は正しくアプリの一時停止として扱われることを確認する）。
   it('still toggles pause via Space when a button has residual (non-:focus-visible) focus from a prior mouse click (#66レビューmust2b)', async () => {
     useRestoredStartupPath();
     getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
@@ -700,46 +701,77 @@ describe('App keyboard shortcuts: Space, F, ? (#66 問題4)', () => {
 // deps配列に無く、初回レンダー時点のクロージャに固定されたままだったため、
 // Fキーを複数回押しても実際には毎回同じ`!isFullscreen`（常に同じ値）しか
 // 計算されず、2回目以降で正しく切り替わらなかった（実ブラウザで再現確認済み）。
+//
+// #66レビュー2巡目must2: CI環境限定でこのテストがflakyだった。原因は、
+// マウント直後に自動実行される「OSの実態からisFullscreenを取得して同期する」
+// 非同期effect（win.isFullscreen().then(setIsFullscreen)）が、beforeEachの既定
+// モック値(true)を返しており、コンポーネントの初期state(useState(true))と
+// 同じ値だったこと。同じ値へのsetStateはReactが再レンダーを省略しうるため、
+// 「非同期解決が実際にstateへ反映・コミットされた」ことをUIから積極的に確認
+// する手段が無かった。CI環境でこの非同期解決がFキー押下と競合するタイミングで
+// 届くと、テストが期待する順序と食い違い稀に失敗していた（と推測される）。
+// 修正: このテストだけ`win.isFullscreen`をあえて初期state(true)と異なる値
+// (false)に解決させ、それがコミットされたこと（タイトルが実際に反転すること）
+// を明示的に待ってからFキーを押し始める。これにより「非同期解決は必ずFキー
+// 押下より前に完了している」ことをテスト自体が保証できる。
 describe('App keyboard shortcut F toggles correctly across repeated presses (#66レビューmust1)', () => {
-  it('alternates true/false/true across three separate F presses (not stuck after the first)', async () => {
+  it('alternates on every press, not stuck after the first, and is unaffected by a same-tick async isFullscreen() resolution (#66レビュー2巡目must2)', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    win.isFullscreen.mockReset().mockResolvedValue(false);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    // 起動直後のuseState(true)による初期表示は「ウィンドウモードに切り替え」
+    // （isFullscreen=trueの時の表示）。win.isFullscreen()の非同期解決(false)が
+    // 実際にstateへ反映・コミットされると「フルスクリーンに戻す」
+    // （isFullscreen=falseの時の表示）へ変わる。この変化を確認できて初めて、
+    // 以降のFキー押下がこの非同期解決と競合しないことを保証できる。
+    await waitFor(() => {
+      expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
+    });
+    expect(win.setFullscreen).toHaveBeenNthCalledWith(1, true);
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
+    });
+    expect(win.setFullscreen).toHaveBeenNthCalledWith(2, false);
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
+    });
+    expect(win.setFullscreen).toHaveBeenNthCalledWith(3, true);
+  });
+});
+
+// #66レビュー2巡目must1（案a）: 右上ピルのコンテナに`onMouseDown`でのpreventDefault
+// が実際に配線されていることの単体テスト。jsdomは実ブラウザと異なりmousedown/click
+// だけでは要素にフォーカスを与えないため（.focus()を明示的に呼ばない限り
+// activeElementは変化しない）、「フォーカスが移らないこと」自体はここでは検証
+// できない（それは実ブラウザe2eが担当する）。ここでは「mousedownイベントの
+// preventDefault()が実際に呼ばれているか」をイベントのdefaultPrevented（＝
+// dispatchEventの戻り値がfalseになること）で直接確認する。
+describe('App top-right pill suppresses focus-stealing on mouse click (#66レビュー2巡目must1案a)', () => {
+  it('calls preventDefault() on mousedown for buttons inside the pill', async () => {
     getLastDirectoryPath.mockResolvedValue(null);
     render(<App />);
 
     await waitFor(() => {
       expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
     });
-    await waitFor(() => {
-      expect(win.isFullscreen).toHaveBeenCalled();
-    });
 
-    // 初期値はtrue（win.isFullscreen()の解決値）＝「ウィンドウモードに切り替え」
-    // ツールチップが出ている状態。各回、tooltipのテキスト変化（＝isFullscreen
-    // stateの更新が実際にコミットされたこと）を待ってから次のFを押す。
-    // #66レビューmust1の核心: 以前はhandleToggleWindowMode（と中のisFullscreen）
-    // がeffectのdepsに無く初回レンダーのクロージャに固定されていたため、
-    // 2回目以降のFで実際には毎回同じ`!true`=falseが計算され続け、
-    // win.setFullscreenに(2, true)ではなく(2, false)のような重複値が渡っていた。
-    await waitFor(() => {
-      expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
-    });
-
-    fireEvent.keyDown(document, { key: 'f' });
-    await waitFor(() => {
-      expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
-    });
-    expect(win.setFullscreen).toHaveBeenNthCalledWith(1, false);
-
-    fireEvent.keyDown(document, { key: 'f' });
-    await waitFor(() => {
-      expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
-    });
-    expect(win.setFullscreen).toHaveBeenNthCalledWith(2, true);
-
-    fireEvent.keyDown(document, { key: 'f' });
-    await waitFor(() => {
-      expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
-    });
-    expect(win.setFullscreen).toHaveBeenNthCalledWith(3, false);
+    const settingsButton = screen.getByTitle('設定');
+    const notCancelled = fireEvent.mouseDown(settingsButton);
+    expect(notCancelled).toBe(false);
   });
 });
 
