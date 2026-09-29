@@ -20,9 +20,11 @@ import {
   useImperativeHandle,
   forwardRef,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useT } from '../lib/i18n';
 import { idleFadeClassName } from '../constants';
+import { createButtonFocusGuard } from '../lib/keyboardShortcuts';
 
 interface OverlayUIProps {
   image: ImageInfo | null;
@@ -55,7 +57,13 @@ interface OverlayUIProps {
   isIdle: boolean;
   onPrevious: () => void;
   onNext: () => void;
-  onOpenPickTab: () => void;
+  /**
+   * `viaMouse`: ピック一覧タブを開いた操作がマウスクリックだったか
+   * （`event.detail > 0`）。App.tsx側のuseFocusTrap呼び出しへ伝わり、
+   * マウスで開いた場合は設定モーダルの閉じるボタンにフォーカスリングを
+   * 出さないようにする（#66レビュー3巡目should）。
+   */
+  onOpenPickTab: (viaMouse: boolean) => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onTogglePause: () => void;
@@ -111,6 +119,11 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   const [statusMessage, setStatusMessage] = useState<string>('');
   const statusTimeoutRef = useRef<number | undefined>(undefined);
   const t = useT();
+  // #66レビュー3巡目nit: 操作バー内の各ボタンへ個別に付ける
+  // onMouseDownガード（コンテナ一括ではなくボタン単位にすることで、
+  // ファイル名テキストのドラッグ選択を妨げないようにする）。
+  const barContainerRef = useRef<HTMLDivElement>(null);
+  const guardButtonMouseDown = useMemo(() => createButtonFocusGuard(barContainerRef), []);
 
   // #66レビューshould: App.tsxのグローバルESCハンドラが「…」メニュー（または
   // 除外サブメニュー）を閉じられるようにする命令的API。
@@ -317,18 +330,19 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
             された。個々のキー（Space等）だけ特別扱いする対症療法では別のキー
             （矢印キー等）で同じ穴が再現するため、根本的に「マウスクリックでは
             そもそもフォーカスを取らせない」方針に変更した
-            （macOSのWKWebViewの既定挙動と同じ）。`mousedown`で`preventDefault()`
-            するとブラウザの既定動作（クリックされた要素へフォーカスを移す）が
-            起きなくなる。バー内の全ボタンをこのコンテナが包んでいるため、
-            ここ1箇所への設置で内部の全ボタン（前へ/一時停止/次へ/ピック/…
-            メニュー・サブメニュー含む）に効く。Tabキーによるフォーカス移動は
-            `mousedown`を経由しないため影響を受けず、キーボード操作は従来通り
-            機能する。 */}
+            （macOSのWKWebViewの既定挙動と同じ）。
+            #66レビュー3巡目nit: 当初はこの`mousedown`のpreventDefaultを
+            コンテナ1箇所に付けていたが、それだとファイル名テキストの
+            ドラッグ選択も巻き込んで無効化してしまっていた。各`<button>`
+            要素にのみ`guardButtonMouseDown`（`createButtonFocusGuard`）を
+            個別に付ける方式に変更し、ファイル名は通常通り選択できるように
+            した。Tabキーによるフォーカス移動は`mousedown`を経由しないため
+            影響を受けず、キーボード操作は従来通り機能する。 */}
         <div
+          ref={barContainerRef}
           className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-xl"
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
-          onMouseDown={(e) => e.preventDefault()}
         >
           <div className="flex items-center gap-1 bg-black/50 backdrop-blur-md rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl">
             {/* 左: 情報クラスタ（GPSサムネ[任意] + ファイル名 · 撮影日 · 位置n/N） */}
@@ -339,6 +353,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                     const url = `https://www.google.com/maps?q=${image.exif!.gpsLatitude},${image.exif!.gpsLongitude}`;
                     await openUrl(url);
                   }}
+                  onMouseDown={guardButtonMouseDown}
                   className="relative shrink-0 w-8 h-8 rounded-lg overflow-hidden border border-white/10 hover:border-white/20 transition-colors group"
                   title={t('locationMapAlt')}
                   aria-label={t('locationMapAlt')}
@@ -378,6 +393,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
             <div className="flex items-center gap-0.5 shrink-0">
               <button
                 onClick={onPrevious}
+                onMouseDown={guardButtonMouseDown}
                 disabled={!canGoBack}
                 className={`p-2 ${canGoBack ? ICON_BTN : ICON_BTN_DISABLED}`}
                 title={t('previousTooltip')}
@@ -387,6 +403,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
               </button>
               <button
                 onClick={onTogglePause}
+                onMouseDown={guardButtonMouseDown}
                 className={`p-2 ${ICON_BTN}`}
                 title={isPausedByUser ? t('playTooltip') : t('pauseTooltip')}
                 aria-label={isPausedByUser ? t('playTooltip') : t('pauseTooltip')}
@@ -395,6 +412,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
               </button>
               <button
                 onClick={onNext}
+                onMouseDown={guardButtonMouseDown}
                 className={`p-2 ${ICON_BTN}`}
                 title={t('nextTooltip')}
                 aria-label={t('nextTooltip')}
@@ -407,6 +425,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
             <div className="flex items-center gap-0.5 shrink-0 relative">
               <button
                 onClick={handlePick}
+                onMouseDown={guardButtonMouseDown}
                 className={`p-2 ${ICON_BTN}`}
                 title={t('pickTooltip')}
                 aria-label={t('pickTooltip')}
@@ -419,6 +438,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                   setShowMoreMenu(!showMoreMenu);
                   setShowExcludeSubmenu(false);
                 }}
+                onMouseDown={guardButtonMouseDown}
                 className={`p-2 ${ICON_BTN}`}
                 title={t('menuTooltip')}
                 aria-label={t('menuTooltip')}
@@ -431,10 +451,26 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
               {/* サブメニュー。バーが画面右寄りに広がっても収まるよう左側へ展開する */}
               {showMoreMenu && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={handleMoreMenuBackdropClick} />
+                  {/* #66レビュー3巡目must: この背景幕はクリックでメニューを閉じる
+                      ためのもの（写真をクリックしても閉じるべき）。祖先の操作
+                      バー（`fixed bottom-6 ... -translate-x-1/2`）が
+                      transform（＋その中のガラス調バー本体が持つ
+                      backdrop-blur-md）を持つため、CSSの仕様上
+                      `position:fixed`な子要素の含有ブロックがそのバー自身の
+                      矩形に限定されてしまい、`inset-0`が画面全体ではなく
+                      バーの小さな矩形にしかならず、バーの外（写真等）を
+                      クリックしても背景幕に当たらずメニューが閉じなかった
+                      （1巡目の視覚刷新でバーにtransformを持たせて以来の回帰）。
+                      `createPortal`で`document.body`直下に出し、transform/
+                      backdrop-filterを持つ祖先の影響を受けないようにする。 */}
+                  {createPortal(
+                    <div className="fixed inset-0 z-40" onClick={handleMoreMenuBackdropClick} />,
+                    document.body,
+                  )}
                   <div className="absolute bottom-full right-0 mb-2 bg-black/90 rounded-xl shadow-2xl border border-white/10 p-1.5 space-y-0.5 w-52 z-50 backdrop-blur-md">
                     <button
                       onClick={handleOpenDirectory}
+                      onMouseDown={guardButtonMouseDown}
                       disabled={isOpeningDirectory}
                       className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors flex items-center gap-2"
                     >
@@ -443,10 +479,14 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                     </button>
 
                     <button
-                      onClick={() => {
-                        onOpenPickTab();
+                      onClick={(e) => {
+                        // #66レビュー3巡目should: マウスクリック(detail>0)か
+                        // キーボードのEnter/Space起動(detail===0)かを
+                        // App.tsx側のuseFocusTrap呼び出しへ伝える。
+                        onOpenPickTab(e.detail > 0);
                         setShowMoreMenu(false);
                       }}
+                      onMouseDown={guardButtonMouseDown}
                       className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors flex items-center gap-2"
                     >
                       <HandGrab size={14} />
@@ -457,6 +497,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                     <div className="relative">
                       <button
                         onClick={() => setShowExcludeSubmenu(!showExcludeSubmenu)}
+                        onMouseDown={guardButtonMouseDown}
                         className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors flex items-center gap-2"
                         aria-haspopup="menu"
                         aria-expanded={showExcludeSubmenu}
@@ -469,18 +510,21 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                         <div className="absolute right-full top-0 mr-1 bg-black/90 rounded-xl shadow-2xl border border-white/10 p-1.5 space-y-0.5 w-48 z-50 backdrop-blur-md">
                           <button
                             onClick={() => handleExclude('date')}
+                            onMouseDown={guardButtonMouseDown}
                             className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors"
                           >
                             {t('excludeByDate')}
                           </button>
                           <button
                             onClick={() => handleExclude('directory')}
+                            onMouseDown={guardButtonMouseDown}
                             className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors"
                           >
                             {t('excludeByDirectory')}
                           </button>
                           <button
                             onClick={() => handleExclude('file')}
+                            onMouseDown={guardButtonMouseDown}
                             className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors"
                           >
                             {t('excludeByFile')}

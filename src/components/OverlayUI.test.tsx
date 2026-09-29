@@ -257,6 +257,45 @@ describe('OverlayUI "…" menu accessibility + imperative handle (#66レビュ�
   });
 });
 
+// #66レビュー3巡目must: 背景幕(`fixed inset-0`)が操作バー（transformを持つ
+// 祖先）の子孫だと、CSSの含有ブロックがバー自身に限定され、`inset-0`が画面
+// 全体でなくバーの矩形にしかならない（写真をクリックしても閉じない回帰）。
+// `createPortal`で`document.body`直下に出すことで解消した。jsdomはレイアウト
+// の含有ブロック計算自体は行わないため、この単体テストでは「実際に
+// document.bodyの直接の子として存在するか」という構造面だけを確認する
+// （実際に画面全体をクリックして閉じることの確認は実ブラウザe2eが担当）。
+describe('OverlayUI "…" menu backdrop is portaled to document.body (#66レビュー3巡目must)', () => {
+  it('renders the click-to-close backdrop as a direct child of document.body, not nested inside the floating bar', () => {
+    const image = makeImage();
+    const { container } = render(<OverlayUI image={image} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+
+    const backdrops = Array.from(document.body.children).filter(
+      (el) => el.className === 'fixed inset-0 z-40',
+    );
+    expect(backdrops.length).toBe(1);
+    // RTLがrenderしたコンテナ（コンポーネント自身のツリー）の外にある
+    // ことも確認する（＝操作バーの祖先の内側ではない）。
+    expect(container.contains(backdrops[0])).toBe(false);
+  });
+
+  it('closes the menu when the portaled backdrop is clicked', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    expect(screen.getByText('ファイルマネージャーで開く')).toBeTruthy();
+
+    const backdrop = Array.from(document.body.children).find(
+      (el) => el.className === 'fixed inset-0 z-40',
+    )!;
+    fireEvent.click(backdrop);
+
+    expect(screen.queryByText('ファイルマネージャーで開く')).toBeNull();
+  });
+});
+
 // #66レビューshould: idle中に一時停止していても手がかりを残すため、プログレス
 // ラインはバー/ステータスメッセージとは独立して常時表示する（isIdleの影響を
 // 受けない）。
@@ -322,6 +361,55 @@ describe('OverlayUI floating bar suppresses focus-stealing on mouse click (#66�
     const nextButton = screen.getByTitle('次へ (→)');
     const notCancelled = fireEvent.mouseDown(nextButton);
     expect(notCancelled).toBe(false);
+  });
+});
+
+// #66レビュー3巡目nit: 2巡目はこのpreventDefaultをバーのコンテナ1箇所に
+// 付けていたため、ファイル名テキストの上でのmousedown（ドラッグ選択の起点）
+// まで巻き込んで無効化してしまっていた。各`<button>`要素にのみ付ける方式に
+// 変更したことで、ボタン以外の要素（ファイル名テキスト等）へのmousedownは
+// 通常通り（preventDefaultされない）であることを確認する。
+describe('OverlayUI mousedown guard is scoped to buttons only, not the whole bar (#66レビュー3巡目nit)', () => {
+  it('does not call preventDefault() on mousedown over the filename text (text stays selectable)', () => {
+    const image = makeImage({ path: '/photos/selectable-name.jpg' });
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const fileNameSpan = screen.getByText('selectable-name.jpg');
+    const notCancelled = fireEvent.mouseDown(fileNameSpan);
+    expect(notCancelled).toBe(true);
+  });
+
+  // #66レビュー3巡目nit: mousedownでのpreventDefaultにより新しいボタンへは
+  // フォーカスが移らない。そのままだと、Tabで別のボタンへ既に乗っていた
+  // フォーカスが誰にもblurされず残り続け、idleでバーが消えなくなってしまう
+  // （has-[:focus-visible]が真のまま）。同じバー内の別ボタンをマウスで
+  // 押した時点で、その残留フォーカスをblurすることを固定する。
+  it('blurs a different button that currently holds keyboard focus when another button is pressed with the mouse', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const previousButton = screen.getByTitle('前へ (←)');
+    const nextButton = screen.getByTitle('次へ (→)');
+    previousButton.focus();
+    expect(document.activeElement).toBe(previousButton);
+    const blurSpy = vi.spyOn(previousButton, 'blur');
+
+    fireEvent.mouseDown(nextButton);
+
+    expect(blurSpy).toHaveBeenCalled();
+  });
+
+  it('does not blur the same button that is being pressed', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const nextButton = screen.getByTitle('次へ (→)');
+    nextButton.focus();
+    const blurSpy = vi.spyOn(nextButton, 'blur');
+
+    fireEvent.mouseDown(nextButton);
+
+    expect(blurSpy).not.toHaveBeenCalled();
   });
 });
 

@@ -1,5 +1,6 @@
 import { Ban, ChevronRight } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { getRecentImages, excludeImage } from '../../lib/tauri';
 import type { RecentImage } from '../../types';
@@ -74,7 +75,16 @@ export function HistorySection() {
               {/* 除外サブメニュー */}
               {activeMenu === img.path && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setActiveMenu(null)} />
+                  {/* #66レビュー3巡目must（OverlayUIと同じ問題の点検で発見）:
+                      設定モーダルのパネル（motion.divでanimate={{scale:1}}を
+                      持つ）は静止時も`transform: scale(1)`をインラインで
+                      保持し続けるため、その子孫の`position:fixed`要素の含有
+                      ブロックがパネル自身に限定されてしまう。`createPortal`で
+                      `document.body`直下に出す。 */}
+                  {createPortal(
+                    <div className="fixed inset-0 z-40" onClick={() => setActiveMenu(null)} />,
+                    document.body,
+                  )}
                   <div className="absolute top-7 right-0 bg-black/90 rounded shadow-xl border border-white/8 p-1.5 space-y-0.5 w-44 z-50 backdrop-blur-sm">
                     <button
                       onClick={() => handleExclude(img.path, 'file')}
