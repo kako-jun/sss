@@ -11,9 +11,9 @@ import { useFocusTrap } from './useFocusTrap';
 // これを判定しておき、キーボード操作で開かれた時だけ復帰する（マウスなら
 // blurする）ことを固定する。
 
-function Modal({ isOpen }: { isOpen: boolean }) {
+function Modal({ isOpen, openedViaMouse }: { isOpen: boolean; openedViaMouse?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  useFocusTrap(ref, isOpen);
+  useFocusTrap(ref, isOpen, openedViaMouse);
   if (!isOpen) return null;
   return (
     <div ref={ref} tabIndex={-1} role="dialog">
@@ -22,14 +22,14 @@ function Modal({ isOpen }: { isOpen: boolean }) {
   );
 }
 
-function Harness() {
+function Harness({ openedViaMouse }: { openedViaMouse?: boolean } = {}) {
   const [open, setOpen] = useState(false);
   return (
     <div>
       <button data-testid="trigger" onClick={() => setOpen(true)}>
         open
       </button>
-      <Modal isOpen={open} />
+      <Modal isOpen={open} openedViaMouse={openedViaMouse} />
       {open && (
         <button data-testid="close" onClick={() => setOpen(false)}>
           close
@@ -108,5 +108,33 @@ describe('useFocusTrap opened-via-keyboard focus restoration (#66レビューmus
     // 再度押されてしまう。復帰させない（blurする）ことを固定する。
     expect(blurSpy).toHaveBeenCalled();
     expect(focusSpy).not.toHaveBeenCalled();
+  });
+});
+
+// #66レビュー3巡目should: マウスで開いた場合に閉じるボタンへ直接フォーカス
+// すると、rAF経由の遅延フォーカスが実ブラウザで`:focus-visible`と誤判定され
+// 常にフォーカスリングが出てしまっていた。マウスで開いた場合はコンテナ自身へ
+// フォーカスすることで、閉じるボタンにはフォーカスが行かないことを固定する。
+describe('useFocusTrap initial focus target depends on openedViaMouse (#66レビュー3巡目should)', () => {
+  it('focuses the first focusable element (close button) when openedViaMouse is false (default)', async () => {
+    const { getByTestId } = render(<Harness />);
+    act(() => {
+      (getByTestId('trigger') as HTMLButtonElement).click();
+    });
+    await flushRaf();
+
+    expect(document.activeElement).toBe(getByTestId('inside'));
+  });
+
+  it('focuses the container itself (not the close button) when openedViaMouse is true', async () => {
+    const { getByTestId, container } = render(<Harness openedViaMouse={true} />);
+    act(() => {
+      (getByTestId('trigger') as HTMLButtonElement).click();
+    });
+    await flushRaf();
+
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(document.activeElement).toBe(dialog);
+    expect(document.activeElement).not.toBe(getByTestId('inside'));
   });
 });

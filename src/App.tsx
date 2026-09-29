@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Slideshow } from './components/Slideshow';
@@ -24,7 +24,12 @@ import { X, Settings as SettingsIcon, Minimize2, Maximize2, Keyboard } from 'luc
 import logoBg from './assets/logo-bg.webp';
 import { useT, useLocale, initLocale, resolveStartupDirectoryError } from './lib/i18n';
 import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL, idleFadeClassName } from './constants';
-import { isTypingTarget, isFocusVisible, hasModifierKey } from './lib/keyboardShortcuts';
+import {
+  isTypingTarget,
+  isFocusVisible,
+  hasModifierKey,
+  createButtonFocusGuard,
+} from './lib/keyboardShortcuts';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 
 function App() {
@@ -33,6 +38,10 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<TabType>('scan');
   const [settingsKey, setSettingsKey] = useState(0);
+  // #66レビュー3巡目should: useFocusTrapへ「マウスクリックで開かれたか」を
+  // 伝えるための状態（詳細はuseFocusTrap.tsのJSDoc参照）。
+  const [settingsOpenedViaMouse, setSettingsOpenedViaMouse] = useState(false);
+  const [shortcutsOpenedViaMouse, setShortcutsOpenedViaMouse] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(0);
   const [totalImages, setTotalImages] = useState(0);
   const [canGoBack, setCanGoBack] = useState(false);
@@ -67,6 +76,10 @@ function App() {
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
   const overlayRef = useRef<OverlayUIHandle>(null);
   const { isIdle, setIsHovering } = useMouseIdle(3000);
+  // #66レビュー3巡目nit: 右上ピル内の各ボタンへ個別に付ける
+  // onMouseDownガード（詳細はOverlayUI.tsxの同種のrefと同じ理由）。
+  const pillContainerRef = useRef<HTMLDivElement>(null);
+  const guardPillButtonMouseDown = useMemo(() => createButtonFocusGuard(pillContainerRef), []);
 
   // #65 問題4: isPlaying はこのフックの内部状態ではなく、ここで導出した派生値にする。
   // 設定画面を開いている/オーバーレイにホバー中/ユーザーが明示的に一時停止した、の
@@ -365,6 +378,9 @@ function App() {
       // #66 問題4: `?` でショートカット一覧の表示を切り替える。
       if (e.key === '?') {
         e.preventDefault();
+        // #66レビュー3巡目should: キーボードで開いた場合として扱う
+        // （useFocusTrapが閉じるボタンへ正しくフォーカスリングを出す）。
+        setShortcutsOpenedViaMouse(false);
         setIsShortcutsOpen((prev) => !prev);
         return;
       }
@@ -417,14 +433,20 @@ function App() {
     };
   }, []);
 
-  const openSettings = (tab: TabType = 'scan') => {
+  // #66レビュー3巡目should: 設定モーダルを開いた操作がマウスクリックだったか
+  // どうかをuseFocusTrapへ伝える（詳細はuseFocusTrap.tsのJSDoc参照）。
+  const openSettings = (tab: TabType = 'scan', viaMouse = false) => {
     setSettingsInitialTab(tab);
     setSettingsKey((k) => k + 1);
     setIsSettingsOpen(true);
+    setSettingsOpenedViaMouse(viaMouse);
   };
 
-  const handleSettings = () => openSettings('scan');
-  const handleOpenPickTab = () => openSettings('pick');
+  // `event.detail`は実際のマウスクリックでは1以上（連続クリック数）、
+  // キーボードでのEnter/Space起動によるclickイベントでは0になる
+  // （ブラウザ標準の挙動、#66レビュー3巡目should）。
+  const handleSettings = (e: React.MouseEvent) => openSettings('scan', e.detail > 0);
+  const handleOpenPickTab = (viaMouse: boolean) => openSettings('pick', viaMouse);
 
   const handleOverlayMouseEnter = () => {
     setIsOverlayHovered(true);
@@ -603,16 +625,24 @@ function App() {
           #66レビュー2巡目must1（案a）: OverlayUIの操作バーと同じ理由で、
           マウスクリックがこのピル内のボタンへフォーカスを残さないように
           `onMouseDown`でpreventDefaultする（Tabでのキーボード操作には影響
-          しない）。 */}
+          しない）。#66レビュー3巡目nit: OverlayUIと同じ理由で、この
+          preventDefaultはコンテナではなく各ボタンへ個別に付ける
+          （`guardPillButtonMouseDown`）。 */}
       <div
+        ref={pillContainerRef}
         className={`fixed top-4 right-4 z-50 ${idleFadeClassName(isIdle)}`}
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
-        onMouseDown={(e) => e.preventDefault()}
       >
         <div className="flex items-center gap-0.5 bg-black/50 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
           <button
-            onClick={() => setIsShortcutsOpen(true)}
+            onClick={(e) => {
+              // #66レビュー3巡目should: マウスクリック(detail>0)かキーボードの
+              // Enter/Space起動(detail===0)かをuseFocusTrapへ伝える。
+              setShortcutsOpenedViaMouse(e.detail > 0);
+              setIsShortcutsOpen(true);
+            }}
+            onMouseDown={guardPillButtonMouseDown}
             className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
             title={t('shortcutsButtonTooltip')}
             aria-label={t('shortcutsButtonTooltip')}
@@ -625,6 +655,7 @@ function App() {
 
           <button
             onClick={handleToggleWindowMode}
+            onMouseDown={guardPillButtonMouseDown}
             className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
             title={isFullscreen ? t('switchToWindowMode') : t('switchToFullscreen')}
             aria-label={isFullscreen ? t('switchToWindowMode') : t('switchToFullscreen')}
@@ -637,6 +668,7 @@ function App() {
 
           <button
             onClick={handleSettings}
+            onMouseDown={guardPillButtonMouseDown}
             className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
             title={t('settingsTitle')}
             aria-label={t('settingsTitle')}
@@ -649,6 +681,7 @@ function App() {
 
           <button
             onClick={() => exit(0)}
+            onMouseDown={guardPillButtonMouseDown}
             className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
             title={t('exitTooltip')}
             aria-label={t('exitTooltip')}
@@ -743,7 +776,11 @@ function App() {
       />
 
       {/* ショートカット一覧（#66 問題4） */}
-      <ShortcutsOverlay isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
+      <ShortcutsOverlay
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
+        openedViaMouse={shortcutsOpenedViaMouse}
+      />
 
       {/* 設定画面 */}
       <Settings
@@ -753,6 +790,7 @@ function App() {
         onScanComplete={handleScanComplete}
         onIntervalChange={handleIntervalChange}
         initialTab={settingsInitialTab}
+        openedViaMouse={settingsOpenedViaMouse}
       />
     </div>
   );

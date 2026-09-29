@@ -22,6 +22,11 @@ interface SettingsProps {
   onScanComplete: () => void;
   onIntervalChange?: (interval: number) => void;
   initialTab?: TabType;
+  /**
+   * このモーダルを開いた操作がマウスクリックだったか（#66レビュー3巡目
+   * should）。`useFocusTrap`へそのまま渡す。詳細はそちらのJSDoc参照。
+   */
+  openedViaMouse?: boolean;
 }
 
 export type TabType = 'scan' | 'options' | 'exclude' | 'pick' | 'history' | 'stats' | 'info';
@@ -44,6 +49,7 @@ export function Settings({
   onScanComplete,
   onIntervalChange,
   initialTab,
+  openedViaMouse = false,
 }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'scan');
   const [statsKey, setStatsKey] = useState(0); // 統計グラフの強制再マウント用
@@ -51,7 +57,7 @@ export function Settings({
   const panelRef = useRef<HTMLDivElement>(null);
   // #66 問題9(a11y): 設定モーダルは role=dialog/aria-modal無し・フォーカストラップ
   // 無しだった（Tabで背後の写真オーバーレイへフォーカスが漏れる）。
-  useFocusTrap(panelRef, isOpen);
+  useFocusTrap(panelRef, isOpen, openedViaMouse);
 
   if (!isOpen) return null;
 
@@ -107,7 +113,16 @@ export function Settings({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.97, opacity: 0 }}
         transition={{ duration: MODAL_ANIMATION_DURATION }}
-        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-2xl w-full mx-8 max-h-[76vh] overflow-hidden border border-white/10 flex flex-col"
+        // #66レビュー3巡目should: マウスで開いた場合はuseFocusTrapがパネル
+        // 自身（tabIndex=-1）にフォーカスする。その際にデフォルトの
+        // フォーカスリングが出ないようにする（キーボードで開いた場合は閉じる
+        // ボタンにフォーカスが行くのでこの見た目には関係しない）。
+        // `!outline-none`（important修飾）が必要な理由: index.cssの
+        // `[tabindex]:focus-visible { outline: ...; }` は属性セレクタ+疑似
+        // クラスで詳細度(0,2,0)を持ち、Tailwindの素の`.outline-none`
+        // （詳細度(0,1,0)）より高いため、importantを付けないと負けて
+        // リングが出てしまう（実ブラウザe2eで確認済み）。
+        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-2xl w-full mx-8 max-h-[76vh] overflow-hidden border border-white/10 flex flex-col !outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">

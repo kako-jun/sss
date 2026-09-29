@@ -8,6 +8,11 @@ import { MODAL_ANIMATION_DURATION } from '../constants';
 interface ShortcutsOverlayProps {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * このモーダルを開いた操作がマウスクリックだったか（#66レビュー3巡目
+   * should）。`useFocusTrap`へそのまま渡す。詳細はそちらのJSDoc参照。
+   */
+  openedViaMouse?: boolean;
 }
 
 /**
@@ -15,10 +20,14 @@ interface ShortcutsOverlayProps {
  * ボタンで開く。Escapeでの閉じ方は`App.tsx`のグローバルキーボードハンドラが担当する
  * （設定モーダルと同じ方針で、ここでは扱わない）。
  */
-export function ShortcutsOverlay({ isOpen, onClose }: ShortcutsOverlayProps) {
+export function ShortcutsOverlay({
+  isOpen,
+  onClose,
+  openedViaMouse = false,
+}: ShortcutsOverlayProps) {
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef, isOpen);
+  useFocusTrap(panelRef, isOpen, openedViaMouse);
 
   if (!isOpen) return null;
 
@@ -51,7 +60,10 @@ export function ShortcutsOverlay({ isOpen, onClose }: ShortcutsOverlayProps) {
         transition={{ duration: MODAL_ANIMATION_DURATION }}
         // #66レビューnit: 設定モーダルと同じ角丸(rounded-2xl)・枠線色(border-white/10)・
         // 閉じるボタン(rounded-full)に統一する。
-        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-md w-full mx-8 border border-white/10"
+        // #66レビュー3巡目should: `!outline-none`はSettingsと同じ理由
+        // （マウスで開いた場合にuseFocusTrapがパネル自身へフォーカスする。
+        // importantが必要な理由もSettings/index.tsxの同箇所コメント参照）。
+        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-md w-full mx-8 border border-white/10 !outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">

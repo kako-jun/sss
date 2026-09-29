@@ -920,6 +920,146 @@ const scenarios = [
     },
   },
   {
+    // #66レビュー3巡目must: 「…」メニューの背景幕(`fixed inset-0`)が、祖先の
+    // 操作バー（transform）とその中のガラス調バー本体（backdrop-blur-md）に
+    // よってCSSの含有ブロックがバー自身の矩形に限定され、`inset-0`が画面全体
+    // でなくバーの小さな矩形にしかならなかった（1巡目の視覚刷新でバーに
+    // transformを持たせて以来の回帰）。写真をクリックしても閉じず、`createPortal`
+    // で`document.body`直下に出して解消した。メニューを開いた状態で写真
+    // （バー・ピルの外）をクリックすると、メニューが閉じ、かつ「次へ」等の
+    // アプリの他の操作は誤って発火しないことを確認する。
+    name: '「…」メニューを開いて写真をクリックすると閉じ、次へ等は発火しない (#66レビュー3巡目must)',
+    hash: 'slides',
+    async run(page) {
+      // このメニュー項目は<svg>アイコンとテキストが兄弟のため、isVisible()の
+      // 「葉ノードのみ」限定チェックには乗らない（項目自体はbuttonの子に
+      // アイコン+テキストの2ノードを持つ）。ボタンのtextContentで直接判定する。
+      const menuItemVisible = () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll('button')].some((b) =>
+            b.textContent.includes('ファイルマネージャーで開く'),
+          ),
+        );
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      await realMouseClickByTitle(page, 'メニュー');
+      await page.waitForTimeout(200);
+      const openedAfterClick = await menuItemVisible();
+      const nextsBefore = await countCalls(page, 'get_next_image');
+      // 写真（バー・ピルの外、画面中央付近）をクリックする。
+      await page.mouse.click(640, 200);
+      await page.waitForTimeout(200);
+      const closedAfterPhotoClick = !(await menuItemVisible());
+      const nextsAfter = await countCalls(page, 'get_next_image');
+      const pass = openedAfterClick && closedAfterPhotoClick && nextsAfter === nextsBefore;
+      return {
+        pass,
+        detail: `openedAfterClick=${openedAfterClick} closedAfterPhotoClick=${closedAfterPhotoClick} nextsBefore=${nextsBefore} nextsAfter=${nextsAfter}`,
+      };
+    },
+  },
+  {
+    // #66レビュー3巡目should: マウスで開いた場合、rAF経由で遅延実行される
+    // `.focus()`呼び出しは、実ブラウザでは直前のマウス操作から時間的に切り離
+    // されているため`:focus-visible`と判定されうる（対象がパネル自身でも
+    // 閉じるボタンでも同様）。そのためこのテストでは「`:focus-visible`が
+    // falseになる」ことではなく、パネル自身にはCSSで`outline-none`を付けて
+    // あるため実際に可視のリングが出ないこと（CLAUDE.md絶対ルール1: 可視判定は
+    // 実ブラウザのcomputed styleで行う）と、閉じるボタン自身にはフォーカスが
+    // 全く移っていないこと（＝そちらにリングが出ようがない）を確認する。
+    name: '設定をマウスクリックで開くと閉じるボタンにフォーカスリングが出ない (#66レビュー3巡目should)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await wakeFromIdle(page);
+      await page.click('button[title="設定"]');
+      await page.waitForTimeout(300);
+      const focusState = await page.evaluate(() => {
+        const el = document.activeElement;
+        const dialog = document.querySelector('[role="dialog"]');
+        const style = el ? getComputedStyle(el) : null;
+        return {
+          isDialog: !!dialog && el === dialog,
+          isCloseButton: !!el && el.tagName === 'BUTTON' && el.title === '閉じる',
+          // Tailwindの`outline-none`（`!outline-none`も同様）は`outline-style:
+          // none`にはせず、`outline: 2px solid transparent`にする（Windows
+          // High Contrast等のためoutline自体は残し、色を透明にして見た目だけ
+          // 消す設計）。よって可視判定はstyle/widthでなくcolorの透明度で行う。
+          outlineColor: style ? style.outlineColor : null,
+        };
+      });
+      const isTransparentOutline =
+        focusState.outlineColor === 'rgba(0, 0, 0, 0)' || focusState.outlineColor === 'transparent';
+      const pass = focusState.isDialog && !focusState.isCloseButton && isTransparentOutline;
+      return { pass, detail: JSON.stringify(focusState) };
+    },
+  },
+  {
+    // 上のshouldケースと対称に、キーボード操作（Tab+Enter）で開いた場合は
+    // 従来通り閉じるボタンへフォーカスし、正しく:focus-visibleがtrueになる
+    // （＝リングが出る）ことも確認する。回帰でこちらを壊していないことの
+    // 確認が目的。
+    name: '設定をキーボード操作(Tab+Enter)で開くと閉じるボタンに正しくフォーカスリングが出る (#66レビュー3巡目should)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      let reached = false;
+      for (let i = 0; i < 20; i++) {
+        await page.keyboard.press('Tab');
+        const isSettingsFocused = await page.evaluate(
+          () => document.activeElement?.title === '設定',
+        );
+        if (isSettingsFocused) {
+          reached = true;
+          break;
+        }
+      }
+      if (!reached) return { pass: false, detail: 'Tabで設定ボタンに到達できなかった' };
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(300);
+      const focusState = await page.evaluate(() => {
+        const el = document.activeElement;
+        return {
+          isCloseButton: !!el && el.tagName === 'BUTTON' && el.title === '閉じる',
+          focusVisible: el ? el.matches(':focus-visible') : null,
+        };
+      });
+      const pass = focusState.isCloseButton && focusState.focusVisible === true;
+      return { pass, detail: JSON.stringify(focusState) };
+    },
+  },
+  {
+    // #66レビュー3巡目nit: mousedownでのpreventDefaultにより、クリックされた
+    // ボタン自身は新しくフォーカスを取らない。だが、既にTabキーボード操作で
+    // 別のボタンへ残っていたフォーカスは、それだけでは誰にもblurされず
+    // 残り続けてしまい、idleになってもhas-[:focus-visible]が真のままバーが
+    // 消えなくなる。同じバー内の別ボタンをマウスで押した時点で、その残留
+    // フォーカスをblurすることで、idleで正しくバーが消えることを確認する。
+    name: 'Tabでフォーカス中のボタンがある状態で別ボタンをマウスで押すと、残留フォーカスがblurされidleでバーが消える (#66レビュー3巡目nit)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      let reached = false;
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press('Tab');
+        const isPauseFocused = await page.evaluate(
+          () => document.activeElement?.title === '一時停止',
+        );
+        if (isPauseFocused) {
+          reached = true;
+          break;
+        }
+      }
+      if (!reached) return { pass: false, detail: 'Tabで一時停止ボタンに到達できなかった' };
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.mouse.move(20, 20);
+      await page.waitForTimeout(3600);
+      const opacity = await getOverlayBarWrapperOpacity(page);
+      return { pass: opacity === 0, detail: `opacity=${opacity}` };
+    },
+  },
+  {
     // #66 問題4: `?`でショートカット一覧を開閉できる。Escapeで閉じる時はアプリを
     // 終了しない。
     name: '? opens the shortcuts overlay; Escape closes it without exiting (#66 問題4)',
