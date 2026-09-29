@@ -211,6 +211,15 @@ describe('tauri command wrappers', () => {
     expect(invoke).toHaveBeenCalledWith('delete_picked_image', { imagePath: '/a.jpg' });
   });
 
+  it('getThumbnail invokes get_thumbnail with imagePath and returns the tagged result (#67)', async () => {
+    invoke.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/x.jpg' });
+    expect(await tauri.getThumbnail('/a.jpg')).toEqual({
+      kind: 'image',
+      path: '/cache/thumbs/x.jpg',
+    });
+    expect(invoke).toHaveBeenCalledWith('get_thumbnail', { imagePath: '/a.jpg' });
+  });
+
   it('propagates rejections from invoke', async () => {
     invoke.mockRejectedValue(new Error('backend boom'));
     await expect(tauri.getNextImage()).rejects.toThrow('backend boom');

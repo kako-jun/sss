@@ -473,7 +473,7 @@ fn clear_directory_contents(dir: &Path) {
 
 /// 一時ファイルに書いてから rename する（同一ディレクトリ内なのでアトミック）。
 /// これにより `exists()` が書込途中のファイルを返すことがなくなる。
-fn write_atomic(dest: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(dest: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let file_name = dest
         .file_name()
         .map(|n| n.to_string_lossy().to_string())

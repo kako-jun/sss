@@ -363,6 +363,10 @@ CREATE TABLE scan_history (
 - EXIF情報抽出
 - 画像サイズ取得（ヘッダのみ、`ImageInfo`表示用に回転時は幅高さ入替）
 
+### src-tauri/src/thumbnail.rs
+
+- 設定画面（履歴・ピック済み）用の長辺256pxのJPEGサムネイル生成（#67）。保存先は`<cache_dir>/thumbs/{md5(パス:更新日時:サイズ)}.jpg`（asset scope許可済み。起動・リセット時の`clear_cache_dir`で掃除され、次回は再生成）。EXIF Orientationは常に焼き込み、透過は黒背景に合成。巨大画像のデコードが並列で走らないよう静的Mutexで直列化し、`cache_worker::write_atomic`で原子的に書く
+
 ### src-tauri/src/cache_worker.rs
 
 - 画像最適化キャッシュを作る単一ワーカースレッド（優先度/世代管理付きキュー、アトミック書込、サイズ上限LRU削除、`request_current_and_wait`同期待ち、失敗セット、panic保護）
@@ -447,6 +451,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
   21. `get_picked_images`: ピック済み画像一覧
   22. `delete_picked_image`: ピック済み画像を削除
   23. `reset_all_display_counts`: 全画像の表示回数をリセット
+  24. `get_thumbnail`: 設定画面用サムネイル（静止画は縮小済みJPEGのパス、動画は`{kind:'video'}`。#67）
 
 ## Reactコンポーネント構成
 

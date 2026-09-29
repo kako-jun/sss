@@ -5,10 +5,12 @@ import type { RecentImage } from '../../types';
 
 const getRecentImages = vi.fn();
 const excludeImage = vi.fn();
+const getThumbnail = vi.fn();
 
 vi.mock('../../lib/tauri', () => ({
   getRecentImages: (...args: unknown[]) => getRecentImages(...args),
   excludeImage: (...args: unknown[]) => excludeImage(...args),
+  getThumbnail: (...args: unknown[]) => getThumbnail(...args),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -22,6 +24,8 @@ import { HistorySection } from './HistorySection';
 beforeEach(() => {
   getRecentImages.mockReset();
   excludeImage.mockReset();
+  getThumbnail.mockReset();
+  getThumbnail.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/t.jpg' });
 });
 
 // #66レビュー3巡目must（OverlayUIと同じ問題の点検で発見）: 設定モーダルの

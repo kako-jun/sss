@@ -455,6 +455,42 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
     Ok(filtered)
 }
 
+/// `get_thumbnail` の結果（#67）。動画は静止画サムネイルを作らず、フロントがアイコンで示す。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ThumbnailResult {
+    /// 静止画。`path` は長辺256pxのJPEG（キャッシュ配下＝asset scope 許可済み）。
+    Image { path: String },
+    /// 動画。サムネイルは無い。
+    Video,
+}
+
+/// 設定画面（履歴・ピック済み）用の小さなサムネイルを返す（#67）。
+/// 原本（5000万画素級）を `<img>` に直接読ませる代わりに、バックエンドで縮小して
+/// キャッシュする。デコードは重いのでブロッキングスレッドで実行する。
+#[tauri::command]
+pub async fn get_thumbnail(
+    image_path: String,
+    state: State<'_, AppState>,
+) -> Result<ThumbnailResult, String> {
+    let source = PathBuf::from(&image_path);
+    if crate::scanner::is_video_path(&source) {
+        return Ok(ThumbnailResult::Video);
+    }
+    if !crate::scanner::is_image_path(&source) {
+        return Err("Not a supported image file".to_string());
+    }
+    let cache_dir = state.cache_dir.clone();
+    let thumb = tauri::async_runtime::spawn_blocking(move || {
+        crate::thumbnail::ensure_thumbnail(&source, &cache_dir)
+    })
+    .await
+    .map_err(|e| format!("Thumbnail task failed: {e}"))??;
+    Ok(ThumbnailResult::Image {
+        path: thumb.to_string_lossy().to_string(),
+    })
+}
+
 /// ピック済みフォルダのパスを取得するヘルパー
 pub(crate) fn get_picked_directory(db: &crate::database::Database) -> Result<PathBuf, String> {
     let share_setting = db

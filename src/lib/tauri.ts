@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type {
   DisplayStats,
+  ThumbnailResult,
   ExcludeOutcome,
   IgnoreRule,
   ImageNavigationResult,
@@ -214,6 +215,14 @@ export async function getRecentImages(): Promise<RecentImage[]> {
  */
 export async function getPickedImages(): Promise<string[]> {
   return await invoke<string[]>('get_picked_images');
+}
+
+/**
+ * 設定画面用の小さなサムネイルを取得する（#67）。
+ * 静止画はバックエンドが縮小してキャッシュした JPEG のパスを返す。動画は `{ kind: 'video' }`。
+ */
+export async function getThumbnail(imagePath: string): Promise<ThumbnailResult> {
+  return await invoke<ThumbnailResult>('get_thumbnail', { imagePath });
 }
 
 /**

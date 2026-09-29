@@ -1,10 +1,10 @@
 import { Ban, ChevronRight } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import { getRecentImages, excludeImage } from '../../lib/tauri';
 import type { RecentImage } from '../../types';
 import { useT } from '../../lib/i18n';
+import { Thumbnail } from './Thumbnail';
 
 export function HistorySection() {
   const t = useT();
@@ -51,12 +51,7 @@ export function HistorySection() {
         <div className="grid grid-cols-4 gap-2">
           {images.map((img) => (
             <div key={img.path} className="relative group">
-              <img
-                src={convertFileSrc(img.path)}
-                alt=""
-                className="w-full aspect-square object-cover rounded border border-white/5"
-                loading="lazy"
-              />
+              <Thumbnail path={img.path} />
               {/* 表示回数 */}
               <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white/50 text-xs text-center py-0.5 rounded-b">
                 &times;{img.displayCount}

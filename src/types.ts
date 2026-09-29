@@ -64,6 +64,9 @@ export interface RecentImage {
   lastDisplayed: string;
 }
 
+// 設定画面サムネイルの取得結果（#67）。静止画は縮小済み JPEG のパス、動画はサムネイル無し。
+export type ThumbnailResult = { kind: 'image'; path: string } | { kind: 'video' };
+
 // 除外ルール1件（"glob": 通常のglobパターン・末尾 `/` はディレクトリ名照合。
 // "date": 撮影日（YYYY-MM-DD）による除外）
 export interface IgnoreRule {

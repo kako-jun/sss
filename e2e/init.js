@@ -140,6 +140,9 @@
         case 'get_picked_images':
         case 'get_recent_images':
           return [];
+        case 'get_thumbnail':
+          // #67: 設定画面のサムネイルはバックエンドが縮小した JPEG のパスを返す（e2e は空扱い）。
+          return { kind: 'video' };
         case 'get_display_stats':
           // #67: 集計済みのヒストグラム（全件一覧ではない）。
           // 'stats' = 完全平等ランダムが働いた状態（差1以内）、'statsspread' = 偏りのある状態。
