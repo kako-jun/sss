@@ -204,4 +204,35 @@ mod tests {
         assert_eq!(stats.mean, 2.0);
         assert_eq!(stats.bins, vec![bin(2, 100_000)]);
     }
+
+    // ---- 独立QA観点表からの追加テスト（#67） ----
+
+    #[test]
+    fn build_display_stats_all_unshown_is_a_single_zero_bin() {
+        let stats = build_display_stats(std::iter::repeat_n(0, 1234));
+        assert_eq!(stats.files, 1234);
+        assert_eq!((stats.min, stats.max), (0, 0));
+        assert_eq!(stats.mean, 0.0);
+        assert_eq!(stats.bins, vec![bin(0, 1234)]);
+    }
+
+    #[test]
+    fn build_display_stats_single_file_has_min_max_mean_equal() {
+        let stats = build_display_stats([5]);
+        assert_eq!(stats.files, 1);
+        assert_eq!((stats.min, stats.max), (5, 5));
+        assert_eq!(stats.mean, 5.0);
+        assert_eq!(stats.bins, vec![bin(5, 1)]);
+    }
+
+    /// 合計は i64 で持つ。i32::MAX を複数足しても溢れず、平均が正しく出る。
+    #[test]
+    fn build_display_stats_sum_does_not_overflow_i32() {
+        let stats = build_display_stats([i32::MAX, i32::MAX, i32::MAX, 0]);
+        assert_eq!(stats.files, 4);
+        assert_eq!((stats.min, stats.max), (0, i32::MAX));
+        let expected = 3.0 * f64::from(i32::MAX) / 4.0;
+        assert!((stats.mean - expected).abs() < 1.0, "mean={}", stats.mean);
+        assert_eq!(stats.bins, vec![bin(0, 1), bin(i32::MAX, 3)]);
+    }
 }

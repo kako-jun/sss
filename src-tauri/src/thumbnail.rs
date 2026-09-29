@@ -297,4 +297,242 @@ mod tests {
         assert!(!thumbs.join("old.jpg").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    // ---- 独立QA観点表からの追加テスト（#67） ----
+
+    /// EXIF Orientation だけを持つ最小の APP1(Exif) セグメント（リトルエンディアン）。
+    fn exif_orientation_segment(orientation: u16) -> Vec<u8> {
+        let mut tiff = Vec::new();
+        tiff.extend_from_slice(b"II");
+        tiff.extend_from_slice(&42u16.to_le_bytes());
+        tiff.extend_from_slice(&8u32.to_le_bytes());
+        tiff.extend_from_slice(&1u16.to_le_bytes());
+        tiff.extend_from_slice(&0x0112u16.to_le_bytes());
+        tiff.extend_from_slice(&3u16.to_le_bytes());
+        tiff.extend_from_slice(&1u32.to_le_bytes());
+        tiff.extend_from_slice(&orientation.to_le_bytes());
+        tiff.extend_from_slice(&[0u8, 0u8]);
+        tiff.extend_from_slice(&0u32.to_le_bytes());
+        let mut app1 = vec![0xFFu8, 0xE1];
+        app1.extend_from_slice(&((2 + 6 + tiff.len()) as u16).to_be_bytes());
+        app1.extend_from_slice(b"Exif\0\0");
+        app1.extend_from_slice(&tiff);
+        app1
+    }
+
+    fn encode_jpeg(img: &image::RgbImage) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgb8(img.clone())
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+        bytes
+    }
+
+    /// 決定的な疑似ノイズ画像（JPEG が十分な大きさになり、途中で切れば壊れる）。
+    fn noisy_image(w: u32, h: u32) -> image::RgbImage {
+        let mut state: u32 = 0x1234_5678;
+        image::RgbImage::from_fn(w, h, |_, _| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            image::Rgb([(state >> 24) as u8, (state >> 16) as u8, (state >> 8) as u8])
+        })
+    }
+
+    fn png_of_size(dir: &Path, name: &str, w: u32, h: u32) -> PathBuf {
+        let path = dir.join(name);
+        image::RgbImage::from_pixel(w, h, image::Rgb([10, 200, 90]))
+            .save(&path)
+            .unwrap();
+        path
+    }
+
+    fn thumb_dims(thumb: &Path) -> (u32, u32) {
+        let img = image::open(thumb).unwrap();
+        (img.width(), img.height())
+    }
+
+    fn leftover_tmp_files(cache: &Path) -> Vec<String> {
+        std::fs::read_dir(cache.join("thumbs"))
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .filter(|n| n.starts_with('.') || n.contains(".tmp"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn exif_orientation_6_swaps_width_and_height_in_the_thumbnail() {
+        let dir = workspace("exif6");
+        let src = dir.join("rotated.jpg");
+        // 格納は横長 40x20。Orientation=6（90度回転）なので表示は縦長 20x40 になる。
+        let base = encode_jpeg(&image::RgbImage::from_pixel(
+            40,
+            20,
+            image::Rgb([90, 90, 200]),
+        ));
+        let mut bytes = base[0..2].to_vec();
+        bytes.extend_from_slice(&exif_orientation_segment(6));
+        bytes.extend_from_slice(&base[2..]);
+        std::fs::write(&src, bytes).unwrap();
+
+        let thumb = ensure_thumbnail(&src, &dir.join("cache")).unwrap();
+        assert_eq!(thumb_dims(&thumb), (20, 40));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn long_edge_at_or_below_256_keeps_original_size_and_257_is_downscaled() {
+        let dir = workspace("edges");
+        let cache = dir.join("cache");
+        let t255 = ensure_thumbnail(&png_of_size(&dir, "e255.png", 255, 100), &cache).unwrap();
+        assert_eq!(thumb_dims(&t255), (255, 100));
+        let t256 = ensure_thumbnail(&png_of_size(&dir, "e256.png", 256, 100), &cache).unwrap();
+        assert_eq!(thumb_dims(&t256), (256, 100));
+        let t257 = ensure_thumbnail(&png_of_size(&dir, "e257.png", 257, 100), &cache).unwrap();
+        let (w, h) = thumb_dims(&t257);
+        assert_eq!(w, THUMB_MAX_EDGE, "長辺 257 は 256 に縮小される");
+        assert!(h <= 100, "縦横比を保って縮む: {h}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn portrait_source_is_limited_by_height_not_width() {
+        let dir = workspace("portrait");
+        let src = png_of_size(&dir, "tall.png", 100, 1000);
+        let thumb = ensure_thumbnail(&src, &dir.join("cache")).unwrap();
+        let (w, h) = thumb_dims(&thumb);
+        assert_eq!(h, THUMB_MAX_EDGE);
+        assert!(w < h, "縦長のまま: {w}x{h}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn changing_source_mtime_or_size_yields_a_new_thumbnail_path() {
+        let dir = workspace("invalidate");
+        let cache = dir.join("cache");
+        let src = png_of_size(&dir, "a.png", 300, 300);
+        let first = ensure_thumbnail(&src, &cache).unwrap();
+
+        // 内容（サイズ）を変えて書き直す → 別パスで再生成される。
+        image::RgbImage::from_pixel(400, 200, image::Rgb([1, 1, 1]))
+            .save(&src)
+            .unwrap();
+        let after_resize = ensure_thumbnail(&src, &cache).unwrap();
+        assert_ne!(after_resize, first);
+        assert_eq!(thumb_dims(&after_resize).0, THUMB_MAX_EDGE);
+
+        // サイズは同じで mtime だけ進める（秒精度なので 10 秒進める）→ また別パス。
+        let bumped = std::time::SystemTime::now() + std::time::Duration::from_secs(10);
+        std::fs::File::options()
+            .write(true)
+            .open(&src)
+            .unwrap()
+            .set_modified(bumped)
+            .unwrap();
+        let after_touch = ensure_thumbnail(&src, &cache).unwrap();
+        assert_ne!(after_touch, after_resize);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn eight_threads_on_the_same_source_all_succeed_with_one_path_and_no_tmp_leftovers() {
+        let dir = workspace("same_source");
+        let cache = dir.join("cache");
+        let src = png_of_size(&dir, "shared.png", 900, 600);
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let (src, cache) = (src.clone(), cache.clone());
+                std::thread::spawn(move || ensure_thumbnail(&src, &cache))
+            })
+            .collect();
+        let paths: Vec<PathBuf> = handles
+            .into_iter()
+            .map(|h| h.join().unwrap().expect("全員 Ok のはず"))
+            .collect();
+
+        assert!(paths.iter().all(|p| *p == paths[0]), "同一パス: {paths:?}");
+        assert_eq!(
+            thumb_dims(&paths[0]).0,
+            THUMB_MAX_EDGE,
+            "出力はデコードできる"
+        );
+        assert_eq!(leftover_tmp_files(&cache), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn concurrent_requests_for_different_sources_finish_without_deadlock() {
+        let dir = workspace("many_sources");
+        let cache = dir.join("cache");
+        let (tx, rx) = std::sync::mpsc::channel();
+        for i in 0..8u32 {
+            let src = png_of_size(&dir, &format!("s{i}.png"), 300 + i, 200);
+            let (cache, tx) = (cache.clone(), tx.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(ensure_thumbnail(&src, &cache));
+            });
+        }
+        drop(tx);
+        let mut done = 0;
+        while let Ok(result) = rx.recv_timeout(std::time::Duration::from_secs(60)) {
+            result.expect("各サムネイルは成功するはず");
+            done += 1;
+        }
+        assert_eq!(done, 8, "60 秒以内に全員が終わる（デッドロックしない）");
+        assert_eq!(leftover_tmp_files(&cache), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn truncated_jpeg_fails_without_leaving_tmp_or_a_bogus_thumbnail() {
+        let dir = workspace("truncated");
+        let full = encode_jpeg(&noisy_image(300, 300));
+        let cache = dir.join("cache");
+        // ヘッダ直後で切れた本物の JPEG。デコードできないのでエラーになる。
+        let src = dir.join("cut.jpg");
+        std::fs::write(&src, &full[..full.len().min(200)]).unwrap();
+        assert!(ensure_thumbnail(&src, &cache).is_err());
+        assert_eq!(leftover_tmp_files(&cache), Vec::<String>::new());
+        let produced = std::fs::read_dir(cache.join("thumbs"))
+            .map(|rd| rd.count())
+            .unwrap_or(0);
+        assert_eq!(produced, 0, "失敗時にサムネイル本体も残さない");
+
+        // 途中（半分）で切れた場合、デコーダが部分画像を返すかどうかは image crate の
+        // 挙動次第。どちらでも「Ok なら読めるサムネイル、Err なら残骸なし」を守る。
+        let half = dir.join("half.jpg");
+        std::fs::write(&half, &full[..full.len() / 2]).unwrap();
+        match ensure_thumbnail(&half, &cache) {
+            Ok(thumb) => assert!(image::open(&thumb).is_ok(), "Ok なら読める JPEG"),
+            Err(_) => assert_eq!(leftover_tmp_files(&cache), Vec::<String>::new()),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn japanese_spaced_and_emoji_paths_work() {
+        let dir = workspace("unicode");
+        let folder = dir.join("旅行 写真 🌸");
+        std::fs::create_dir_all(&folder).unwrap();
+        let src = png_of_size(&folder, "夕焼け 1 🌇.png", 320, 240);
+        let thumb = ensure_thumbnail(&src, &dir.join("cache dir 🗂")).unwrap();
+        assert_eq!(thumb_dims(&thumb).0, THUMB_MAX_EDGE);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn zero_byte_source_fails_without_writing() {
+        let dir = workspace("zero");
+        let src = dir.join("empty.jpg");
+        std::fs::write(&src, b"").unwrap();
+        let cache = dir.join("cache");
+        assert!(ensure_thumbnail(&src, &cache).is_err());
+        assert!(!cache.join("thumbs").exists() || leftover_tmp_files(&cache).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

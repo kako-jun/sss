@@ -266,4 +266,172 @@ mod tests {
         assert!(victim.exists());
         let _ = fs::remove_dir_all(&dir);
     }
+
+    // ---- 独立QA観点表からの追加テスト（#67） ----
+
+    #[test]
+    fn numbered_file_name_handles_dotfiles_multi_dots_and_keeps_extension_case() {
+        // ドットファイルは「拡張子なし」扱い（stem 全体に連番）。
+        assert_eq!(numbered_file_name(OsStr::new(".hidden"), 1), ".hidden_1");
+        // 複数ドットは最後のドットだけが拡張子。
+        assert_eq!(numbered_file_name(OsStr::new("a.tar.gz"), 1), "a.tar_1.gz");
+        // 拡張子の大文字小文字は保つ。
+        assert_eq!(numbered_file_name(OsStr::new("A.JPG"), 1), "A_1.JPG");
+    }
+
+    #[test]
+    fn extensionless_file_copied_twice_gets_noext_then_noext_1_without_trailing_dot() {
+        let dir = workspace("noext");
+        let dest = dir.join("picked");
+        fs::create_dir_all(&dest).unwrap();
+        let src = dir.join("noext");
+        fs::write(&src, b"data").unwrap();
+
+        let first = copy_with_unique_name(&src, &dest).unwrap();
+        let second = copy_with_unique_name(&src, &dest).unwrap();
+        assert_eq!(first.file_name().unwrap(), "noext");
+        assert_eq!(second.file_name().unwrap(), "noext_1");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 連番は「一番若い空き番号」から埋める（a.png と a_2.png があるなら a_1.png）。
+    /// 空きを飛ばして最大値+1 にはしない現在の挙動を固定する。
+    #[test]
+    fn numbering_fills_the_lowest_free_slot_before_skipping_ahead() {
+        let dir = workspace("fill_gap");
+        let dest = dir.join("picked");
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(dest.join("a.png"), b"x").unwrap();
+        fs::write(dest.join("a_2.png"), b"y").unwrap();
+        let src = dir.join("a.png");
+        fs::write(&src, b"new").unwrap();
+
+        let out = copy_with_unique_name(&src, &dest).unwrap();
+        assert_eq!(out.file_name().unwrap(), "a_1.png");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn eight_threads_copying_the_same_name_create_eight_distinct_files_without_overwrite() {
+        let dir = workspace("threads");
+        let dest = dir.join("picked");
+        fs::create_dir_all(&dest).unwrap();
+
+        // 各スレッドは別ディレクトリの同名ファイル（中身は別）をピックする。
+        let handles: Vec<_> = (0..8u8)
+            .map(|i| {
+                let src_dir = dir.join(format!("src{i}"));
+                fs::create_dir_all(&src_dir).unwrap();
+                let src = src_dir.join("same.jpg");
+                fs::write(&src, [i]).unwrap();
+                let dest = dest.clone();
+                std::thread::spawn(move || copy_with_unique_name(&src, &dest).unwrap())
+            })
+            .collect();
+        let created: Vec<PathBuf> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        let unique: std::collections::HashSet<_> = created.iter().collect();
+        assert_eq!(unique.len(), 8, "全員が別のファイル名: {created:?}");
+        assert_eq!(fs::read_dir(&dest).unwrap().count(), 8);
+        let mut contents: Vec<u8> = created.iter().map(|p| fs::read(p).unwrap()[0]).collect();
+        contents.sort();
+        assert_eq!(
+            contents,
+            (0..8u8).collect::<Vec<_>>(),
+            "どの中身も上書きで失われない"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_includes_uppercase_and_webp_tif_and_excludes_avi_mkv() {
+        let dir = workspace("list_ext");
+        for name in [
+            "a.MP4", "b.WebP", "c.TIF", "d.m4v", "e.OGV", // 含む
+            "f.avi", "g.mkv", "h.flv", "i.wmv", // scanner の定義に無いので除外
+        ] {
+            fs::write(dir.join(name), b"x").unwrap();
+        }
+        let listed = list_picked_media(&dir).unwrap();
+        let mut names: Vec<_> = listed
+            .iter()
+            .map(|p| {
+                Path::new(p)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+        names.sort();
+        assert_eq!(names, ["a.MP4", "b.WebP", "c.TIF", "d.m4v", "e.OGV"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_target_with_uppercase_extension_is_accepted() {
+        let dir = workspace("del_upper");
+        let picked = dir.join("picked");
+        fs::create_dir_all(&picked).unwrap();
+        for name in ["A.JPG", "B.MP4"] {
+            let file = picked.join(name);
+            fs::write(&file, b"x").unwrap();
+            assert_eq!(validate_picked_delete_target(&file, &picked).unwrap(), file);
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_target_reached_through_a_directory_symlink_to_outside_is_rejected() {
+        let dir = workspace("del_dirlink");
+        let picked = dir.join("picked");
+        let outside = dir.join("outside");
+        fs::create_dir_all(&picked).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let victim = outside.join("victim.jpg");
+        fs::write(&victim, b"x").unwrap();
+        // picked/linkdir -> outside。picked/linkdir/victim.jpg は文字列上は picked 内だが実体は外。
+        std::os::unix::fs::symlink(&outside, picked.join("linkdir")).unwrap();
+        let sneaky = picked.join("linkdir").join("victim.jpg");
+        assert!(validate_picked_delete_target(&sneaky, &picked).is_err());
+        assert!(victim.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_target_dangling_symlink_is_rejected() {
+        let dir = workspace("del_dangling");
+        let picked = dir.join("picked");
+        fs::create_dir_all(&picked).unwrap();
+        let link = picked.join("dangling.jpg");
+        std::os::unix::fs::symlink(dir.join("nowhere.jpg"), &link).unwrap();
+        assert!(validate_picked_delete_target(&link, &picked).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_target_empty_path_is_rejected_without_panic() {
+        let dir = workspace("del_empty");
+        let picked = dir.join("picked");
+        fs::create_dir_all(&picked).unwrap();
+        assert!(validate_picked_delete_target(Path::new(""), &picked).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 現状固定: ピックフォルダ内のサブフォルダにあるメディアファイルも削除を許可する
+    /// （検証は「canonical パスがピックフォルダ配下」であることだけ。直下限定ではない）。
+    /// 一覧（`list_picked_media`）は直下しか返さないので、UI からは通常到達しない。
+    #[test]
+    fn delete_target_in_a_subfolder_of_picked_dir_is_currently_accepted() {
+        let dir = workspace("del_subfolder");
+        let picked = dir.join("picked");
+        let sub = picked.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let file = sub.join("nested.jpg");
+        fs::write(&file, b"x").unwrap();
+        assert_eq!(validate_picked_delete_target(&file, &picked).unwrap(), file);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

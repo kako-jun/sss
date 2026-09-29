@@ -873,4 +873,32 @@ mod tests {
         // それ以外は非メディア
         assert!(!scanner.is_media_file(Path::new("test.txt")));
     }
+
+    // ---- 独立QA観点表からの追加テスト（#67） ----
+
+    #[test]
+    fn media_path_needs_a_real_extension() {
+        // 拡張子なし
+        assert!(!is_media_path(Path::new("photo")));
+        assert!(!is_media_path(Path::new("/dir/mp4")));
+        // ドットファイル名 `.jpg` は拡張子ではなくファイル名（std は extension=None）
+        assert!(!is_media_path(Path::new(".jpg")));
+        assert!(!is_media_path(Path::new("/dir/.mp4")));
+        // 末尾ドットのみ
+        assert!(!is_media_path(Path::new("photo.")));
+        // 通常の拡張子は大文字小文字によらず真
+        assert!(is_media_path(Path::new("a.JPG")));
+        assert!(is_media_path(Path::new("/dir/b.Mp4")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn media_path_with_non_utf8_extension_is_false_and_does_not_panic() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let path = Path::new(OsStr::from_bytes(b"/dir/a.\xff\xfe"));
+        assert!(!is_media_path(path));
+        assert!(!is_image_path(path));
+        assert!(!is_video_path(path));
+    }
 }

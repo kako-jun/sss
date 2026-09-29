@@ -134,3 +134,112 @@ fn display_stats_histogram_counts_unshown_members_as_zero_and_skips_non_members(
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 統計テスト用の最小 AppState を組み立てて `mock_app` に載せる。
+fn app_with(
+    dir: &std::path::Path,
+    db: Database,
+    playlist: Option<Playlist>,
+    directory_path: Option<PathBuf>,
+) -> tauri::App<tauri::test::MockRuntime> {
+    let cache_dir = dir.join("cache");
+    std::fs::create_dir_all(&cache_dir).unwrap();
+    let app = tauri::test::mock_app();
+    app.manage(AppState {
+        db: Mutex::new(db),
+        playlist: Mutex::new(playlist),
+        directory_path: Mutex::new(directory_path),
+        cache_dir: cache_dir.clone(),
+        cache_worker: CacheWorker::spawn(cache_dir),
+        _keep_awake: None,
+        scan_in_progress: std::sync::atomic::AtomicBool::new(false),
+        last_incremented_display: Mutex::new(None),
+    });
+    app
+}
+
+fn display_stats_of(
+    app: &tauri::App<tauri::test::MockRuntime>,
+) -> sss_lib::commands::stats::DisplayStats {
+    let state = app.state::<AppState>();
+    tauri::async_runtime::block_on(get_display_stats(state))
+        .expect("get_display_statsは成功するはず")
+}
+
+fn bins_of(stats: &sss_lib::commands::stats::DisplayStats) -> Vec<(i32, u32)> {
+    stats.bins.iter().map(|b| (b.count, b.files)).collect()
+}
+
+/// #67 QA: 全員未表示（image_stats が空）なら 0 に全員が入った単一 bin になる。
+#[test]
+fn display_stats_when_nobody_was_shown_is_a_single_zero_bin() {
+    let dir = workspace("all_unshown");
+    let members: Vec<String> = (0..5)
+        .map(|i| dir.join(format!("{i}.jpg")).to_string_lossy().to_string())
+        .collect();
+    let db = Database::new(dir.join("sss.db")).expect("db init");
+    let app = app_with(&dir, db, Some(Playlist::new(members)), Some(dir.clone()));
+
+    let stats = display_stats_of(&app);
+    assert_eq!(stats.files, 5);
+    assert_eq!((stats.min, stats.max), (0, 0));
+    assert_eq!(stats.mean, 0.0);
+    assert_eq!(bins_of(&stats), vec![(0, 5)]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn display_stats_with_a_single_member_reports_files_1() {
+    let dir = workspace("one_member");
+    let only = dir.join("only.jpg").to_string_lossy().to_string();
+    let db = Database::new(dir.join("sss.db")).expect("db init");
+    db.increment_display_count(&only).unwrap();
+    let app = app_with(&dir, db, Some(Playlist::new(vec![only])), Some(dir.clone()));
+
+    let stats = display_stats_of(&app);
+    assert_eq!(stats.files, 1);
+    assert_eq!((stats.min, stats.max, stats.mean), (1, 1, 1.0));
+    assert_eq!(bins_of(&stats), vec![(1, 1)]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 現状固定: プレイリストがあっても directory_path が None なら、DB の表示回数は
+/// 引かず全員 0 回として数える（メンバー数 files は保つ）。
+#[test]
+fn display_stats_with_playlist_but_no_directory_counts_everyone_as_zero() {
+    let dir = workspace("no_directory");
+    let a = dir.join("a.jpg").to_string_lossy().to_string();
+    let b = dir.join("b.jpg").to_string_lossy().to_string();
+    let db = Database::new(dir.join("sss.db")).expect("db init");
+    db.increment_display_count(&a).unwrap();
+    db.increment_display_count(&a).unwrap();
+    let app = app_with(&dir, db, Some(Playlist::new(vec![a, b])), None);
+
+    let stats = display_stats_of(&app);
+    assert_eq!(stats.files, 2);
+    assert_eq!(bins_of(&stats), vec![(0, 2)]);
+    assert_eq!((stats.min, stats.max, stats.mean), (0, 0, 0.0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// プレイリストが Some(空) の場合と None（未スキャン）の場合はどちらも files==0 の空分布。
+#[test]
+fn display_stats_of_empty_playlist_and_missing_playlist_are_both_empty() {
+    let dir = workspace("empty_vs_none");
+    let db = Database::new(dir.join("sss.db")).expect("db init");
+    let empty = app_with(&dir, db, Some(Playlist::new(vec![])), Some(dir.clone()));
+    let stats = display_stats_of(&empty);
+    assert_eq!(stats.files, 0);
+    assert!(stats.bins.is_empty());
+    assert_eq!((stats.min, stats.max, stats.mean), (0, 0, 0.0));
+
+    let dir2 = workspace("empty_vs_none_b");
+    let db2 = Database::new(dir2.join("sss.db")).expect("db init");
+    let none = app_with(&dir2, db2, None, Some(dir2.clone()));
+    let stats = display_stats_of(&none);
+    assert_eq!(stats.files, 0);
+    assert!(stats.bins.is_empty());
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&dir2);
+}
