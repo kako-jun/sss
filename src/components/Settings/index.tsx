@@ -163,11 +163,13 @@ export function Settings({
 
         {/* タブコンテンツ。#66視覚刷新: 旧50vhの固定最小高は短い内容のタブ
             （フォルダ・オプション等）でもモーダルが常に画面の半分を占めて
-            間延びして見えた。内容に合わせて縮み、最小高は「タブ切替時に
-            ガタつかない」ための控えめな値（260px）だけに抑え、最大は
+            間延びして見えた。#66レビューshould: 控えめな最小高（260px）に
+            縮めても「固定値を置く」こと自体が内容追従の原則に反するため撤廃し、
+            完全に内容の高さへ追従させる（タブ切替時の見た目のガタつきより、
+            短い内容のタブが間延びして見えることの方を避ける）。最大は
             モーダル自体のmax-h-[80vh]に任せてスクロールする。各パネルに
             role=tabpanel/aria-labelledbyを付け、対応するタブと対応付ける。 */}
-        <div className="flex-1 overflow-y-auto min-h-[260px]">
+        <div className="flex-1 overflow-y-auto">
           {activeTab === 'scan' && (
             <div role="tabpanel" id="tabpanel-scan" aria-labelledby="tab-scan" tabIndex={0}>
               <ScanSection onScanComplete={onScanComplete} />

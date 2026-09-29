@@ -40,7 +40,7 @@ export function PickSection() {
       <h3 className="text-sm font-medium text-white/70">{t('pickListTitle')}</h3>
 
       {images.length === 0 ? (
-        <div className="p-4 bg-black/30 rounded-lg text-center text-white/30 text-sm">
+        <div className="p-4 bg-black/30 rounded-lg text-center text-white/50 text-sm">
           {t('noPickedPhotos')}
         </div>
       ) : (

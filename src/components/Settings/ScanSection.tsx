@@ -113,7 +113,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
     <div className="space-y-4">
       <div>
         <h3 className="text-sm font-medium text-white/70">{t('directorySelectionTitle')}</h3>
-        <p className="text-xs text-white/40 mt-1">{t('directorySelectionDescription')}</p>
+        <p className="text-xs text-white/50 mt-1">{t('directorySelectionDescription')}</p>
       </div>
 
       <div className="flex gap-2">
@@ -148,7 +148,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
       {errorMessage && <div className="text-sm text-red-400/70">{errorMessage}</div>}
 
       {realtimeProgress && (
-        <div className="text-sm text-white/30 font-mono">
+        <div className="text-sm text-white/50 font-mono">
           {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()}
         </div>
       )}
@@ -163,19 +163,19 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
                 {scanProgress.totalFiles.toLocaleString()}
               </span>
             </div>
-            <div className="text-sm text-white/40">
+            <div className="text-sm text-white/50">
               {t('newFilesLabel')}{' '}
               <span className="font-mono text-white/60">
                 {scanProgress.newFiles.toLocaleString()}
               </span>
             </div>
-            <div className="text-sm text-white/40">
+            <div className="text-sm text-white/50">
               {t('deletedFilesLabel')}{' '}
               <span className="font-mono text-white/60">
                 {scanProgress.deletedFiles.toLocaleString()}
               </span>
             </div>
-            <div className="text-sm text-white/30">
+            <div className="text-sm text-white/50">
               {t('durationLabel')}{' '}
               <span className="font-mono">
                 {t('secondsUnit', { value: (scanProgress.durationMs / 1000).toFixed(2) })}
@@ -185,15 +185,15 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
 
           {scanProgress.errorCount > 0 && (
             <div className="space-y-2 p-4 bg-black/30 rounded-lg">
-              <div className="text-sm text-white/40">
+              <div className="text-sm text-white/50">
                 {t('readErrorsLabel')}{' '}
                 <span className="font-mono text-red-400/80">
                   {t('errorCountValue', { count: scanProgress.errorCount.toLocaleString() })}
                 </span>
-                <span className="text-white/30 text-xs"> {t('keptAsUnknownNote')}</span>
+                <span className="text-white/50 text-xs"> {t('keptAsUnknownNote')}</span>
               </div>
               {scanProgress.errorExamples.length > 0 && (
-                <ul className="text-xs text-white/30 font-mono space-y-0.5">
+                <ul className="text-xs text-white/50 font-mono space-y-0.5">
                   {scanProgress.errorExamples.map((example, index) => (
                     <li key={`${index}-${example}`} className="truncate">
                       {example}

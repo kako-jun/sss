@@ -68,28 +68,33 @@ export function InfoSection() {
       {/* アプリ情報 */}
       <div className="space-y-3">
         <h3 className="text-base font-medium text-white/70">Smart Slide Show (sss)</h3>
-        <div className="text-white/30 text-sm space-y-1">
+        <div className="text-white/50 text-sm space-y-1">
           <div>{t('versionLabel', { version: version || '…' })}</div>
           <div>{t('appDescription')}</div>
         </div>
       </div>
 
-      {/* GitHubリンク。#66視覚刷新: 副次操作なのでDESIGN.md「Buttons — Ghost」 */}
+      {/* GitHubリンク。#66視覚刷新: 副次操作なのでDESIGN.md「Buttons — Ghost」。
+          #66レビューnit: px-4のパディングのせいで、上の見出し/説明文（左パディング
+          無し）とボタン内のアイコンの左端が揃っていなかった。ボタンの当たり判定は
+          保ったまま`-ml-4`で見た目の左端だけ引き戻す。 */}
       <div>
         <button
           onClick={handleOpenGitHub}
-          className="flex items-center gap-2 px-4 py-2 text-white/40 hover:text-white/70 hover:bg-white/8 rounded-lg transition-colors text-sm"
+          className="flex items-center gap-2 px-4 py-2 -ml-4 text-white/40 hover:text-white/70 hover:bg-white/8 rounded-lg transition-colors text-sm"
         >
           <ExternalLink size={16} />
           {t('viewOnGitHub')}
         </button>
       </div>
 
-      {/* 設定の初期化。#66視覚刷新: 罫線区切りをやめ、カード背景（bg-black/20）
-          で危険な操作の領域を視覚的に分ける。 */}
-      <div className="bg-black/20 rounded-lg p-4">
+      {/* 設定の初期化。#66視覚刷新: 罫線区切りをやめ、カード背景で危険な操作の
+          領域を視覚的に分ける。#66レビューnit: bg-black/20は`bg-neutral-950`の
+          モーダル背景とほぼ差が無く沈んで見えたため、境界線を添えて視認性を
+          上げる。 */}
+      <div className="bg-black/30 border border-white/8 rounded-lg p-4">
         <h4 className="text-sm font-medium text-white/70">{t('dangerZoneTitle')}</h4>
-        <p className="text-xs text-white/40 mt-1 mb-3">{t('dangerZoneDescription')}</p>
+        <p className="text-xs text-white/50 mt-1 mb-3">{t('dangerZoneDescription')}</p>
         <button
           onClick={handleResetSettings}
           disabled={isResetting}
@@ -99,7 +104,7 @@ export function InfoSection() {
           {isResetting ? t('resettingSettingsLabel') : t('resetSettingsButton')}
         </button>
         {resetMessage && (
-          <div className="mt-2 text-xs text-white/30 whitespace-pre-line">{resetMessageText}</div>
+          <div className="mt-2 text-xs text-white/50 whitespace-pre-line">{resetMessageText}</div>
         )}
       </div>
     </div>

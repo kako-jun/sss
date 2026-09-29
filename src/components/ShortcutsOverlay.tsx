@@ -49,20 +49,22 @@ export function ShortcutsOverlay({ isOpen, onClose }: ShortcutsOverlayProps) {
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.97, opacity: 0 }}
         transition={{ duration: MODAL_ANIMATION_DURATION }}
-        className="bg-neutral-950 rounded-xl shadow-2xl p-7 max-w-md w-full mx-8 border border-white/8"
+        // #66レビューnit: 設定モーダルと同じ角丸(rounded-2xl)・枠線色(border-white/10)・
+        // 閉じるボタン(rounded-full)に統一する。
+        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-md w-full mx-8 border border-white/10"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 id="shortcuts-heading" className="text-lg font-medium text-white/70">
+          <h2 id="shortcuts-heading" className="text-lg font-medium text-white/80">
             {t('shortcutsTitle')}
           </h2>
           <button
             onClick={onClose}
             aria-label={t('closeTooltip')}
             title={t('closeTooltip')}
-            className="p-1.5 hover:bg-white/8 rounded transition-colors"
+            className="p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white/90 transition-colors"
           >
-            <X className="w-5 h-5 text-white/30 hover:text-white/60" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 

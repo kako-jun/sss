@@ -74,11 +74,11 @@ export function ExcludeRulesSection() {
     <div className="space-y-4">
       <div>
         <h3 className="text-sm font-medium text-white/70">{t('excludeRulesTitle')}</h3>
-        <p className="text-xs text-white/40 mt-1">{t('excludeRulesDescription')}</p>
+        <p className="text-xs text-white/50 mt-1">{t('excludeRulesDescription')}</p>
       </div>
 
       {rules.length === 0 ? (
-        <div className="text-white/30 text-sm">{t('noExcludeRules')}</div>
+        <div className="text-white/50 text-sm">{t('noExcludeRules')}</div>
       ) : (
         <div className="space-y-1">
           {rules.map(({ pattern, ruleType }) => (

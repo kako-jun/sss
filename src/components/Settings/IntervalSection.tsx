@@ -115,7 +115,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
     <div className="space-y-4">
       <div>
         <h3 className="text-sm font-medium text-white/70">{t('displayIntervalTitle')}</h3>
-        <p className="text-xs text-white/40 mt-1">{t('displayIntervalDescription')}</p>
+        <p className="text-xs text-white/50 mt-1">{t('displayIntervalDescription')}</p>
       </div>
       <div className="flex items-center gap-4">
         <input
