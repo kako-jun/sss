@@ -162,6 +162,56 @@ async function countCalls(page, cmd) {
   return page.evaluate((c) => window.__e2eLog.filter((l) => l[1] === c).length, cmd);
 }
 
+/** 設定ボタン（lucideのgearアイコン、ロケール非依存）をクリックして開く。#66用。 */
+async function openSettingsModal(page) {
+  await page.evaluate(() => {
+    const icon = document.querySelector('svg.lucide-settings');
+    const btn = icon && icon.closest('button');
+    if (!btn) throw new Error('設定ボタンが見つからない');
+    btn.click();
+  });
+  await page.waitForTimeout(350);
+}
+
+/**
+ * #66レビューmust2: idle中は操作バー・右上ピルにpointer-events-noneが付き
+ * （constants.tsのIDLE_FADE_HIDDEN）、本物のマウスクリック（下記
+ * realMouseClickByTitle）はヒットテストに失敗してタイムアウトする。JSの
+ * `.click()`（openSettingsModal等）はDOMメソッド直呼びのためpointer-events を
+ * 無視して素通りするが、must2の各シナリオは「本物のマウス操作で得た残留
+ * フォーカスが:focus-visibleにならない」ことそのものを検証したいので、事前に
+ * 実際のマウス移動でidleを解除しクリック可能な状態にしてから使う。
+ */
+async function wakeFromIdle(page) {
+  await page.mouse.move(640, 400);
+  await page.mouse.move(641, 401);
+  await page.waitForTimeout(400); // IDLE_FADE_BASEのtransition-opacity(300ms)+余裕
+}
+
+/**
+ * 本物のマウス操作でボタンをクリックする（Playwrightの`click()`は実ブラウザの
+ * pointerdown/mousedown/mouseup/clickイベント一式を発火する）。#66レビュー
+ * must2: JSの`.click()`と違い、実ブラウザの`:focus-visible`ヒューリスティックが
+ * 本物のマウス操作と同じ扱いになる（＝マウスでクリックしたボタンは
+ * `:focus-visible`にならない）ことを前提にする検証にはこちらを使う。
+ */
+async function realMouseClickByTitle(page, title) {
+  await page.click(`button[title="${title}"]`);
+}
+
+/**
+ * フローティング操作バー（`.bottom-6`）を包むidleフェード用ラッパー要素の
+ * 実際のcomputed opacityを返す。CLAUDE.md絶対ルール1: 可視判定はプロパティ
+ * ではなく実ブラウザのcomputed styleで行う。
+ */
+async function getOverlayBarWrapperOpacity(page) {
+  return page.evaluate(() => {
+    const bar = document.querySelector('.bottom-6');
+    const wrapper = bar ? bar.parentElement : null;
+    return wrapper ? Number(getComputedStyle(wrapper).opacity) : null;
+  });
+}
+
 const scenarios = [
   {
     // #65レビューM1(must): 画像→動画→動画→画像と回すあいだ、動画が
@@ -554,6 +604,605 @@ const scenarios = [
       return measureSettingsTabRowAtWidths(page);
     },
   },
+  {
+    // #66レビュー2巡目should2: 垂直中央寄せ(items-center)だと、タブ切替で
+    // 内容の高さが変わるたびにモーダル自体の上端位置（＝ヘッダー・タブ行の
+    // 位置）が上下に動いてしまっていた。上寄せ(items-start + pt-[12vh])に
+    // 変更したことで、内容量が大きく異なるタブ（フォルダ=長い/情報=短い等）へ
+    // 切り替えてもタブ行の画面上でのY座標（getBoundingClientRect().top）が
+    // 変わらないことを確認する。
+    name: 'Settings modal tab row top position does not move when switching between tabs of different content height (#66レビュー2巡目should2)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+
+      const tabRowTop = () =>
+        page.evaluate(() => {
+          const row = document.querySelector('.overflow-x-auto');
+          return row ? row.getBoundingClientRect().top : null;
+        });
+      const clickTabByLabel = (label) =>
+        page.evaluate((l) => {
+          const tabs = [...document.querySelectorAll('[role="tab"]')];
+          const tab = tabs.find((t) => t.textContent.includes(l));
+          if (!tab) throw new Error(`タブ「${l}」が見つからない`);
+          tab.click();
+        }, label);
+
+      const initialTop = await tabRowTop();
+      // 内容量が大きく異なるタブを順に回る（フォルダ=スキャン結果表示で
+      // 縦に長め、情報=短め、除外ルール=中間）。
+      const tops = { initial: initialTop };
+      for (const label of ['情報', 'フォルダ', '除外ルール', 'オプション']) {
+        await clickTabByLabel(label);
+        await page.waitForTimeout(150);
+        tops[label] = await tabRowTop();
+      }
+
+      const allTops = Object.values(tops);
+      // 1px未満の丸め誤差は許容する。
+      const allSame = allTops.every((t) => t !== null && Math.abs(t - initialTop) < 1);
+      return { pass: allSame, detail: JSON.stringify(tops) };
+    },
+  },
+  {
+    // #66 問題1: 設定を開いている間のESCはモーダルを閉じるだけで、exit_appは
+    // 呼ばない（以前はフェーズに関わらず常にexit_appを呼んでいた）。
+    name: 'Escape closes the Settings modal instead of exiting the app while it is open (#66 問題1)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+      const tabRowVisibleBefore = await page.evaluate(
+        () => !!document.querySelector('.overflow-x-auto'),
+      );
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      const tabRowVisibleAfter = await page.evaluate(
+        () => !!document.querySelector('.overflow-x-auto'),
+      );
+      const exitCalls = await countCalls(page, 'exit_app');
+      const pass = tabRowVisibleBefore && !tabRowVisibleAfter && exitCalls === 0;
+      return {
+        pass,
+        detail: `tabRowVisibleBefore=${tabRowVisibleBefore} tabRowVisibleAfter=${tabRowVisibleAfter} exitCalls=${exitCalls}`,
+      };
+    },
+  },
+  {
+    name: 'Escape calls exit_app when nothing (Settings/Shortcuts) is open (#66 問題1)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(200);
+      const exitCalls = await countCalls(page, 'exit_app');
+      return { pass: exitCalls === 1, detail: `exitCalls=${exitCalls}` };
+    },
+  },
+  {
+    // #66 問題2: 旧実装はホバーで自動一時停止する`isPlaying`をアイコンにそのまま
+    // 使っていたため、ボタンが見える間(=マウスがオーバーレイ上)は常に▶固定に
+    // 見えていた。Space操作後、実ブラウザで▶/⏸ツールチップが正しく切り替わる
+    // ことを確認する。
+    name: 'Space toggles the pause/play icon+tooltip in the overlay (#66 問題2・4)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(1000);
+      // ⏸/▶ボタンはtitle属性でしか文言を持たない(SVGアイコンのみ)ため、
+      // isVisible()（可視のテキストノード検索）ではなくDOM属性で直接判定する。
+      const initiallyPlaying = await page.evaluate(
+        () => !!document.querySelector('button[title="一時停止"]'),
+      );
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(200);
+      const nowPaused = await page.evaluate(() => !!document.querySelector('button[title="再生"]'));
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(200);
+      const backToPlaying = await page.evaluate(
+        () => !!document.querySelector('button[title="一時停止"]'),
+      );
+      const pass = initiallyPlaying && nowPaused && backToPlaying;
+      return {
+        pass,
+        detail: `initiallyPlaying=${initiallyPlaying} nowPaused=${nowPaused} backToPlaying=${backToPlaying}`,
+      };
+    },
+  },
+  {
+    name: 'F toggles fullscreen via setFullscreen/setDecorations IPC calls (#66 問題4)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      const before = await countCalls(page, 'plugin:window|set_fullscreen');
+      await page.keyboard.press('f');
+      await page.waitForTimeout(300);
+      const after = await countCalls(page, 'plugin:window|set_fullscreen');
+      const decorationCalls = await countCalls(page, 'plugin:window|set_decorations');
+      const pass = after === before + 1 && decorationCalls >= 1;
+      return {
+        pass,
+        detail: `set_fullscreen before=${before} after=${after} set_decorations=${decorationCalls}`,
+      };
+    },
+  },
+  {
+    // #66レビューmust1: App.tsxのkeydown effectがdeps不足で、古いisFullscreenを
+    // 閉じ込めるstale closureになっており、Fキーが1回しか正しく切り替わらな
+    // かった（2回目以降が無反応/巻き戻る）。handlersRef経由に直したことで、
+    // Fを3回押すたびに前回と逆の値へ交互に切り替わり続けることを確認する
+    // （App.tsxはisFullscreen初期値=trueで起動するため、実際の並びは
+    // false→true→falseになる。「1回目の値で固定されず、毎回反転すること」を
+    // 検証するのが主眼で、初期値そのものはこのテストの対象外）。
+    name: 'F pressed three times alternates fullscreen each press, not stuck after the first press (#66レビューmust1)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      const values = [];
+      for (let i = 0; i < 3; i++) {
+        const before = await countCalls(page, 'plugin:window|set_fullscreen');
+        await page.keyboard.press('f');
+        const deadline = Date.now() + 3000;
+        let after = before;
+        while (Date.now() < deadline) {
+          after = await countCalls(page, 'plugin:window|set_fullscreen');
+          if (after > before) break;
+          await page.waitForTimeout(50);
+        }
+        const lastArgsJson = await page.evaluate(() => {
+          const calls = window.__e2eLog.filter((l) => l[1] === 'plugin:window|set_fullscreen');
+          return calls.length > 0 ? calls[calls.length - 1][2] : null;
+        });
+        values.push(lastArgsJson ? JSON.parse(lastArgsJson).value : null);
+        await page.waitForTimeout(200);
+      }
+      const alternates =
+        values.length === 3 &&
+        values.every((v) => typeof v === 'boolean') &&
+        values[0] !== values[1] &&
+        values[1] !== values[2] &&
+        values[0] === values[2];
+      return { pass: alternates, detail: `values=${JSON.stringify(values)}` };
+    },
+  },
+  {
+    // #66レビューmust2(a)→2巡目must1（案a）: 当初はChromium(WebView2)実機で、
+    // マウスクリック後にボタンへ残るフォーカスがidle判定を妨げ、idleになっても
+    // 操作バーが消えない不具合があった。個々のキーを見る対症療法
+    // （focusVisibleAtFocusTimeRef）では別のキーで同じ穴が再現するため、
+    // 根本対策として操作バーのコンテナに`onMouseDown`でpreventDefaultし、
+    // マウスクリックがそもそもボタンへフォーカスを与えないようにした（実際に
+    // フォーカスが残らないので、以降どんなキーが押されても:focus-visible化の
+    // 心配が無い）。マウスで「次へ」ボタンをクリックした直後、実際に
+    // どの要素にもフォーカスが移っていない（document.activeElement===body）
+    // ことと、バーの外へマウスを離してidleになれば操作バーが実際に消える
+    // （computed opacity===0）ことを確認する。
+    name: 'clicking Next does not steal focus, and idle fade still hides the bar afterward (#66レビューmust2(a)→2巡目must1)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      await realMouseClickByTitle(page, '次へ (→)');
+      const focusRightAfterClick = await page.evaluate(
+        () => document.activeElement === document.body,
+      );
+      await page.waitForTimeout(100);
+      // バーの外（画面左上）へマウスを離す。mouseleaveでisHoveringがfalseに
+      // 戻り、idleタイマーが再開する。
+      await page.mouse.move(20, 20);
+      await page.waitForTimeout(3600);
+      const opacity = await getOverlayBarWrapperOpacity(page);
+      const pass = focusRightAfterClick && opacity === 0;
+      return { pass, detail: `focusRightAfterClick=${focusRightAfterClick} opacity=${opacity}` };
+    },
+  },
+  {
+    // #66レビューmust2(b): 旧実装は、マウスで「次へ」ボタンをクリックして
+    // フォーカスが残ったまま次にSpaceを押すと、ブラウザネイティブの
+    // 「フォーカス中のbuttonはSpaceで再クリックされる」挙動が働いてしまい、
+    // アプリの一時停止/再生ではなく「次へ」が意図せず再発火していた。マウス
+    // クリック後のSpaceは、そのボタンを再発火せずアプリの一時停止として
+    // 扱われることを確認する。
+    name: 'Space after a mouse click on the Next button pauses the app instead of re-triggering Next (#66レビューmust2(b))',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.waitForTimeout(150);
+      const nextsBefore = await countCalls(page, 'get_next_image');
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(200);
+      const nextsAfter = await countCalls(page, 'get_next_image');
+      const pausedNow = await page.evaluate(() => !!document.querySelector('button[title="再生"]'));
+      const pass = nextsAfter === nextsBefore && pausedNow;
+      return {
+        pass,
+        detail: `nextsBefore=${nextsBefore} nextsAfter=${nextsAfter} pausedNow=${pausedNow}`,
+      };
+    },
+  },
+  {
+    // #66レビュー2巡目must1（案a）: 個々のキー（Space等）だけを特別扱いする
+    // 対症療法では、別のキー（矢印キー等）で同じ「マウスクリック後にキーを
+    // 押すと:focus-visibleが反転してidleでもバーが消えない」問題が再現する。
+    // 根本対策（操作バー・右上ピルへのonMouseDownでのpreventDefault、マウス
+    // クリックそのものでフォーカスを与えない）を入れたことで、クリック後に
+    // 何のキーを押しても（ここではSpace）idleへ入れば必ずバーが消えることを
+    // 確認する。
+    name: '次へクリック→Space→4秒待つとidleへ入りバーが消える (#66レビュー2巡目must1)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.keyboard.press('Space');
+      // クリック直後はマウスカーソルがバー上に残っており、バーの
+      // onMouseEnterでisHoveringがtrueのままだとidleタイマー自体が止まって
+      // 一生idleにならない（これはアプリの意図した挙動＝ホバー中は操作バーを
+      // 隠さない、であってmust1のバグではない）。この検証の主眼はあくまで
+      // 「クリック後に何かキーを押しても、後でidleに入れば正しくバーが消える
+      // か」なので、実際のユーザー操作同様にマウスをバーの外へ離してから待つ。
+      await page.mouse.move(20, 20);
+      await page.waitForTimeout(4000);
+      const opacity = await getOverlayBarWrapperOpacity(page);
+      const focusState = await page.evaluate(() => {
+        const el = document.activeElement;
+        return { isBody: el === document.body, tag: el ? el.tagName : null };
+      });
+      const pass = opacity === 0 && focusState.isBody;
+      return { pass, detail: `opacity=${opacity} focusState=${JSON.stringify(focusState)}` };
+    },
+  },
+  {
+    // #66レビュー2巡目must1（案a）: 上と同じ検証をSpace以外のキー（矢印キー）
+    // でも行う。個別のキー対応ではなく「マウスクリックでフォーカスを与えない」
+    // という根本対策になっていることを、Space専用ではない別のキーで確認する
+    // ことが目的。
+    name: '次へクリック→→キー→4秒待つとidleへ入りバーが消える (#66レビュー2巡目must1)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.keyboard.press('ArrowRight');
+      // 上のSpaceシナリオと同じ理由でマウスをバーの外へ離してから待つ
+      // （ホバー中はidleタイマーが止まる仕様自体は意図した挙動）。
+      await page.mouse.move(20, 20);
+      await page.waitForTimeout(4000);
+      const opacity = await getOverlayBarWrapperOpacity(page);
+      const focusState = await page.evaluate(() => {
+        const el = document.activeElement;
+        return { isBody: el === document.body, tag: el ? el.tagName : null };
+      });
+      const pass = opacity === 0 && focusState.isBody;
+      return { pass, detail: `opacity=${opacity} focusState=${JSON.stringify(focusState)}` };
+    },
+  },
+  {
+    // #66レビューmust2(c): 歯車をマウスでクリックして設定を開き、Escapeで
+    // 閉じると、旧実装は同じ歯車ボタンへフォーカスを復帰させていた。その状態で
+    // Spaceを押すと、ネイティブなbuttonのSpaceクリック相当の挙動で設定が
+    // 再度開いてしまっていた。マウス操作で開いた場合はフォーカスを復帰しない
+    // （blurする）ことで、Escape後のSpaceが設定を再オープンしないことを
+    // 確認する。
+    name: 'gear (mouse click) → Escape → Space does not reopen Settings (#66レビューmust2(c))',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await wakeFromIdle(page);
+      // #66視覚刷新: ようこそ画面の中央CTAボタン（「フォルダを選択」/「設定を
+      // 開く」）も統一感のため同じ歯車アイコン(SettingsIcon)を内包しており、
+      // `svg.lucide-settings`だけでは右上の歯車ボタンと曖昧になる
+      // （strict modeで2要素ヒット）。右上の歯車ボタンだけが持つ
+      // `title="設定"`で一意に選ぶ。
+      await page.click('button[title="設定"]');
+      await page.waitForTimeout(300);
+      const openedAfterClick = await page.evaluate(
+        () => !!document.querySelector('[role="dialog"]'),
+      );
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      const closedAfterEscape = await page.evaluate(
+        () => !document.querySelector('[role="dialog"]'),
+      );
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(300);
+      const stillClosedAfterSpace = await page.evaluate(
+        () => !document.querySelector('[role="dialog"]'),
+      );
+      const pass = openedAfterClick && closedAfterEscape && stillClosedAfterSpace;
+      return {
+        pass,
+        detail: `openedAfterClick=${openedAfterClick} closedAfterEscape=${closedAfterEscape} stillClosedAfterSpace=${stillClosedAfterSpace}`,
+      };
+    },
+  },
+  {
+    // #66レビュー3巡目must: 「…」メニューの背景幕(`fixed inset-0`)が、祖先の
+    // 操作バー（transform）とその中のガラス調バー本体（backdrop-blur-md）に
+    // よってCSSの含有ブロックがバー自身の矩形に限定され、`inset-0`が画面全体
+    // でなくバーの小さな矩形にしかならなかった（1巡目の視覚刷新でバーに
+    // transformを持たせて以来の回帰）。写真をクリックしても閉じず、`createPortal`
+    // で`document.body`直下に出して解消した。メニューを開いた状態で写真
+    // （バー・ピルの外）をクリックすると、メニューが閉じ、かつ「次へ」等の
+    // アプリの他の操作は誤って発火しないことを確認する。
+    name: '「…」メニューを開いて写真をクリックすると閉じ、次へ等は発火しない (#66レビュー3巡目must)',
+    hash: 'slides',
+    async run(page) {
+      // このメニュー項目は<svg>アイコンとテキストが兄弟のため、isVisible()の
+      // 「葉ノードのみ」限定チェックには乗らない（項目自体はbuttonの子に
+      // アイコン+テキストの2ノードを持つ）。ボタンのtextContentで直接判定する。
+      const menuItemVisible = () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll('button')].some((b) =>
+            b.textContent.includes('ファイルマネージャーで開く'),
+          ),
+        );
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      await realMouseClickByTitle(page, 'メニュー');
+      await page.waitForTimeout(200);
+      const openedAfterClick = await menuItemVisible();
+      const nextsBefore = await countCalls(page, 'get_next_image');
+      // 写真（バー・ピルの外、画面中央付近）をクリックする。
+      await page.mouse.click(640, 200);
+      await page.waitForTimeout(200);
+      const closedAfterPhotoClick = !(await menuItemVisible());
+      const nextsAfter = await countCalls(page, 'get_next_image');
+      const pass = openedAfterClick && closedAfterPhotoClick && nextsAfter === nextsBefore;
+      return {
+        pass,
+        detail: `openedAfterClick=${openedAfterClick} closedAfterPhotoClick=${closedAfterPhotoClick} nextsBefore=${nextsBefore} nextsAfter=${nextsAfter}`,
+      };
+    },
+  },
+  {
+    // #66レビュー3巡目should: マウスで開いた場合、rAF経由で遅延実行される
+    // `.focus()`呼び出しは、実ブラウザでは直前のマウス操作から時間的に切り離
+    // されているため`:focus-visible`と判定されうる（対象がパネル自身でも
+    // 閉じるボタンでも同様）。そのためこのテストでは「`:focus-visible`が
+    // falseになる」ことではなく、パネル自身にはCSSで`outline-none`を付けて
+    // あるため実際に可視のリングが出ないこと（CLAUDE.md絶対ルール1: 可視判定は
+    // 実ブラウザのcomputed styleで行う）と、閉じるボタン自身にはフォーカスが
+    // 全く移っていないこと（＝そちらにリングが出ようがない）を確認する。
+    name: '設定をマウスクリックで開くと閉じるボタンにフォーカスリングが出ない (#66レビュー3巡目should)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await wakeFromIdle(page);
+      await page.click('button[title="設定"]');
+      await page.waitForTimeout(300);
+      const focusState = await page.evaluate(() => {
+        const el = document.activeElement;
+        const dialog = document.querySelector('[role="dialog"]');
+        const style = el ? getComputedStyle(el) : null;
+        return {
+          isDialog: !!dialog && el === dialog,
+          isCloseButton: !!el && el.tagName === 'BUTTON' && el.title === '閉じる',
+          // Tailwindの`outline-none`（`!outline-none`も同様）は`outline-style:
+          // none`にはせず、`outline: 2px solid transparent`にする（Windows
+          // High Contrast等のためoutline自体は残し、色を透明にして見た目だけ
+          // 消す設計）。よって可視判定はstyle/widthでなくcolorの透明度で行う。
+          outlineColor: style ? style.outlineColor : null,
+        };
+      });
+      const isTransparentOutline =
+        focusState.outlineColor === 'rgba(0, 0, 0, 0)' || focusState.outlineColor === 'transparent';
+      const pass = focusState.isDialog && !focusState.isCloseButton && isTransparentOutline;
+      return { pass, detail: JSON.stringify(focusState) };
+    },
+  },
+  {
+    // 上のshouldケースと対称に、キーボード操作（Tab+Enter）で開いた場合は
+    // 従来通り閉じるボタンへフォーカスし、正しく:focus-visibleがtrueになる
+    // （＝リングが出る）ことも確認する。回帰でこちらを壊していないことの
+    // 確認が目的。
+    name: '設定をキーボード操作(Tab+Enter)で開くと閉じるボタンに正しくフォーカスリングが出る (#66レビュー3巡目should)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      let reached = false;
+      for (let i = 0; i < 20; i++) {
+        await page.keyboard.press('Tab');
+        const isSettingsFocused = await page.evaluate(
+          () => document.activeElement?.title === '設定',
+        );
+        if (isSettingsFocused) {
+          reached = true;
+          break;
+        }
+      }
+      if (!reached) return { pass: false, detail: 'Tabで設定ボタンに到達できなかった' };
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(300);
+      const focusState = await page.evaluate(() => {
+        const el = document.activeElement;
+        return {
+          isCloseButton: !!el && el.tagName === 'BUTTON' && el.title === '閉じる',
+          focusVisible: el ? el.matches(':focus-visible') : null,
+        };
+      });
+      const pass = focusState.isCloseButton && focusState.focusVisible === true;
+      return { pass, detail: JSON.stringify(focusState) };
+    },
+  },
+  {
+    // #66レビュー3巡目nit: mousedownでのpreventDefaultにより、クリックされた
+    // ボタン自身は新しくフォーカスを取らない。だが、既にTabキーボード操作で
+    // 別のボタンへ残っていたフォーカスは、それだけでは誰にもblurされず
+    // 残り続けてしまい、idleになってもhas-[:focus-visible]が真のままバーが
+    // 消えなくなる。同じバー内の別ボタンをマウスで押した時点で、その残留
+    // フォーカスをblurすることで、idleで正しくバーが消えることを確認する。
+    name: 'Tabでフォーカス中のボタンがある状態で別ボタンをマウスで押すと、残留フォーカスがblurされidleでバーが消える (#66レビュー3巡目nit)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await wakeFromIdle(page);
+      let reached = false;
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press('Tab');
+        const isPauseFocused = await page.evaluate(
+          () => document.activeElement?.title === '一時停止',
+        );
+        if (isPauseFocused) {
+          reached = true;
+          break;
+        }
+      }
+      if (!reached) return { pass: false, detail: 'Tabで一時停止ボタンに到達できなかった' };
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.mouse.move(20, 20);
+      await page.waitForTimeout(3600);
+      const opacity = await getOverlayBarWrapperOpacity(page);
+      return { pass: opacity === 0, detail: `opacity=${opacity}` };
+    },
+  },
+  {
+    // #66 問題4: `?`でショートカット一覧を開閉できる。Escapeで閉じる時はアプリを
+    // 終了しない。
+    name: '? opens the shortcuts overlay; Escape closes it without exiting (#66 問題4)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await page.keyboard.press('?');
+      await page.waitForTimeout(300);
+      const shownAfterOpen = await isVisible(page, 'キーボードショートカット');
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      const shownAfterClose = await isVisible(page, 'キーボードショートカット');
+      const exitCalls = await countCalls(page, 'exit_app');
+      const pass = shownAfterOpen && !shownAfterClose && exitCalls === 0;
+      return {
+        pass,
+        detail: `shownAfterOpen=${shownAfterOpen} shownAfterClose=${shownAfterClose} exitCalls=${exitCalls}`,
+      };
+    },
+  },
+  {
+    // #66 問題3・10: idle（3秒間マウス非操作）でカーソルと右上の常設ボタン列の
+    // 両方が消え、マウスを動かすと両方復帰することを実ブラウザのcomputed style
+    // で確認する（CLAUDE.md絶対ルール1）。
+    name: 'idle hides the cursor and the top-right button row; moving the mouse restores both (#66 問題3・10)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(1000); // 最初の画像表示を待つ（idleは初期状態でtrueのまま）
+      await page.waitForTimeout(2500); // 合計3.5秒超、マウスは一度も動かさない
+      const idleState = await page.evaluate(() => {
+        const root = document.querySelector('.w-screen.h-screen.bg-black');
+        const btnRow = [...document.querySelectorAll('div')].find(
+          (el) => el.querySelector('svg.lucide-settings') && el.className.includes('fixed'),
+        );
+        return {
+          cursor: root ? getComputedStyle(root).cursor : null,
+          buttonRowOpacity: btnRow ? Number(getComputedStyle(btnRow).opacity) : null,
+        };
+      });
+      await page.mouse.move(300, 300);
+      await page.mouse.move(320, 320);
+      await page.waitForTimeout(300);
+      const activeState = await page.evaluate(() => {
+        const root = document.querySelector('.w-screen.h-screen.bg-black');
+        const btnRow = [...document.querySelectorAll('div')].find(
+          (el) => el.querySelector('svg.lucide-settings') && el.className.includes('fixed'),
+        );
+        return {
+          cursor: root ? getComputedStyle(root).cursor : null,
+          buttonRowOpacity: btnRow ? Number(getComputedStyle(btnRow).opacity) : null,
+        };
+      });
+      const pass =
+        idleState.cursor === 'none' &&
+        idleState.buttonRowOpacity === 0 &&
+        activeState.cursor !== 'none' &&
+        activeState.buttonRowOpacity === 1;
+      return {
+        pass,
+        detail: `idle=${JSON.stringify(idleState)} active=${JSON.stringify(activeState)}`,
+      };
+    },
+  },
+  {
+    // #66 問題9(a11y): 設定モーダルにrole=dialog/aria-modal、タブにrole=tab/
+    // aria-selectedが付いていることを実ブラウザのDOMで確認する。
+    name: 'Settings modal exposes role=dialog/aria-modal and tabs expose role=tab/aria-selected (#66 a11y)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+      const result = await page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        const tabs = [...document.querySelectorAll('[role="tab"]')];
+        const selected = tabs.filter((t) => t.getAttribute('aria-selected') === 'true');
+        return {
+          hasDialog: !!dialog,
+          ariaModal: dialog ? dialog.getAttribute('aria-modal') : null,
+          tabCount: tabs.length,
+          selectedCount: selected.length,
+        };
+      });
+      const pass =
+        result.hasDialog &&
+        result.ariaModal === 'true' &&
+        result.tabCount === 7 &&
+        result.selectedCount === 1;
+      return { pass, detail: JSON.stringify(result) };
+    },
+  },
+  {
+    // #66 問題9(a11y): モーダル内でTabを繰り返し押しても、フォーカスがモーダルの
+    // 外（背後のオーバーレイ等）へ漏れない（フォーカストラップ）。
+    name: 'Settings modal traps Tab focus inside the dialog (#66 a11y)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+      for (let i = 0; i < 12; i++) {
+        await page.keyboard.press('Tab');
+      }
+      const stillInside = await page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        return !!dialog && dialog.contains(document.activeElement);
+      });
+      return { pass: stillInside, detail: `stillInside=${stillInside}` };
+    },
+  },
+  {
+    // #66 問題9(#61レビュー由来): 除外ルールの解除ボタンがhoverのみで表示され、
+    // キーボード/タッチで見えなかった。既定でも薄く(opacity>0)見えることを確認する。
+    name: 'Exclude rule remove button is visible (opacity>0) without hovering (#66 問題9)',
+    hash: 'welcome',
+    async run(page) {
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const tabs = [...document.querySelectorAll('[role="tab"], .overflow-x-auto > button')];
+        const excludeTab = tabs.find((b) => b.textContent.includes('除外ルール'));
+        if (!excludeTab) throw new Error('除外ルールタブが見つからない');
+        excludeTab.click();
+      });
+      await page.waitForTimeout(200);
+      await page.fill('input[placeholder*="パターン"]', '*.e2etest');
+      await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find((b) =>
+          b.textContent.includes('追加'),
+        );
+        if (!btn) throw new Error('追加ボタンが見つからない');
+        btn.click();
+      });
+      await page.waitForTimeout(300);
+      const opacity = await page.evaluate(() => {
+        const row = [...document.querySelectorAll('span')].find((s) =>
+          s.textContent.includes('*.e2etest'),
+        );
+        const removeBtn = row ? row.closest('div').parentElement.querySelector('button') : null;
+        return removeBtn ? Number(getComputedStyle(removeBtn).opacity) : null;
+      });
+      const pass = opacity !== null && opacity > 0;
+      return { pass, detail: `opacity=${opacity}` };
+    },
+  },
 ];
 
 /**
@@ -710,6 +1359,13 @@ async function main() {
           if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
         });
         await page.goto(`${BASE_URL}/#${scenario.hash}`);
+        // #66: 複数ページを同じbrowserで使い回す中、直前のシナリオがフォーカス
+        // トラップ（モーダルを開いてフォーカスを奪う）を使うと、後続シナリオの
+        // page.keyboard.press()がOSレベルでは非アクティブな古いページに実際の
+        // キー入力ルーティングを奪われることがあった（document.activeElementは
+        // 期待通りbodyのままなのに、Spaceキー等が効かない）。明示的にこのページを
+        // 前面に出してからキーボード操作を伴うシナリオを実行する。
+        await page.bringToFront();
         let outcome;
         try {
           outcome = await scenario.run(page);

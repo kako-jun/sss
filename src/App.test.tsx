@@ -526,6 +526,313 @@ describe('App i18n (#80): language setting resolution', () => {
 // のまま保持し、表示のたびに現在のロケールへ解決する。エラー表示中に言語を
 // 切り替えても、確定済みの旧言語の文言のまま固まらず、新しい言語へ即座に
 // 切り替わることを固定する（新旧言語が混在しないことの回帰テスト）。
+// #66 問題1: 設定中のESCはモーダルを閉じる。それ以外はexit_appを呼ぶ。以前は
+// フェーズに関わらず常にexit_appを呼んでいたため、設定画面でESCを押しただけで
+// アプリごと終了していた。
+describe('App Escape key (#66 問題1)', () => {
+  it('closes the Settings modal instead of exiting the app when Settings is open', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    // App自身が描画する設定ボタン（右上）をクリックして開く（Settingsコンポーネント
+    // 自体はこのファイルでスタブ化されているため、data-testid="settings-stub" が
+    // 現れることで開いたことを確認する）。
+    fireEvent.click(screen.getByTitle('設定'));
+    expect(screen.getByTestId('settings-stub')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('settings-stub')).toBeNull();
+    });
+    expect(invoke).not.toHaveBeenCalledWith('exit_app');
+  });
+
+  it('calls exit_app when Escape is pressed and nothing is open', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('exit_app');
+    });
+  });
+});
+
+// #66 問題4: Space=一時停止/再開、F/F11=フルスクリーン切替、?=ショートカット一覧。
+describe('App keyboard shortcuts: Space, F, ? (#66 問題4)', () => {
+  it('toggles the pause icon/tooltip in the overlay when Space is pressed on the document body', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+    // 再生中は「一時停止」ツールチップ/アイコン。
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+
+    fireEvent.keyDown(document.body, { key: ' ' });
+
+    await waitFor(() => {
+      expect(screen.getByTitle('再生')).toBeTruthy();
+    });
+    expect(screen.queryByTitle('一時停止')).toBeNull();
+
+    // もう一度押すと再生に戻る。
+    fireEvent.keyDown(document.body, { key: ' ' });
+    await waitFor(() => {
+      expect(screen.getByTitle('一時停止')).toBeTruthy();
+    });
+  });
+
+  it('toggles fullscreen via setFullscreen/setDecorations when F is pressed', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+    // 起動時のisFullscreen()解決(true)を待つ。
+    await waitFor(() => {
+      expect(win.isFullscreen).toHaveBeenCalled();
+    });
+
+    fireEvent.keyDown(document, { key: 'f' });
+
+    await waitFor(() => {
+      expect(win.setFullscreen).toHaveBeenCalledWith(false);
+    });
+    expect(win.setDecorations).toHaveBeenCalledWith(true);
+  });
+
+  it('toggles the shortcuts overlay when ? is pressed, and Escape closes it without exiting', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: '?' });
+    await waitFor(() => {
+      expect(screen.getByText('キーボードショートカット')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByText('キーボードショートカット')).toBeNull();
+    });
+    expect(invoke).not.toHaveBeenCalledWith('exit_app');
+  });
+
+  it('does not toggle pause when Space is pressed while a button has real keyboard (:focus-visible) focus (avoids double-firing the native click)', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+
+    const settingsButton = screen.getByTitle('設定');
+    settingsButton.focus();
+    fireEvent.keyDown(settingsButton, { key: ' ' });
+
+    // フォーカスがボタンにある間はグローバルのSpaceショートカットを発火しない
+    // （ボタン自身のネイティブなクリック相当の挙動に譲る）。jsdomは
+    // `:focus-visible`を「今フォーカスされているか」だけで判定する（実際に
+    // .focus()されたこのボタンはtrueになる）ため、追加のスタブ無しでこの
+    // ケースを再現できる。
+    await Promise.resolve();
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+  });
+
+  // #66レビューmust2(b): 実ブラウザ(Chromium/WebView2)では「前へ/次へ」等の
+  // ボタンをマウスでクリックした後もそのボタンにフォーカスが残り続けるが、
+  // それは`:focus-visible`にならない（キーボード操作等で意図的にフォーカス
+  // された場合だけ真になる）。この「クリック直後の残留フォーカス」を
+  // シミュレートするため、実際に.focus()した上で`matches`を明示的にfalseへ
+  // スタブする（jsdomの`:focus-visible`は「フォーカスの有無」だけで判定して
+  // しまい、この違いを自然には再現できないため）。
+  //
+  // #66レビュー2巡目must1（案a）: 実際の根本対策は、操作バー・右上ピルの
+  // コンテナに`onMouseDown={e => e.preventDefault()}`を付け、マウスクリックが
+  // そもそもボタンへフォーカスを残さないようにしたこと（実ブラウザではこの
+  // シナリオ自体が起きなくなった）。このテストはSpaceハンドラ自身のロジック
+  // （`document.activeElement`が実際に`:focus-visible`かどうかをその場で判定
+  // する、という単純な形に戻した）に対する保険的な単体テストとして残す
+  // （何らかの経路でボタンに非キーボード的な残留フォーカスが生じても、Space
+  // は正しくアプリの一時停止として扱われることを確認する）。
+  it('still toggles pause via Space when a button has residual (non-:focus-visible) focus from a prior mouse click (#66レビューmust2b)', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+
+    const nextButton = screen.getByTitle('次へ (→)');
+    vi.spyOn(nextButton, 'matches').mockReturnValue(false);
+    nextButton.focus();
+
+    fireEvent.keyDown(nextButton, { key: ' ' });
+
+    await waitFor(() => {
+      expect(screen.getByTitle('再生')).toBeTruthy();
+    });
+  });
+});
+
+// #66レビューmust1: キーボードハンドラが参照する値をrefで持つようにしたことの
+// 回帰テスト。以前はhandleToggleWindowMode（とその中のisFullscreen）がeffectの
+// deps配列に無く、初回レンダー時点のクロージャに固定されたままだったため、
+// Fキーを複数回押しても実際には毎回同じ`!isFullscreen`（常に同じ値）しか
+// 計算されず、2回目以降で正しく切り替わらなかった（実ブラウザで再現確認済み）。
+//
+// #66レビュー2巡目must2: CI環境限定でこのテストがflakyだった。原因は、
+// マウント直後に自動実行される「OSの実態からisFullscreenを取得して同期する」
+// 非同期effect（win.isFullscreen().then(setIsFullscreen)）が、beforeEachの既定
+// モック値(true)を返しており、コンポーネントの初期state(useState(true))と
+// 同じ値だったこと。同じ値へのsetStateはReactが再レンダーを省略しうるため、
+// 「非同期解決が実際にstateへ反映・コミットされた」ことをUIから積極的に確認
+// する手段が無かった。CI環境でこの非同期解決がFキー押下と競合するタイミングで
+// 届くと、テストが期待する順序と食い違い稀に失敗していた（と推測される）。
+// 修正: このテストだけ`win.isFullscreen`をあえて初期state(true)と異なる値
+// (false)に解決させ、それがコミットされたこと（タイトルが実際に反転すること）
+// を明示的に待ってからFキーを押し始める。これにより「非同期解決は必ずFキー
+// 押下より前に完了している」ことをテスト自体が保証できる。
+describe('App keyboard shortcut F toggles correctly across repeated presses (#66レビューmust1)', () => {
+  it('alternates on every press, not stuck after the first, and is unaffected by a same-tick async isFullscreen() resolution (#66レビュー2巡目must2)', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    win.isFullscreen.mockReset().mockResolvedValue(false);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    // 起動直後のuseState(true)による初期表示は「ウィンドウモードに切り替え」
+    // （isFullscreen=trueの時の表示）。win.isFullscreen()の非同期解決(false)が
+    // 実際にstateへ反映・コミットされると「フルスクリーンに戻す」
+    // （isFullscreen=falseの時の表示）へ変わる。この変化を確認できて初めて、
+    // 以降のFキー押下がこの非同期解決と競合しないことを保証できる。
+    await waitFor(() => {
+      expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
+    });
+    expect(win.setFullscreen).toHaveBeenNthCalledWith(1, true);
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
+    });
+    expect(win.setFullscreen).toHaveBeenNthCalledWith(2, false);
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
+    });
+    expect(win.setFullscreen).toHaveBeenNthCalledWith(3, true);
+  });
+});
+
+// #66レビュー2巡目must1（案a）: 右上ピルのコンテナに`onMouseDown`でのpreventDefault
+// が実際に配線されていることの単体テスト。jsdomは実ブラウザと異なりmousedown/click
+// だけでは要素にフォーカスを与えないため（.focus()を明示的に呼ばない限り
+// activeElementは変化しない）、「フォーカスが移らないこと」自体はここでは検証
+// できない（それは実ブラウザe2eが担当する）。ここでは「mousedownイベントの
+// preventDefault()が実際に呼ばれているか」をイベントのdefaultPrevented（＝
+// dispatchEventの戻り値がfalseになること）で直接確認する。
+describe('App top-right pill suppresses focus-stealing on mouse click (#66レビュー2巡目must1案a)', () => {
+  it('calls preventDefault() on mousedown for buttons inside the pill', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    const settingsButton = screen.getByTitle('設定');
+    const notCancelled = fireEvent.mouseDown(settingsButton);
+    expect(notCancelled).toBe(false);
+  });
+});
+
+// #66レビューmust2: meta/ctrl/altのいずれかを伴う場合、アプリ側のショートカット
+// として扱わない（Cmd+F/Ctrl+F等、OS/ブラウザ標準のショートカットとの衝突を
+// 避ける）。
+describe('App keyboard shortcuts ignore modifier-key combinations (#66レビューmust2)', () => {
+  it('does not toggle fullscreen for Cmd+F or Ctrl+F', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'f', metaKey: true });
+    fireEvent.keyDown(document, { key: 'f', ctrlKey: true });
+    await Promise.resolve();
+
+    expect(win.setFullscreen).not.toHaveBeenCalled();
+  });
+
+  it('does not exit the app for Ctrl+Escape', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'Escape', ctrlKey: true });
+    await Promise.resolve();
+
+    expect(invoke).not.toHaveBeenCalledWith('exit_app');
+  });
+});
+
+// #66レビューshould: オーバーレイの「…」メニュー（除外サブメニュー含む）が
+// 開いている間のESCは、それを閉じるだけにする。
+describe('App Escape closes the overlay "…" menu without exiting (#66レビューshould)', () => {
+  it('closes the more-menu on Escape instead of calling exit_app', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    expect(screen.getByText('ファイルマネージャーで開く')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByText('ファイルマネージャーで開く')).toBeNull();
+    });
+    expect(invoke).not.toHaveBeenCalledWith('exit_app');
+  });
+});
+
 describe('App directoryError follows locale switches without mixing languages (#82 should1)', () => {
   it('re-resolves the startup directory error message to the new language after switching locale mid-display', async () => {
     getLastDirectoryPath.mockResolvedValue('/photos');

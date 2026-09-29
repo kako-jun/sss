@@ -113,9 +113,10 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        {t('displayIntervalTitle')}
-      </h3>
+      <div>
+        <h3 className="text-sm font-medium text-white/70">{t('displayIntervalTitle')}</h3>
+        <p className="text-xs text-white/50 mt-1">{t('displayIntervalDescription')}</p>
+      </div>
       <div className="flex items-center gap-4">
         <input
           type="range"
@@ -140,7 +141,8 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
             }}
             className="w-14 px-2 py-1 bg-black/40 text-white/60 rounded border border-white/8 text-center text-sm focus:outline-none focus:border-white/20"
           />
-          <span className="text-white/30 text-sm">{t('secondsUnitOnly')}</span>
+          {/* #66レビュー2巡目nit: /30→/50（他の説明/補助テキストと同じ濃さに統一）。 */}
+          <span className="text-white/50 text-sm">{t('secondsUnitOnly')}</span>
         </div>
       </div>
     </div>

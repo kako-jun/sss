@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
+import type { OverlayUIHandle } from './components/OverlayUI';
 import { Settings } from './components/Settings';
 import type { TabType } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
@@ -19,10 +20,17 @@ import {
 import { runStartupSequence } from './lib/startup';
 import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
-import { X, Settings as SettingsIcon, Minimize2, Maximize2 } from 'lucide-react';
+import { X, Settings as SettingsIcon, Minimize2, Maximize2, Keyboard } from 'lucide-react';
 import logoBg from './assets/logo-bg.webp';
 import { useT, useLocale, initLocale, resolveStartupDirectoryError } from './lib/i18n';
-import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL } from './constants';
+import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL, idleFadeClassName } from './constants';
+import {
+  isTypingTarget,
+  isFocusVisible,
+  hasModifierKey,
+  createButtonFocusGuard,
+} from './lib/keyboardShortcuts';
+import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 
 function App() {
   const t = useT();
@@ -30,6 +38,10 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<TabType>('scan');
   const [settingsKey, setSettingsKey] = useState(0);
+  // #66レビュー3巡目should: useFocusTrapへ「マウスクリックで開かれたか」を
+  // 伝えるための状態（詳細はuseFocusTrap.tsのJSDoc参照）。
+  const [settingsOpenedViaMouse, setSettingsOpenedViaMouse] = useState(false);
+  const [shortcutsOpenedViaMouse, setShortcutsOpenedViaMouse] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(0);
   const [totalImages, setTotalImages] = useState(0);
   const [canGoBack, setCanGoBack] = useState(false);
@@ -48,6 +60,8 @@ function App() {
   const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
   const [isPausedByUser, setIsPausedByUser] = useState(false); // ユーザーが明示的に一時停止したか
   const [isFullscreen, setIsFullscreen] = useState(true); // フルスクリーン状態（起動時の設定値に合わせた初期値）
+  // #66 問題4: ショートカット一覧（`?`キー、または右上のヘルプボタン）の開閉状態。
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   // #65: ディレクトリが一度でも設定されたことがあるか。「本当に未設定」（ようこそ画面）と
   // 「設定済みだが今アクセスできない/スキャン失敗/空」を区別するために使う。
   const [hasDirectory, setHasDirectory] = useState(false);
@@ -60,7 +74,12 @@ function App() {
     null,
   );
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
+  const overlayRef = useRef<OverlayUIHandle>(null);
   const { isIdle, setIsHovering } = useMouseIdle(3000);
+  // #66レビュー3巡目nit: 右上ピル内の各ボタンへ個別に付ける
+  // onMouseDownガード（詳細はOverlayUI.tsxの同種のrefと同じ理由）。
+  const pillContainerRef = useRef<HTMLDivElement>(null);
+  const guardPillButtonMouseDown = useMemo(() => createButtonFocusGuard(pillContainerRef), []);
 
   // #65 問題4: isPlaying はこのフックの内部状態ではなく、ここで導出した派生値にする。
   // 設定画面を開いている/オーバーレイにホバー中/ユーザーが明示的に一時停止した、の
@@ -244,57 +263,6 @@ function App() {
     })();
   };
 
-  // キーボードショートカット
-  useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      // #65: キーリピート(押しっぱなし)による多重発火を無視する（問題3関連）。
-      if (e.repeat) return;
-
-      // ESCキーでアプリ終了
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        try {
-          await invoke('exit_app');
-        } catch (err) {
-          console.error('Failed to exit app:', err);
-        }
-      }
-
-      // 左矢印キーで前の画像へ
-      if (e.key === 'ArrowLeft' && canGoBack && !isSettingsOpen) {
-        e.preventDefault();
-        await handlePrevious();
-      }
-
-      // 右矢印キーで次の画像へ
-      if (e.key === 'ArrowRight' && !isSettingsOpen) {
-        e.preventDefault();
-        handleNext();
-      }
-    };
-
-    // captureフェーズで最優先でキャッチ
-    document.addEventListener('keydown', handleKeyDown, true);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown, true);
-    };
-    // handleNext/handlePrevious は毎レンダーで再生成されるが deps に含めると
-    // リスナーが毎回張り直されるため意図的に除外
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canGoBack, isSettingsOpen]);
-
-  const openSettings = (tab: TabType = 'scan') => {
-    setSettingsInitialTab(tab);
-    setSettingsKey((k) => k + 1);
-    setIsSettingsOpen(true);
-  };
-
-  const handleSettings = () => openSettings('scan');
-  const handleOpenPickTab = () => openSettings('pick');
-
   const handleToggleWindowMode = async () => {
     try {
       const win = getCurrentWindow();
@@ -308,6 +276,177 @@ function App() {
       console.error('Failed to toggle window mode:', err);
     }
   };
+
+  // #66レビューmust1: キーボードハンドラが参照する値
+  // （handlePrevious/handleNext/handleToggleWindowMode と、canGoBack/isSettingsOpen/
+  // isShortcutsOpen）を「最新のref」として保持する。以前はこれらの一部だけを
+  // effectのdeps配列に入れていたため、depsに無い値（handleToggleWindowMode、
+  // ひいてはその中で読むisFullscreen）が初回レンダー時点の値に固定されたまま
+  // 更新されず、Fキーが1回しか正しく切り替わらない不具合があった（実ブラウザで
+  // 再現確認済み）。ここで全てをrefにまとめ、キーボードリスナー自体は1回だけ
+  // 登録する（deps=[]）ことで、この種のstale closure問題を構造的に無くす。
+  const keydownHandlersRef = useRef({
+    canGoBack,
+    isSettingsOpen,
+    isShortcutsOpen,
+    handlePrevious,
+    handleNext,
+    handleToggleWindowMode,
+  });
+  // #66レビュー2巡目must2: 以前はこの代入を`useEffect(() => {...})`（deps無し、
+  // 毎レンダー後に走るpassive effect）で行っていたが、passive effectはReactの
+  // コミット後に非同期に（他の作業を挟んで）flushされるため、ある種のテスト
+  // 環境や高負荷なタイミングでは、実際のレンダー結果とrefの内容が一瞬ズレる
+  // 余地があった（CI限定のflakyの一因）。レンダー本体で直接代入すれば、
+  // このrefは常に「今まさにコミットされようとしているレンダー」の値と完全に
+  // 同期する（読み取り専用の同期用refであり、代入そのものが画面表示に影響
+  // しないため、レンダー中の副作用としても安全）。
+  keydownHandlersRef.current = {
+    canGoBack,
+    isSettingsOpen,
+    isShortcutsOpen,
+    handlePrevious,
+    handleNext,
+    handleToggleWindowMode,
+  };
+
+  // キーボードショートカット
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      // #65: キーリピート(押しっぱなし)による多重発火を無視する（問題3関連）。
+      if (e.repeat) return;
+      // #66レビューmust2: meta/ctrl/altのいずれかを伴う場合は無視する
+      // （Cmd+F/Ctrl+F等、OS/ブラウザ標準のショートカットとの衝突を避ける。
+      // 実ブラウザで「Cmd+FがOSのフルスクリーンAPIも呼んでしまう」ことを確認）。
+      if (hasModifierKey(e)) return;
+
+      const h = keydownHandlersRef.current;
+
+      // ESCキー（#66 問題1）: 設定を開いている間は「閉じる」、それ以外は終了。
+      // 自由テキストを打ち込める入力欄にフォーカスがある間はモーダルを閉じたり
+      // アプリを終了したりせず、代わりにフォーカスを外す（#66レビューshould:
+      // 編集を取り消す一般的なESCの挙動に寄せる。checkbox/range/number等の
+      // 非テキスト系inputはこの対象外＝通常通りモーダルを閉じる）。
+      if (e.key === 'Escape') {
+        if (isTypingTarget(e.target)) {
+          (e.target as HTMLElement).blur();
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (h.isSettingsOpen) {
+          setIsSettingsOpen(false);
+          return;
+        }
+        if (h.isShortcutsOpen) {
+          setIsShortcutsOpen(false);
+          return;
+        }
+        // #66レビューshould: オーバーレイの「…」メニュー（除外サブメニュー含む）が
+        // 開いている間のESCは、それを閉じるだけにする。
+        if (overlayRef.current?.isMenuOpen()) {
+          overlayRef.current.closeMenu();
+          return;
+        }
+        try {
+          await invoke('exit_app');
+        } catch (err) {
+          console.error('Failed to exit app:', err);
+        }
+        return;
+      }
+
+      // 以降のショートカットは、設定モーダルを開いている間は入力欄との衝突を
+      // 避けるため無効化する（矢印キーの既存挙動と同じ方針）。
+      if (h.isSettingsOpen) return;
+
+      // 左矢印キーで前の画像へ
+      if (e.key === 'ArrowLeft' && h.canGoBack) {
+        e.preventDefault();
+        await h.handlePrevious();
+        return;
+      }
+
+      // 右矢印キーで次の画像へ
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        h.handleNext();
+        return;
+      }
+
+      // #66 問題4: `?` でショートカット一覧の表示を切り替える。
+      if (e.key === '?') {
+        e.preventDefault();
+        // #66レビュー3巡目should: キーボードで開いた場合として扱う
+        // （useFocusTrapが閉じるボタンへ正しくフォーカスリングを出す）。
+        setShortcutsOpenedViaMouse(false);
+        setIsShortcutsOpen((prev) => !prev);
+        return;
+      }
+
+      if (h.isShortcutsOpen) return;
+
+      // #66 問題4: Space で一時停止/再開をトグルする。
+      // #66レビューmust2(b)→2巡目must1: 以前は`e.target === document.body`のみを
+      // 見ていたが、実ブラウザ(Chromium/WebView2)では「前へ/次へ」等のボタンを
+      // マウスでクリックした後もそのボタンにフォーカスが残り続け、target が
+      // bodyではなくなる。その状態でSpaceを押すと、このガードに阻まれてアプリの
+      // 一時停止が発火しないばかりか、フォーカスが残ったボタン自身がネイティブな
+      // クリック相当の挙動（＝そのボタンを再度押す）を引き起こしていた。
+      // 一度は`:focus-visible`をフォーカス獲得の瞬間にスナップショットする方式
+      // （focusVisibleAtFocusTimeRef）で対処したが、根本原因である「マウス
+      // クリックでボタンにフォーカスが残ること」自体を、操作バー・右上ピルの
+      // コンテナに`onMouseDown={e => e.preventDefault()}`を付けて無くしたため
+      // （2巡目must1案a）、マウスクリック後は`document.activeElement`が
+      // 元々フォーカスされていた要素（通常はbody）のまま変わらなくなり、
+      // このスナップショット機構は不要になった。単純に、今
+      // `document.activeElement`が実際にキーボードで`:focus-visible`な状態か
+      // をその場で判定するだけでよい（Tabで意図的にボタンへフォーカスして
+      // いる場合は、そのボタンへネイティブなSpace起動を譲る）。
+      if (e.key === ' ' && !isTypingTarget(e.target)) {
+        const activeElement = document.activeElement;
+        const isKeyboardFocused =
+          !!activeElement && activeElement !== document.body && isFocusVisible(activeElement);
+        if (!isKeyboardFocused) {
+          e.preventDefault();
+          setIsPausedByUser((prev) => !prev);
+        }
+        return;
+      }
+
+      // #66 問題4: F / F11 でフルスクリーンとウィンドウモードを切り替える。
+      if (e.key === 'f' || e.key === 'F' || e.key === 'F11') {
+        e.preventDefault();
+        await h.handleToggleWindowMode();
+        return;
+      }
+    };
+
+    // captureフェーズで最優先でキャッチ。#66レビューmust1: ハンドラ内部は
+    // 全てkeydownHandlersRef経由で最新値を読むため、このeffect自体はマウント時に
+    // 1度だけ登録すればよい（isFullscreen等の変化のたびに張り直す必要が無い）。
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []);
+
+  // #66レビュー3巡目should: 設定モーダルを開いた操作がマウスクリックだったか
+  // どうかをuseFocusTrapへ伝える（詳細はuseFocusTrap.tsのJSDoc参照）。
+  const openSettings = (tab: TabType = 'scan', viaMouse = false) => {
+    setSettingsInitialTab(tab);
+    setSettingsKey((k) => k + 1);
+    setIsSettingsOpen(true);
+    setSettingsOpenedViaMouse(viaMouse);
+  };
+
+  // `event.detail`は実際のマウスクリックでは1以上（連続クリック数）、
+  // キーボードでのEnter/Space起動によるclickイベントでは0になる
+  // （ブラウザ標準の挙動、#66レビュー3巡目should）。
+  const handleSettings = (e: React.MouseEvent) => openSettings('scan', e.detail > 0);
+  const handleOpenPickTab = (viaMouse: boolean) => openSettings('pick', viaMouse);
 
   const handleOverlayMouseEnter = () => {
     setIsOverlayHovered(true);
@@ -415,17 +554,22 @@ function App() {
           <img src={logoBg} alt="SSS Logo" className="w-1/3 h-auto opacity-2" />
         </div>
 
-        {/* 終了ボタン（右上） */}
-        <button
-          onClick={() => exit(0)}
-          className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
-          title={t('exitTooltip')}
-        >
-          <X size={18} />
-          <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-            {t('exitTooltip')}
-          </span>
-        </button>
+        {/* 終了ボタン（右上）。#66視覚刷新: 通常表示中の右上ピルと統一 */}
+        <div className="fixed top-4 right-4 z-50">
+          <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
+            <button
+              onClick={() => exit(0)}
+              className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
+              title={t('exitTooltip')}
+              aria-label={t('exitTooltip')}
+            >
+              <X size={16} />
+              <span className="absolute top-full right-0 mt-2 px-2 py-1 bg-black/90 text-white/70 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
+                {t('exitTooltip')}
+              </span>
+            </button>
+          </div>
+        </div>
 
         <div className="w-screen h-screen flex items-center justify-center relative z-10">
           <div className="text-white/50 text-center">
@@ -451,7 +595,16 @@ function App() {
   }
 
   return (
-    <div className="w-screen h-screen bg-black overflow-hidden">
+    <div
+      // #66 問題3: idle（3秒間マウス非操作）中はカーソルも隠す。写真が主役の
+      // 鑑賞アプリなので、操作UIだけでなくカーソル自体も消して邪魔しない。
+      // 設定モーダル・ショートカット一覧を開いている間はUIを操作中なので対象外
+      // にする（#66レビューshould: ショートカット一覧を読んでいる間にカーソルが
+      // 消えるのは不自然）。
+      className={`w-screen h-screen bg-black overflow-hidden${
+        isIdle && !isSettingsOpen && !isShortcutsOpen ? ' cursor-none' : ''
+      }`}
+    >
       {/* スライドショー */}
       <Slideshow
         image={currentImage}
@@ -462,29 +615,106 @@ function App() {
         onMediaError={handleMediaError}
       />
 
-      {/* 終了ボタン（右上） */}
-      <button
-        onClick={() => exit(0)}
-        className="fixed top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/30 hover:text-white/60 transition-colors group"
-        title={t('exitTooltip')}
+      {/* 右上の常設ボタン（終了・ショートカット・ウィンドウモード・設定）。
+          #66視覚刷新: 枠線付き四角ボタン4つの並びから、枠線なしアイコンを1つの
+          ガラス調ピル（DESIGN.md「Icon Pill Group」）にまとめた。idle時は
+          オーバーレイ同様にフェードアウトする（実際にキーボードでフォーカスして
+          いる間は例外的に可視のまま。キーボードでTab移動して見えなくなるのを
+          防ぐ）。#66レビューshould: マウスでホバーしている間もidleタイマーを
+          止める（オーバーレイと同じ挙動。再生の自動一時停止は伴わない）。
+          #66レビュー2巡目must1（案a）: OverlayUIの操作バーと同じ理由で、
+          マウスクリックがこのピル内のボタンへフォーカスを残さないように
+          `onMouseDown`でpreventDefaultする（Tabでのキーボード操作には影響
+          しない）。#66レビュー3巡目nit: OverlayUIと同じ理由で、この
+          preventDefaultはコンテナではなく各ボタンへ個別に付ける
+          （`guardPillButtonMouseDown`）。 */}
+      <div
+        ref={pillContainerRef}
+        className={`fixed top-4 right-4 z-50 ${idleFadeClassName(isIdle)}`}
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
       >
-        <X size={18} />
-        <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-          {t('exitTooltip')}
-        </span>
-      </button>
+        <div className="flex items-center gap-0.5 bg-black/50 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
+          <button
+            onClick={(e) => {
+              // #66レビュー3巡目should: マウスクリック(detail>0)かキーボードの
+              // Enter/Space起動(detail===0)かをuseFocusTrapへ伝える。
+              setShortcutsOpenedViaMouse(e.detail > 0);
+              setIsShortcutsOpen(true);
+            }}
+            onMouseDown={guardPillButtonMouseDown}
+            className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
+            title={t('shortcutsButtonTooltip')}
+            aria-label={t('shortcutsButtonTooltip')}
+          >
+            <Keyboard size={16} />
+            <span className="absolute top-full right-0 mt-2 px-2 py-1 bg-black/90 text-white/70 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
+              {t('shortcutsButtonTooltip')}
+            </span>
+          </button>
 
-      {/* 画像がない場合の案内画面（ようこそ/空/接続不可/読込失敗）。#65問題1・5・9 */}
+          <button
+            onClick={handleToggleWindowMode}
+            onMouseDown={guardPillButtonMouseDown}
+            className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
+            title={isFullscreen ? t('switchToWindowMode') : t('switchToFullscreen')}
+            aria-label={isFullscreen ? t('switchToWindowMode') : t('switchToFullscreen')}
+          >
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            <span className="absolute top-full right-0 mt-2 px-2 py-1 bg-black/90 text-white/70 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
+              {isFullscreen ? t('windowModeLabel') : t('fullscreenLabel')}
+            </span>
+          </button>
+
+          <button
+            onClick={handleSettings}
+            onMouseDown={guardPillButtonMouseDown}
+            className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
+            title={t('settingsTitle')}
+            aria-label={t('settingsTitle')}
+          >
+            <SettingsIcon size={16} />
+            <span className="absolute top-full right-0 mt-2 px-2 py-1 bg-black/90 text-white/70 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
+              {t('settingsTitle')}
+            </span>
+          </button>
+
+          <button
+            onClick={() => exit(0)}
+            onMouseDown={guardPillButtonMouseDown}
+            className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
+            title={t('exitTooltip')}
+            aria-label={t('exitTooltip')}
+          >
+            <X size={16} />
+            <span className="absolute top-full right-0 mt-2 px-2 py-1 bg-black/90 text-white/70 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pointer-events-none">
+              {t('exitTooltip')}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* 画像がない場合の案内画面（ようこそ/空/接続不可/読込失敗）。#65問題1・5・9
+          #66視覚刷新: 角丸のガラスカードに統一し、ようこそ画面だけロゴマーク・
+          プライマリボタン・ショートカットヒントを添える。 */}
       {!currentImage && !isLoading && !isSettingsOpen && emptyStateContent && (
-        <div className="fixed inset-0 flex items-center justify-center z-40">
-          <div className="text-center max-w-md px-6">
-            <div className="text-white/60 text-xl mb-2">{emptyStateContent.title}</div>
+        <div className="fixed inset-0 flex items-center justify-center z-40 px-6">
+          {/* #66レビューshould: max-w-smは日本語の説明文（特に長い方の文言）が
+              不自然な位置で折り返っていた。max-w-mdに広げ、`text-balance`
+              （Tailwind `text-wrap: balance`）で行の折返し位置を均等にする。 */}
+          <div className="text-center max-w-md w-full bg-black/30 backdrop-blur-md border border-white/10 rounded-2xl px-8 py-10">
+            {!hasDirectory && (
+              <img src={logoBg} alt="" aria-hidden="true" className="w-14 h-14 mx-auto mb-5" />
+            )}
+            <div className="text-white/85 text-xl font-medium mb-2">{emptyStateContent.title}</div>
             {emptyStateContent.subtitle && (
-              <div className="text-white/30 text-sm mb-6">{emptyStateContent.subtitle}</div>
+              <div className="text-white/50 text-sm mb-6 text-balance">
+                {emptyStateContent.subtitle}
+              </div>
             )}
             {directoryErrorMessage && (
               <div
-                className="text-red-400/80 font-mono text-xs mb-6 truncate max-w-[90vw] mx-auto"
+                className="text-red-400/80 font-mono text-xs mb-6 truncate max-w-full mx-auto"
                 title={directoryErrorMessage}
               >
                 {directoryErrorMessage}
@@ -492,11 +722,22 @@ function App() {
             )}
             <button
               onClick={handleSettings}
-              className="flex items-center gap-2 px-5 py-2 bg-white/8 hover:bg-white/15 border border-white/10 text-white/50 hover:text-white/80 rounded transition-colors mx-auto text-sm"
+              className="flex items-center justify-center gap-2 px-6 py-2.5 bg-white/90 hover:bg-white text-black font-medium rounded-lg transition-colors mx-auto text-sm"
             >
               <SettingsIcon size={16} />
               {hasDirectory ? t('openSettings') : t('selectFolder')}
             </button>
+            {!hasDirectory && (
+              <div className="mt-6 flex items-center justify-center gap-1.5 text-white/50 text-xs">
+                <span
+                  className="font-mono px-1.5 py-0.5 bg-white/8 border border-white/10 rounded"
+                  aria-hidden="true"
+                >
+                  ?
+                </span>
+                <span>{t('shortcutsHintWelcome')}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -505,62 +746,41 @@ function App() {
           復元後のバックグラウンドスキャン失敗（#65レビュー修正） */}
       {currentImage && bottomNotice && (
         <div
-          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 bg-black/80 text-white/50 text-xs px-3 py-2 rounded border border-white/10 max-w-[90vw] truncate"
+          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 max-w-[90vw] truncate"
           title={bottomNotice}
         >
           {bottomNotice}
         </div>
       )}
 
-      {/* ウィンドウモード切り替え（右上） */}
-      <button
-        onClick={handleToggleWindowMode}
-        className="fixed top-4 right-24 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/20 hover:text-white/50 transition-colors group"
-        title={isFullscreen ? t('switchToWindowMode') : t('switchToFullscreen')}
-      >
-        {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-        <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-          {isFullscreen ? t('windowModeLabel') : t('fullscreenLabel')}
-        </span>
-      </button>
+      {/* オーバーレイUI（プログレスラインは常時表示、バー/ステータスはidleで
+          フェード。#66レビューshould: idle中に一時停止していても手がかりを
+          残すため、フェードの制御はOverlayUI内部に持たせisIdleを直接渡す）。 */}
+      <OverlayUI
+        ref={overlayRef}
+        image={currentImage}
+        canGoBack={canGoBack}
+        currentPosition={currentPosition}
+        totalImages={totalImages}
+        progress={progressPercent}
+        progressDurationMs={progressDurationMs}
+        isPausedByUser={isPausedByUser}
+        isIdle={isIdle}
+        onPrevious={handlePrevious}
+        onNext={handleNext}
+        onOpenPickTab={handleOpenPickTab}
+        onMouseEnter={handleOverlayMouseEnter}
+        onMouseLeave={handleOverlayMouseLeave}
+        onTogglePause={handleTogglePause}
+        onExcluded={handleExcluded}
+      />
 
-      {/* 設定ボタン（右上、×ボタンの左隣） */}
-      <button
-        onClick={handleSettings}
-        className="fixed top-4 right-14 z-50 p-2 bg-black/40 hover:bg-black/70 backdrop-blur-sm rounded border border-white/8 text-white/20 hover:text-white/50 transition-colors group"
-        title={t('settingsTitle')}
-      >
-        <SettingsIcon size={16} />
-        <span className="absolute top-full right-0 mt-1 px-2 py-1 bg-black/90 text-white/60 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-          {t('settingsTitle')}
-        </span>
-      </button>
-
-      {/* オーバーレイUI（フェードイン/アウト） */}
-      <div
-        className="transition-opacity duration-300"
-        style={{
-          opacity: isIdle ? 0 : 1,
-          pointerEvents: isIdle ? 'none' : 'auto',
-        }}
-      >
-        <OverlayUI
-          image={currentImage}
-          canGoBack={canGoBack}
-          currentPosition={currentPosition}
-          totalImages={totalImages}
-          progress={progressPercent}
-          progressDurationMs={progressDurationMs}
-          isPlaying={isPlaying}
-          onPrevious={handlePrevious}
-          onNext={handleNext}
-          onOpenPickTab={handleOpenPickTab}
-          onMouseEnter={handleOverlayMouseEnter}
-          onMouseLeave={handleOverlayMouseLeave}
-          onTogglePause={handleTogglePause}
-          onExcluded={handleExcluded}
-        />
-      </div>
+      {/* ショートカット一覧（#66 問題4） */}
+      <ShortcutsOverlay
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
+        openedViaMouse={shortcutsOpenedViaMouse}
+      />
 
       {/* 設定画面 */}
       <Settings
@@ -570,6 +790,7 @@ function App() {
         onScanComplete={handleScanComplete}
         onIntervalChange={handleIntervalChange}
         initialTab={settingsInitialTab}
+        openedViaMouse={settingsOpenedViaMouse}
       />
     </div>
   );

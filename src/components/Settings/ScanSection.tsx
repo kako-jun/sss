@@ -111,9 +111,10 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        {t('directorySelectionTitle')}
-      </h3>
+      <div>
+        <h3 className="text-sm font-medium text-white/70">{t('directorySelectionTitle')}</h3>
+        <p className="text-xs text-white/50 mt-1">{t('directorySelectionDescription')}</p>
+      </div>
 
       <div className="flex gap-2">
         <input
@@ -121,21 +122,24 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
           value={selectedDirectory}
           readOnly
           placeholder=""
-          className="flex-1 px-3 py-2 bg-black/40 text-white/60 rounded border border-white/8 focus:outline-none focus:border-white/20 text-sm"
+          title={selectedDirectory}
+          className="flex-1 px-3 py-2 bg-black/40 text-white/60 rounded-lg border border-white/8 focus:outline-none focus:border-white/20 text-sm truncate"
         />
         <button
           onClick={handleSelectDirectory}
-          className="flex items-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded border border-white/8 transition shrink-0 text-sm"
+          className="flex items-center gap-2 px-4 py-2 text-white/50 hover:text-white/80 hover:bg-white/8 rounded-lg transition-colors shrink-0 text-sm"
         >
           <FolderOpen className="w-4 h-4" />
           {t('selectButtonLabel')}
         </button>
       </div>
 
+      {/* #66視覚刷新: 主要操作（スキャン実行）はDESIGN.md「Buttons — Primary」
+          （白塗り）、副次操作（フォルダ選択）は「Buttons — Ghost」にする。 */}
       <button
         onClick={handleScan}
         disabled={!selectedDirectory || isScanning}
-        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 disabled:bg-black/20 disabled:text-white/20 text-white/60 hover:text-white/80 rounded border border-white/8 disabled:border-white/5 transition text-sm"
+        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white/90 hover:bg-white disabled:bg-white/10 disabled:text-white/30 disabled:cursor-not-allowed text-black font-medium rounded-lg transition-colors text-sm"
       >
         <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
         {isScanning ? t('scanningLabel') : t('scanLabel')}
@@ -144,36 +148,34 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
       {errorMessage && <div className="text-sm text-red-400/70">{errorMessage}</div>}
 
       {realtimeProgress && (
-        <div className="text-sm text-white/30 font-mono">
+        <div className="text-sm text-white/50 font-mono">
           {realtimeProgress.current.toLocaleString()} / {realtimeProgress.total.toLocaleString()}
         </div>
       )}
 
       {scanProgress && (
         <div className="space-y-2">
-          <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-            {t('scanResultTitle')}
-          </h3>
-          <div className="space-y-2 p-4 bg-black/30 rounded border border-white/5">
+          <h3 className="text-sm font-medium text-white/70">{t('scanResultTitle')}</h3>
+          <div className="space-y-2 p-4 bg-black/30 rounded-lg">
             <div className="text-sm text-white/50">
               {t('fileCountLabel')}{' '}
               <span className="font-mono text-white/70">
                 {scanProgress.totalFiles.toLocaleString()}
               </span>
             </div>
-            <div className="text-sm text-white/40">
+            <div className="text-sm text-white/50">
               {t('newFilesLabel')}{' '}
               <span className="font-mono text-white/60">
                 {scanProgress.newFiles.toLocaleString()}
               </span>
             </div>
-            <div className="text-sm text-white/40">
+            <div className="text-sm text-white/50">
               {t('deletedFilesLabel')}{' '}
               <span className="font-mono text-white/60">
                 {scanProgress.deletedFiles.toLocaleString()}
               </span>
             </div>
-            <div className="text-sm text-white/30">
+            <div className="text-sm text-white/50">
               {t('durationLabel')}{' '}
               <span className="font-mono">
                 {t('secondsUnit', { value: (scanProgress.durationMs / 1000).toFixed(2) })}
@@ -182,16 +184,16 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
           </div>
 
           {scanProgress.errorCount > 0 && (
-            <div className="space-y-2 p-4 bg-black/30 rounded border border-white/5">
-              <div className="text-sm text-white/40">
+            <div className="space-y-2 p-4 bg-black/30 rounded-lg">
+              <div className="text-sm text-white/50">
                 {t('readErrorsLabel')}{' '}
                 <span className="font-mono text-red-400/80">
                   {t('errorCountValue', { count: scanProgress.errorCount.toLocaleString() })}
                 </span>
-                <span className="text-white/30 text-xs"> {t('keptAsUnknownNote')}</span>
+                <span className="text-white/50 text-xs"> {t('keptAsUnknownNote')}</span>
               </div>
               {scanProgress.errorExamples.length > 0 && (
-                <ul className="text-xs text-white/30 font-mono space-y-0.5">
+                <ul className="text-xs text-white/50 font-mono space-y-0.5">
                   {scanProgress.errorExamples.map((example, index) => (
                     <li key={`${index}-${example}`} className="truncate">
                       {example}

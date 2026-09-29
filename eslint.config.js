@@ -39,6 +39,10 @@ export default [
         HTMLInputElement: 'readonly',
         confirm: 'readonly',
         React: 'readonly',
+        EventTarget: 'readonly',
+        Element: 'readonly',
+        requestAnimationFrame: 'readonly',
+        cancelAnimationFrame: 'readonly',
       },
     },
     plugins: {

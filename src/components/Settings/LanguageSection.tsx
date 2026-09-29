@@ -36,18 +36,18 @@ export function LanguageSection() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        {t('languageLabel')}
-      </h3>
-      <div className="inline-flex bg-black/40 rounded border border-white/8 p-0.5 gap-0.5">
+      <h3 className="text-sm font-medium text-white/70">{t('languageLabel')}</h3>
+      <div className="inline-flex bg-black/40 rounded-lg p-0.5 gap-0.5">
         {OPTIONS.map((option) => (
           <button
             key={option}
             onClick={() => handleChange(option)}
-            className={`px-3 py-1.5 rounded text-sm transition-colors ${
+            // #66レビュー2巡目nit: 非選択の文字色を/40→/50に（設定タブ行の
+            // 非選択スタイルと揃える。DESIGN.mdのテキスト階層に合わせて統一）。
+            className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
               setting === option
                 ? 'bg-white/15 text-white/80'
-                : 'text-white/40 hover:text-white/60 hover:bg-white/5'
+                : 'text-white/50 hover:text-white/70 hover:bg-white/5'
             }`}
           >
             {labelFor(option)}

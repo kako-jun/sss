@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
+import { createRef } from 'react';
+import type { OverlayUIHandle } from './OverlayUI';
 
 // #59: tauri-plugin-shell の open() から tauri-plugin-opener の openUrl() への移行。
 // 地図セルのクリックが正しい引数で openUrl を呼ぶことをピン留めする（GPS座標→URL整形の
@@ -46,7 +48,8 @@ const requiredProps = {
   totalImages: 10,
   progress: 0,
   progressDurationMs: 0,
-  isPlaying: true,
+  isPausedByUser: false,
+  isIdle: false,
   onPrevious: noop,
   onNext: noop,
   onOpenPickTab: noop,
@@ -112,6 +115,301 @@ describe('OverlayUI exclude advances immediately (#65 問題5)', () => {
 
     await screen.findByText('エラー: 除外失敗');
     expect(onExcluded).not.toHaveBeenCalled();
+  });
+});
+
+// #66 問題2: 旧実装は「実際に再生中か(isPlaying)」を渡していたが、オーバーレイの
+// ⏸/▶ボタンはオーバーレイにマウスオーバーしないと見えず、ホバー中はApp.tsx側で
+// 常にisPlaying=falseへ自動一時停止するため、ボタンが見えている間は常に
+// アイコンが▶(再生)のまま固定されて見える不具合があった。ユーザーが選んだ
+// 一時停止状態(isPausedByUser)を独立して渡すことで、ホバーの影響を受けずに
+// 正しいアイコン/ツールチップになることを固定する。
+describe('OverlayUI pause/play icon reflects isPausedByUser, not the hover-derived isPlaying (#66 問題2)', () => {
+  it('shows the Pause icon and "一時停止" tooltip when not paused by the user', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} isPausedByUser={false} />);
+
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+    expect(screen.queryByTitle('再生')).toBeNull();
+  });
+
+  it('shows the Play icon and "再生" tooltip when paused by the user', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} isPausedByUser={true} />);
+
+    expect(screen.getByTitle('再生')).toBeTruthy();
+    expect(screen.queryByTitle('一時停止')).toBeNull();
+  });
+});
+
+describe('OverlayUI status message timers do not interfere with each other (#66 問題6)', () => {
+  it('keeps a newly shown message visible for its own full duration even if triggered right after a previous one', async () => {
+    // 完全に決定的な擬似タイマー（自動進行なし）で制御し、mockの解決に必要な
+    // マイクロタスクのフラッシュだけ明示的に行う（実時間との結合による揺れを避ける）。
+    vi.useFakeTimers();
+    excludeImage.mockResolvedValue({ pattern: 'a.tmp', needsRescan: false });
+    pickImage.mockResolvedValue('/picks/a.tmp');
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    // 1回目: 除外してステータスメッセージを表示する。
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('ファイルを除外'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('除外パターン追加: a.tmp')).toBeTruthy();
+
+    // 2.9秒後（1回目のタイマーが発火する直前）に2回目のピック操作で新しい
+    // メッセージを表示する。旧実装は1回目のタイマー(あと0.1秒)がそのまま発火し、
+    // 2回目のメッセージを即座に消してしまっていた。
+    act(() => {
+      vi.advanceTimersByTime(2900);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('ピック（コピー）'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('コピー完了: /picks/a.tmp')).toBeTruthy();
+
+    // 1回目のタイマーが本来発火していたはずの時刻(+0.2秒)を過ぎても、
+    // 2回目のメッセージはまだ消えない（干渉していない証拠）。
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.getByText('コピー完了: /picks/a.tmp')).toBeTruthy();
+
+    // 2回目のメッセージ自身の3秒が経過すれば消える。
+    act(() => {
+      vi.advanceTimersByTime(2900);
+    });
+    expect(screen.queryByText('コピー完了: /picks/a.tmp')).toBeNull();
+
+    vi.useRealTimers();
+  });
+});
+
+// #66レビューmust4: `image.path.split('\\').pop() || image.path.split('/').pop()`は
+// バックスラッシュが無いPOSIXパスだと「区切りが無いので元の文字列全体」を返して
+// しまい、それが空でないため`||`の右辺（'/'区切り）に一切フォールバックしなかった
+// （フルパスがそのままファイル名として表示される不具合）。
+describe('OverlayUI fileName extraction handles POSIX paths (#66レビューmust4)', () => {
+  it('shows only the basename, not the full path, for a POSIX-style path', () => {
+    const image = makeImage({ path: '/photos/2024/summer/beach.jpg' });
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    expect(screen.getByText('beach.jpg')).toBeTruthy();
+    expect(screen.queryByText('/photos/2024/summer/beach.jpg')).toBeNull();
+  });
+
+  it('still shows only the basename for a Windows-style backslash path', () => {
+    const image = makeImage({ path: 'C:\\Users\\kako\\Pictures\\beach.jpg' });
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    expect(screen.getByText('beach.jpg')).toBeTruthy();
+  });
+});
+
+// #66レビューshould: 「…」メニュー・除外サブメニューにaria-haspopup/aria-expanded
+// を付け、App.tsxのグローバルESCハンドラがrefのisMenuOpen/closeMenuでメニューを
+// 閉じられるようにする命令的API。
+describe('OverlayUI "…" menu accessibility + imperative handle (#66レビューshould)', () => {
+  it('exposes aria-haspopup/aria-expanded on the menu button, toggling with open state', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const menuButton = screen.getByTitle('メニュー');
+    expect(menuButton.getAttribute('aria-haspopup')).toBe('menu');
+    expect(menuButton.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(menuButton);
+    expect(menuButton.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('ref.isMenuOpen()/closeMenu() reflect and control the "…" menu and exclude submenu', () => {
+    const ref = createRef<OverlayUIHandle>();
+    const image = makeImage();
+    render(<OverlayUI ref={ref} image={image} {...requiredProps} />);
+
+    expect(ref.current?.isMenuOpen()).toBe(false);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    expect(ref.current?.isMenuOpen()).toBe(true);
+
+    act(() => {
+      ref.current?.closeMenu();
+    });
+    expect(ref.current?.isMenuOpen()).toBe(false);
+    expect(screen.queryByText('ファイルマネージャーで開く')).toBeNull();
+  });
+
+  it('isMenuOpen() is also true while just the exclude submenu is open', () => {
+    const ref = createRef<OverlayUIHandle>();
+    const image = makeImage();
+    render(<OverlayUI ref={ref} image={image} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    expect(ref.current?.isMenuOpen()).toBe(true);
+  });
+});
+
+// #66レビュー3巡目must: 背景幕(`fixed inset-0`)が操作バー（transformを持つ
+// 祖先）の子孫だと、CSSの含有ブロックがバー自身に限定され、`inset-0`が画面
+// 全体でなくバーの矩形にしかならない（写真をクリックしても閉じない回帰）。
+// `createPortal`で`document.body`直下に出すことで解消した。jsdomはレイアウト
+// の含有ブロック計算自体は行わないため、この単体テストでは「実際に
+// document.bodyの直接の子として存在するか」という構造面だけを確認する
+// （実際に画面全体をクリックして閉じることの確認は実ブラウザe2eが担当）。
+describe('OverlayUI "…" menu backdrop is portaled to document.body (#66レビュー3巡目must)', () => {
+  it('renders the click-to-close backdrop as a direct child of document.body, not nested inside the floating bar', () => {
+    const image = makeImage();
+    const { container } = render(<OverlayUI image={image} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+
+    const backdrops = Array.from(document.body.children).filter(
+      (el) => el.className === 'fixed inset-0 z-40',
+    );
+    expect(backdrops.length).toBe(1);
+    // RTLがrenderしたコンテナ（コンポーネント自身のツリー）の外にある
+    // ことも確認する（＝操作バーの祖先の内側ではない）。
+    expect(container.contains(backdrops[0])).toBe(false);
+  });
+
+  it('closes the menu when the portaled backdrop is clicked', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    expect(screen.getByText('ファイルマネージャーで開く')).toBeTruthy();
+
+    const backdrop = Array.from(document.body.children).find(
+      (el) => el.className === 'fixed inset-0 z-40',
+    )!;
+    fireEvent.click(backdrop);
+
+    expect(screen.queryByText('ファイルマネージャーで開く')).toBeNull();
+  });
+});
+
+// #66レビューshould: idle中に一時停止していても手がかりを残すため、プログレス
+// ラインはバー/ステータスメッセージとは独立して常時表示する（isIdleの影響を
+// 受けない）。
+describe('OverlayUI progress line fade rule (#66レビューshould→2巡目should1)', () => {
+  // #66レビュー2巡目should1: 当初は「プログレスラインは常時表示（idleでも
+  // フェードしない）」だったが、再生中にidleへ入ってもバーだけ消えて進捗線が
+  // 動き続けているのは中途半端という指摘を受け、「再生中のidleはバーと同様に
+  // フェードし、一時停止中のidleだけ手がかりとして残す」に変更した。
+  it('fades the progress line on idle while playing (isPausedByUser=false)', () => {
+    const image = makeImage();
+    const { container } = render(
+      <OverlayUI image={image} {...requiredProps} isIdle={true} isPausedByUser={false} />,
+    );
+
+    const progressLine = container.querySelector('.bottom-0');
+    expect(progressLine).toBeTruthy();
+    expect(progressLine?.className).toContain('opacity-0');
+  });
+
+  it('keeps the progress line visible on idle while paused (isPausedByUser=true)', () => {
+    const image = makeImage();
+    const { container } = render(
+      <OverlayUI image={image} {...requiredProps} isIdle={true} isPausedByUser={true} />,
+    );
+
+    const progressLine = container.querySelector('.bottom-0');
+    expect(progressLine).toBeTruthy();
+    expect(progressLine?.className).not.toContain('opacity-0');
+  });
+
+  it('never fades the progress line while not idle, regardless of pause state', () => {
+    const image = makeImage();
+    const { container } = render(
+      <OverlayUI image={image} {...requiredProps} isIdle={false} isPausedByUser={false} />,
+    );
+
+    const progressLine = container.querySelector('.bottom-0');
+    expect(progressLine?.className).not.toContain('opacity-0');
+  });
+
+  it('puts opacity-0 on the bar/status wrapper when isIdle is true regardless of pause state', () => {
+    const image = makeImage();
+    const { container } = render(
+      <OverlayUI image={image} {...requiredProps} isIdle={true} isPausedByUser={true} />,
+    );
+
+    const barPositionDiv = container.querySelector('.bottom-6');
+    const fadeWrapper = barPositionDiv?.parentElement;
+    expect(fadeWrapper?.className).toContain('opacity-0');
+  });
+});
+
+describe('OverlayUI floating bar suppresses focus-stealing on mouse click (#66レビュー2巡目must1案a)', () => {
+  // jsdomはmousedown/clickだけでは要素にフォーカスを与えないため（実ブラウザ
+  // と異なり.focus()を明示しない限りactiveElementは変化しない）、「フォーカス
+  // が移らないこと」自体はここでは検証できない（実ブラウザe2eが担当）。ここでは
+  // `onMouseDown`のpreventDefault()が実際に呼ばれているかを、イベントの
+  // defaultPrevented（dispatchEventの戻り値がfalseになること）で直接確認する。
+  it('calls preventDefault() on mousedown for a button inside the floating bar', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const nextButton = screen.getByTitle('次へ (→)');
+    const notCancelled = fireEvent.mouseDown(nextButton);
+    expect(notCancelled).toBe(false);
+  });
+});
+
+// #66レビュー3巡目nit: 2巡目はこのpreventDefaultをバーのコンテナ1箇所に
+// 付けていたため、ファイル名テキストの上でのmousedown（ドラッグ選択の起点）
+// まで巻き込んで無効化してしまっていた。各`<button>`要素にのみ付ける方式に
+// 変更したことで、ボタン以外の要素（ファイル名テキスト等）へのmousedownは
+// 通常通り（preventDefaultされない）であることを確認する。
+describe('OverlayUI mousedown guard is scoped to buttons only, not the whole bar (#66レビュー3巡目nit)', () => {
+  it('does not call preventDefault() on mousedown over the filename text (text stays selectable)', () => {
+    const image = makeImage({ path: '/photos/selectable-name.jpg' });
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const fileNameSpan = screen.getByText('selectable-name.jpg');
+    const notCancelled = fireEvent.mouseDown(fileNameSpan);
+    expect(notCancelled).toBe(true);
+  });
+
+  // #66レビュー3巡目nit: mousedownでのpreventDefaultにより新しいボタンへは
+  // フォーカスが移らない。そのままだと、Tabで別のボタンへ既に乗っていた
+  // フォーカスが誰にもblurされず残り続け、idleでバーが消えなくなってしまう
+  // （has-[:focus-visible]が真のまま）。同じバー内の別ボタンをマウスで
+  // 押した時点で、その残留フォーカスをblurすることを固定する。
+  it('blurs a different button that currently holds keyboard focus when another button is pressed with the mouse', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const previousButton = screen.getByTitle('前へ (←)');
+    const nextButton = screen.getByTitle('次へ (→)');
+    previousButton.focus();
+    expect(document.activeElement).toBe(previousButton);
+    const blurSpy = vi.spyOn(previousButton, 'blur');
+
+    fireEvent.mouseDown(nextButton);
+
+    expect(blurSpy).toHaveBeenCalled();
+  });
+
+  it('does not blur the same button that is being pressed', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const nextButton = screen.getByTitle('次へ (→)');
+    nextButton.focus();
+    const blurSpy = vi.spyOn(nextButton, 'blur');
+
+    fireEvent.mouseDown(nextButton);
+
+    expect(blurSpy).not.toHaveBeenCalled();
   });
 });
 

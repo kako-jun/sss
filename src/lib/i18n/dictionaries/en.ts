@@ -15,6 +15,19 @@ export const en = {
   windowModeLabel: 'Windowed',
   fullscreenLabel: 'Fullscreen',
   genericErrorTitle: 'Something went wrong',
+  closeTooltip: 'Close',
+
+  // === Keyboard shortcuts (#66) ===
+  shortcutsButtonTooltip: 'Keyboard shortcuts (?)',
+  shortcutsTitle: 'Keyboard Shortcuts',
+  shortcutSpace: 'Pause / resume',
+  shortcutNavigate: 'Previous / next',
+  shortcutFullscreen: 'Toggle fullscreen',
+  shortcutEscape: 'Exit (closes Settings first if open)',
+  shortcutHelp: 'Show this help',
+  // #66 visual refresh: caption next to the "?" badge on the welcome screen
+  // (the badge itself is a fixed "?" glyph in the JSX; this is just the label).
+  shortcutsHintWelcome: 'Show keyboard shortcuts',
 
   // === Startup notice screens (#65) ===
   welcomeTitle: 'Welcome to SSS',
@@ -53,9 +66,11 @@ export const en = {
   excludeByDate: 'Exclude by date taken',
   excludeByDirectory: 'Exclude this folder',
   excludeByFile: 'Exclude this file',
-  noLocationInfo: 'No location',
-  noDateTime: 'No date',
   locationMapAlt: 'Location map',
+  // #66 visual refresh: file size, display count, and last-displayed time are no
+  // longer shown inline; they're folded into the filename's title tooltip.
+  displayCountTooltip: 'Shown {count} times',
+  lastDisplayedTooltip: 'Last shown: {when}',
   pickCopyDone: 'Copied to {path}',
   pickCopyFailed: "Couldn't copy the photo",
   excludeFailed: 'Error: exclude failed',
@@ -69,6 +84,7 @@ export const en = {
   secondsUnitOnly: 's',
 
   // === Settings: tabs ===
+  settingsTabsLabel: 'Settings tabs',
   tabScan: 'Folder',
   tabOptions: 'Options',
   tabExclude: 'Exclude Rules',
@@ -79,6 +95,9 @@ export const en = {
 
   // === Settings: Import (scan) ===
   directorySelectionTitle: 'Select Folder',
+  // #66 visual refresh: description for the heading+description+control rhythm.
+  directorySelectionDescription:
+    'Only what changed since last time is re-scanned, so even 100,000+ photos start in seconds',
   scanningLabel: 'Scanning...',
   scanLabel: 'Scan',
   scanResultTitle: 'Scan Results',
@@ -99,11 +118,13 @@ export const en = {
 
   // === Settings: Options ===
   displayIntervalTitle: 'Display Interval',
+  displayIntervalDescription: 'Seconds before switching to the next photo or video (5–60s)',
   exifRotationLabel: 'Auto-rotate images based on EXIF orientation',
   pickDestinationTitle: 'Picks Folder',
 
   // === Settings: Exclude Rules ===
   excludeRulesTitle: 'Exclude Rules',
+  excludeRulesDescription: 'Manage which photos and videos are left out of the slideshow',
   noExcludeRules: 'No exclude rules yet',
   dateRuleTag: 'Date',
   removeTooltip: 'Remove',
@@ -146,6 +167,7 @@ export const en = {
   versionLabel: 'Version: {version}',
   viewOnGitHub: 'View on GitHub',
   dangerZoneTitle: 'Danger Zone',
+  dangerZoneDescription: "These actions can't be undone. Please double-check before continuing.",
   resetSettingsButton: 'Reset All Data',
   resettingSettingsLabel: 'Resetting...',
   confirmResetAllData:

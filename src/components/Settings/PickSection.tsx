@@ -32,17 +32,16 @@ export function PickSection() {
   };
 
   if (loading) {
-    return <div className="text-white/30 text-sm">{t('loadingLabel')}</div>;
+    // #66レビュー2巡目nit: /30→/50（他の説明/補助テキストと同じ濃さに統一）。
+    return <div className="text-white/50 text-sm">{t('loadingLabel')}</div>;
   }
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        {t('pickListTitle')}
-      </h3>
+      <h3 className="text-sm font-medium text-white/70">{t('pickListTitle')}</h3>
 
       {images.length === 0 ? (
-        <div className="p-4 bg-black/30 rounded text-center text-white/30 text-sm border border-white/5">
+        <div className="p-4 bg-black/30 rounded-lg text-center text-white/50 text-sm">
           {t('noPickedPhotos')}
         </div>
       ) : (
@@ -57,8 +56,11 @@ export function PickSection() {
               />
               <button
                 onClick={() => handleDelete(path)}
-                className="absolute top-1 right-1 p-0.5 bg-black/70 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/90"
+                // #66 問題9: hoverのみで表示されるとキーボード/タッチで見えなかった。
+                // 既定でも薄く見せ、hover/focusで強調する。
+                className="absolute top-1 right-1 p-0.5 bg-black/70 rounded opacity-40 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-black/90"
                 title={t('deleteTooltip')}
+                aria-label={t('deleteTooltip')}
               >
                 <X className="w-3.5 h-3.5 text-white/60 hover:text-white/90" />
               </button>

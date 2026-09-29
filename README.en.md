@@ -56,13 +56,16 @@ npm run tauri:build
 - **Previous button**: goes back to the previous photo/video (from history, does not increase its display count)
 - **Next button**: advances immediately
 - **"…" menu** (inside the overlay): open the file manager, view your picks, or exclude by date/file/folder
-- **Settings button** (top right, always visible even without moving the mouse): opens the settings screen
+- **Top-right buttons** (exit, shortcuts, window mode, settings): shown while you're using the mouse, and fade out on idle just like the overlay
 
 #### Keyboard shortcuts
 
-- **ESC**: quit the app
+- **ESC**: quit the app (just closes Settings or the shortcuts overlay if either is open)
 - **Left arrow**: go to the previous photo/video
 - **Right arrow**: go to the next photo/video
+- **Space**: toggle pause/resume
+- **F / F11**: toggle fullscreen and windowed mode (on macOS, `F11` is often bound to the OS's Mission Control and may never reach the app; use `F`, or `fn + F11`, instead)
+- **?**: show the keyboard shortcuts overlay
 
 ### Exclude rules
 
@@ -94,12 +97,13 @@ A legacy `.sssignore` file (gitignore-style, in your home directory: Windows `%U
 
 ## Overlay UI info
 
-Shown when you move the mouse:
+Shown in the rounded bar that floats at the bottom center when you move the mouse
+(#66: nothing is shown for information that isn't there):
 
-- 🗺️ Location (a map thumbnail when GPS data is available, click to open Google Maps; "No location" otherwise)
-- 📅 Date taken (from EXIF, images only)
-- 📁 File name and file size (hover for the full path as a tooltip)
-- 📊 Playlist position (e.g. 1,234 / 100,000) and display count
+- 🗺️ Location (a small map thumbnail, only when the photo has GPS data; click to open Google Maps)
+- 📅 Date taken (only when EXIF has one)
+- 📁 File name and playlist position (e.g. 1,234 / 100,000)
+- File size, display count, and last-shown time are one hover away, in the filename's tooltip
 
 Per-photo display counts and last-shown times are available in Settings → History and Settings → Stats.
 

@@ -45,9 +45,7 @@ export function ShareDirectorySection() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider">
-        {t('pickDestinationTitle')}
-      </h3>
+      <h3 className="text-sm font-medium text-white/70">{t('pickDestinationTitle')}</h3>
 
       <div className="flex gap-2">
         <input
@@ -55,11 +53,12 @@ export function ShareDirectorySection() {
           value={shareDirectoryPath}
           readOnly
           placeholder={defaultPath}
-          className="flex-1 px-3 py-2 bg-black/40 text-white/50 rounded border border-white/8 focus:outline-none focus:border-white/20 text-sm"
+          title={shareDirectoryPath || defaultPath}
+          className="flex-1 px-3 py-2 bg-black/40 text-white/50 rounded-lg border border-white/8 focus:outline-none focus:border-white/20 text-sm truncate"
         />
         <button
           onClick={handleSelectDirectory}
-          className="flex items-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded border border-white/8 transition shrink-0 text-sm"
+          className="flex items-center gap-2 px-4 py-2 text-white/50 hover:text-white/80 hover:bg-white/8 rounded-lg transition-colors shrink-0 text-sm"
         >
           <FolderOpen className="w-4 h-4" />
           {t('selectButtonLabel')}

@@ -39,7 +39,13 @@ describe('GraphSection i18n (#80)', () => {
     await waitFor(() => {
       expect(screen.getByText('画像ごとの表示回数')).toBeTruthy();
     });
-    expect(container.querySelector('.u-legend .u-label')?.textContent).toBe('表示回数');
+    // #66レビューmust5: uPlotのlegend DOM構築は上のタイトル描画とは別のeffectで
+    // 起きるため、タイトルが見えた直後の同期チェックだとCIで稀に間に合わず
+    // flakyだった（実ブラウザ差ではなくレンダー完了タイミングの問題）。waitForに
+    // 入れてuPlotの構築を待つ。
+    await waitFor(() => {
+      expect(container.querySelector('.u-legend .u-label')?.textContent).toBe('表示回数');
+    });
     expect(screen.getByText('表示回数をリセット')).toBeTruthy();
   });
 

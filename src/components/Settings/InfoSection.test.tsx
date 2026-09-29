@@ -19,11 +19,43 @@ vi.mock('../../lib/tauri', () => ({
   resetAllData: (...args: unknown[]) => resetAllData(...args),
 }));
 
+// #66 問題7: バージョン表示を「1.0.0」のハードコードから `getVersion()`
+// （`@tauri-apps/api/app`、Tauriが`tauri.conf.json`のバージョンを返す）に変更した。
+const getVersion = vi.fn();
+vi.mock('@tauri-apps/api/app', () => ({
+  getVersion: (...args: unknown[]) => getVersion(...args),
+}));
+
 import { InfoSection } from './InfoSection';
 
 beforeEach(() => {
   openUrl.mockReset();
   resetAllData.mockReset();
+  getVersion.mockReset().mockResolvedValue('1.2.3');
+});
+
+describe('InfoSection version display (#66 問題7)', () => {
+  it('shows the version returned by getVersion(), not a hardcoded value', async () => {
+    render(<InfoSection />);
+
+    await waitFor(() => {
+      expect(screen.getByText('バージョン: 1.2.3')).toBeTruthy();
+    });
+    expect(screen.queryByText('バージョン: 1.0.0')).toBeNull();
+  });
+
+  it('logs and does not crash when getVersion() rejects', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getVersion.mockRejectedValue(new Error('not available'));
+
+    render(<InfoSection />);
+
+    await waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith('Failed to get app version:', expect.any(Error));
+    });
+
+    consoleError.mockRestore();
+  });
 });
 
 describe('InfoSection GitHub link (openUrl)', () => {
