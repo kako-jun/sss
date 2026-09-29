@@ -11,9 +11,18 @@ import {
 } from 'lucide-react';
 import type { ImageInfo } from '../types';
 import { openInExplorer, pickImage, excludeImage } from '../lib/tauri';
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import {
+  useState,
+  useMemo,
+  useRef,
+  useEffect,
+  useCallback,
+  useImperativeHandle,
+  forwardRef,
+} from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useT } from '../lib/i18n';
+import { idleFadeClassName } from '../constants';
 
 interface OverlayUIProps {
   image: ImageInfo | null;
@@ -37,6 +46,13 @@ interface OverlayUIProps {
    * 独立して渡すことで、ホバーによる自動一時停止と混同しないようにする。
    */
   isPausedByUser: boolean;
+  /**
+   * idle（マウス非操作）中かどうか（#66レビューshould）。フローティングバーと
+   * ステータスメッセージはこれに連動してフェードするが、写真下端のプログレス
+   * ラインは常時表示する（idle中に一時停止していても、何かが動いている/止まって
+   * いることが分かる最低限の手がかりを残すため）。
+   */
+  isIdle: boolean;
   onPrevious: () => void;
   onNext: () => void;
   onOpenPickTab: () => void;
@@ -51,34 +67,64 @@ interface OverlayUIProps {
   onExcluded?: () => void;
 }
 
+/**
+ * `App.tsx`のグローバルESCハンドラが、オーバーレイの「…」メニュー（または
+ * その中の除外サブメニュー）が開いている時はそれを閉じるだけにするための
+ * 命令的API（#66レビューshould）。OverlayUIはApp.tsxから見て「開いている」
+ * こと自体をReact状態としては公開していない（ローカルUI状態のため）ので、
+ * refを介した最小限のインターフェースにする。
+ */
+export interface OverlayUIHandle {
+  isMenuOpen: () => boolean;
+  closeMenu: () => void;
+}
+
 // #66 視覚刷新: DESIGN.md「Buttons — Icon (Overlay)」トークン。既定から十分な
 // コントラストを持たせ（旧text-white/30〜40は暗すぎた）、hoverでさらに強調する。
 const ICON_BTN =
   'rounded-lg transition-colors text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90';
 const ICON_BTN_DISABLED = 'text-white/20 cursor-not-allowed';
 
-export function OverlayUI({
-  image,
-  canGoBack,
-  currentPosition,
-  totalImages,
-  progress,
-  progressDurationMs,
-  isPausedByUser,
-  onPrevious,
-  onNext,
-  onOpenPickTab,
-  onMouseEnter,
-  onMouseLeave,
-  onTogglePause,
-  onExcluded,
-}: OverlayUIProps) {
+export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function OverlayUI(
+  {
+    image,
+    canGoBack,
+    currentPosition,
+    totalImages,
+    progress,
+    progressDurationMs,
+    isPausedByUser,
+    isIdle,
+    onPrevious,
+    onNext,
+    onOpenPickTab,
+    onMouseEnter,
+    onMouseLeave,
+    onTogglePause,
+    onExcluded,
+  },
+  ref,
+) {
   const [isOpeningDirectory, setIsOpeningDirectory] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showExcludeSubmenu, setShowExcludeSubmenu] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
   const statusTimeoutRef = useRef<number | undefined>(undefined);
   const t = useT();
+
+  // #66レビューshould: App.tsxのグローバルESCハンドラが「…」メニュー（または
+  // 除外サブメニュー）を閉じられるようにする命令的API。
+  useImperativeHandle(
+    ref,
+    () => ({
+      isMenuOpen: () => showMoreMenu || showExcludeSubmenu,
+      closeMenu: () => {
+        setShowMoreMenu(false);
+        setShowExcludeSubmenu(false);
+      },
+    }),
+    [showMoreMenu, showExcludeSubmenu],
+  );
 
   // #66 問題6: 複数の操作（ピック/除外等）が短時間に連続すると、先に張った
   // setTimeoutが後から表示した新しいメッセージを消してしまう（＝タイマーが
@@ -175,7 +221,12 @@ export function OverlayUI({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const fileName = image ? image.path.split('\\').pop() || image.path.split('/').pop() || '' : '';
+  // #66レビューmust4: `split('\\').pop()`はバックスラッシュが無いPOSIXパスでは
+  // 「区切りが無いので元の文字列全体」を返してしまい、それが空でないため`||`の
+  // 右辺（'/'区切り）に一切フォールバックしなかった（フルパスがそのままファイル名
+  // として表示される不具合）。バックスラッシュ・スラッシュのどちらでも1回で
+  // 区切れるよう正規表現に統一する。
+  const fileName = image ? (image.path.split(/[\\/]/).pop() ?? '') : '';
 
   const hasGps =
     image?.exif != null && image.exif.gpsLatitude !== null && image.exif.gpsLongitude !== null;
@@ -230,179 +281,196 @@ export function OverlayUI({
         />
       </div>
 
-      {/* ステータスメッセージ（フローティングバーの上に表示） */}
-      {statusMessage && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 whitespace-nowrap">
-          {statusMessage}
-        </div>
-      )}
+      {/* ステータスメッセージ・フローティングの操作バー。idleでフェードする
+          （プログレスラインだけは上で独立させ常時表示、#66レビューshould:
+          idle中に一時停止していても何かの手がかりを残す）。 */}
+      <div className={idleFadeClassName(isIdle)}>
+        {/* ステータスメッセージ（フローティングバーの上に表示）。#66レビューnit:
+            長いパス（ピック完了メッセージ等）が狭い画面幅からはみ出さないよう
+            max-w-[90vw]+truncateを付ける。 */}
+        {statusMessage && (
+          <div
+            className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 whitespace-nowrap max-w-[90vw] truncate"
+            title={statusMessage}
+          >
+            {statusMessage}
+          </div>
+        )}
 
-      {/* フローティングの操作バー。#66視覚刷新: 画面幅いっぱいの2段グリッドバーを
-          やめ、下中央に浮かぶ角丸のコンパクトなガラス調バー1本にした
-          （DESIGN.md「Floating Control Bar」）。左=情報、中央=主要操作、
-          右=副次操作の3クラスタ構成。 */}
-      <div
-        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-xl"
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-      >
-        <div className="flex items-center gap-1 bg-black/50 backdrop-blur-md rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl">
-          {/* 左: 情報クラスタ（GPSサムネ[任意] + ファイル名 · 撮影日 · 位置n/N） */}
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            {hasGps && (
-              <button
-                onClick={async () => {
-                  const url = `https://www.google.com/maps?q=${image.exif!.gpsLatitude},${image.exif!.gpsLongitude}`;
-                  await openUrl(url);
-                }}
-                className="relative shrink-0 w-8 h-8 rounded-lg overflow-hidden border border-white/10 hover:border-white/20 transition-colors group"
-                title={t('locationMapAlt')}
-                aria-label={t('locationMapAlt')}
-              >
-                {/* OpenStreetMap Tile Usage Policy: img タグではカスタム User-Agent を送れないため、
+        {/* フローティングの操作バー。#66視覚刷新: 画面幅いっぱいの2段グリッドバーを
+            やめ、下中央に浮かぶ角丸のコンパクトなガラス調バー1本にした
+            （DESIGN.md「Floating Control Bar」）。左=情報、中央=主要操作、
+            右=副次操作の3クラスタ構成。 */}
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-xl"
+          onMouseEnter={onMouseEnter}
+          onMouseLeave={onMouseLeave}
+        >
+          <div className="flex items-center gap-1 bg-black/50 backdrop-blur-md rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl">
+            {/* 左: 情報クラスタ（GPSサムネ[任意] + ファイル名 · 撮影日 · 位置n/N） */}
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              {hasGps && (
+                <button
+                  onClick={async () => {
+                    const url = `https://www.google.com/maps?q=${image.exif!.gpsLatitude},${image.exif!.gpsLongitude}`;
+                    await openUrl(url);
+                  }}
+                  className="relative shrink-0 w-8 h-8 rounded-lg overflow-hidden border border-white/10 hover:border-white/20 transition-colors group"
+                  title={t('locationMapAlt')}
+                  aria-label={t('locationMapAlt')}
+                >
+                  {/* OpenStreetMap Tile Usage Policy: img タグではカスタム User-Agent を送れないため、
                     高速に写真をスキップするとレート制限を受ける可能性がある */}
-                <img
-                  src={tileUrl!}
-                  alt={t('locationMapAlt')}
-                  className="w-full h-full object-cover grayscale opacity-70 group-hover:opacity-100 group-hover:grayscale-0 transition-all"
-                />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/10">
-                  <MapPin size={12} className="text-white drop-shadow" fill="currentColor" />
-                </div>
-              </button>
-            )}
-
-            <div className="min-w-0 flex-1 flex items-baseline gap-1.5 text-xs" title={infoTooltip}>
-              <span className="text-white/75 truncate min-w-0">{fileName}</span>
-              {dateShort && (
-                <>
-                  <span className="text-white/20 shrink-0">·</span>
-                  <span className="text-white/40 font-mono shrink-0">{dateShort}</span>
-                </>
+                  <img
+                    src={tileUrl!}
+                    alt={t('locationMapAlt')}
+                    className="w-full h-full object-cover grayscale opacity-70 group-hover:opacity-100 group-hover:grayscale-0 transition-all"
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/10">
+                    <MapPin size={12} className="text-white drop-shadow" fill="currentColor" />
+                  </div>
+                </button>
               )}
-              <span className="text-white/20 shrink-0">·</span>
-              <span className="text-white/40 font-mono shrink-0 tabular-nums">
-                {currentPosition.toLocaleString()} / {totalImages.toLocaleString()}
-              </span>
+
+              <div
+                className="min-w-0 flex-1 flex items-baseline gap-1.5 text-xs"
+                title={infoTooltip}
+              >
+                <span className="text-white/75 truncate min-w-0">{fileName}</span>
+                {dateShort && (
+                  <>
+                    <span className="text-white/20 shrink-0">·</span>
+                    <span className="text-white/50 font-mono shrink-0">{dateShort}</span>
+                  </>
+                )}
+                <span className="text-white/20 shrink-0">·</span>
+                <span className="text-white/50 font-mono shrink-0 tabular-nums">
+                  {currentPosition.toLocaleString()} / {totalImages.toLocaleString()}
+                </span>
+              </div>
             </div>
-          </div>
 
-          {/* 中央: 主要操作（前へ・一時停止・次へ） */}
-          <div className="flex items-center gap-0.5 shrink-0">
-            <button
-              onClick={onPrevious}
-              disabled={!canGoBack}
-              className={`p-2 ${canGoBack ? ICON_BTN : ICON_BTN_DISABLED}`}
-              title={t('previousTooltip')}
-              aria-label={t('previousTooltip')}
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <button
-              onClick={onTogglePause}
-              className={`p-2 ${ICON_BTN}`}
-              title={isPausedByUser ? t('playTooltip') : t('pauseTooltip')}
-              aria-label={isPausedByUser ? t('playTooltip') : t('pauseTooltip')}
-            >
-              {isPausedByUser ? <Play size={20} /> : <Pause size={20} />}
-            </button>
-            <button
-              onClick={onNext}
-              className={`p-2 ${ICON_BTN}`}
-              title={t('nextTooltip')}
-              aria-label={t('nextTooltip')}
-            >
-              <ChevronRight size={18} />
-            </button>
-          </div>
+            {/* 中央: 主要操作（前へ・一時停止・次へ） */}
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                onClick={onPrevious}
+                disabled={!canGoBack}
+                className={`p-2 ${canGoBack ? ICON_BTN : ICON_BTN_DISABLED}`}
+                title={t('previousTooltip')}
+                aria-label={t('previousTooltip')}
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                onClick={onTogglePause}
+                className={`p-2 ${ICON_BTN}`}
+                title={isPausedByUser ? t('playTooltip') : t('pauseTooltip')}
+                aria-label={isPausedByUser ? t('playTooltip') : t('pauseTooltip')}
+              >
+                {isPausedByUser ? <Play size={20} /> : <Pause size={20} />}
+              </button>
+              <button
+                onClick={onNext}
+                className={`p-2 ${ICON_BTN}`}
+                title={t('nextTooltip')}
+                aria-label={t('nextTooltip')}
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
 
-          {/* 右: 副次操作（ピック・…メニュー） */}
-          <div className="flex items-center gap-0.5 shrink-0 relative">
-            <button
-              onClick={handlePick}
-              className={`p-2 ${ICON_BTN}`}
-              title={t('pickTooltip')}
-              aria-label={t('pickTooltip')}
-            >
-              <HandGrab size={16} />
-            </button>
+            {/* 右: 副次操作（ピック・…メニュー） */}
+            <div className="flex items-center gap-0.5 shrink-0 relative">
+              <button
+                onClick={handlePick}
+                className={`p-2 ${ICON_BTN}`}
+                title={t('pickTooltip')}
+                aria-label={t('pickTooltip')}
+              >
+                <HandGrab size={16} />
+              </button>
 
-            <button
-              onClick={() => {
-                setShowMoreMenu(!showMoreMenu);
-                setShowExcludeSubmenu(false);
-              }}
-              className={`p-2 ${ICON_BTN}`}
-              title={t('menuTooltip')}
-              aria-label={t('menuTooltip')}
-            >
-              <Ellipsis size={16} />
-            </button>
+              <button
+                onClick={() => {
+                  setShowMoreMenu(!showMoreMenu);
+                  setShowExcludeSubmenu(false);
+                }}
+                className={`p-2 ${ICON_BTN}`}
+                title={t('menuTooltip')}
+                aria-label={t('menuTooltip')}
+                aria-haspopup="menu"
+                aria-expanded={showMoreMenu}
+              >
+                <Ellipsis size={16} />
+              </button>
 
-            {/* サブメニュー。バーが画面右寄りに広がっても収まるよう左側へ展開する */}
-            {showMoreMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={handleMoreMenuBackdropClick} />
-                <div className="absolute bottom-full right-0 mb-2 bg-black/90 rounded-xl shadow-2xl border border-white/10 p-1.5 space-y-0.5 w-52 z-50 backdrop-blur-md">
-                  <button
-                    onClick={handleOpenDirectory}
-                    disabled={isOpeningDirectory}
-                    className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors flex items-center gap-2"
-                  >
-                    <FolderOpen size={14} />
-                    {t('openInFileManager')}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      onOpenPickTab();
-                      setShowMoreMenu(false);
-                    }}
-                    className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors flex items-center gap-2"
-                  >
-                    <HandGrab size={14} />
-                    {t('viewPicks')}
-                  </button>
-
-                  {/* 除外サブメニュー */}
-                  <div className="relative">
+              {/* サブメニュー。バーが画面右寄りに広がっても収まるよう左側へ展開する */}
+              {showMoreMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={handleMoreMenuBackdropClick} />
+                  <div className="absolute bottom-full right-0 mb-2 bg-black/90 rounded-xl shadow-2xl border border-white/10 p-1.5 space-y-0.5 w-52 z-50 backdrop-blur-md">
                     <button
-                      onClick={() => setShowExcludeSubmenu(!showExcludeSubmenu)}
+                      onClick={handleOpenDirectory}
+                      disabled={isOpeningDirectory}
                       className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors flex items-center gap-2"
                     >
-                      <Ban size={14} />
-                      {t('excludeMenuLabel')}
-                      <ChevronLeft size={12} className="ml-auto" />
+                      <FolderOpen size={14} />
+                      {t('openInFileManager')}
                     </button>
-                    {showExcludeSubmenu && (
-                      <div className="absolute right-full top-0 mr-1 bg-black/90 rounded-xl shadow-2xl border border-white/10 p-1.5 space-y-0.5 w-48 z-50 backdrop-blur-md">
-                        <button
-                          onClick={() => handleExclude('date')}
-                          className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors"
-                        >
-                          {t('excludeByDate')}
-                        </button>
-                        <button
-                          onClick={() => handleExclude('directory')}
-                          className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors"
-                        >
-                          {t('excludeByDirectory')}
-                        </button>
-                        <button
-                          onClick={() => handleExclude('file')}
-                          className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors"
-                        >
-                          {t('excludeByFile')}
-                        </button>
-                      </div>
-                    )}
+
+                    <button
+                      onClick={() => {
+                        onOpenPickTab();
+                        setShowMoreMenu(false);
+                      }}
+                      className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors flex items-center gap-2"
+                    >
+                      <HandGrab size={14} />
+                      {t('viewPicks')}
+                    </button>
+
+                    {/* 除外サブメニュー */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowExcludeSubmenu(!showExcludeSubmenu)}
+                        className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors flex items-center gap-2"
+                        aria-haspopup="menu"
+                        aria-expanded={showExcludeSubmenu}
+                      >
+                        <Ban size={14} />
+                        {t('excludeMenuLabel')}
+                        <ChevronLeft size={12} className="ml-auto" />
+                      </button>
+                      {showExcludeSubmenu && (
+                        <div className="absolute right-full top-0 mr-1 bg-black/90 rounded-xl shadow-2xl border border-white/10 p-1.5 space-y-0.5 w-48 z-50 backdrop-blur-md">
+                          <button
+                            onClick={() => handleExclude('date')}
+                            className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors"
+                          >
+                            {t('excludeByDate')}
+                          </button>
+                          <button
+                            onClick={() => handleExclude('directory')}
+                            className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors"
+                          >
+                            {t('excludeByDirectory')}
+                          </button>
+                          <button
+                            onClick={() => handleExclude('file')}
+                            className="w-full p-2 rounded-lg hover:bg-white/10 text-left text-sm text-white/60 hover:text-white/90 transition-colors"
+                          >
+                            {t('excludeByFile')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </>
-            )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
     </>
   );
-}
+});

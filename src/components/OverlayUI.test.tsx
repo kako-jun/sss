@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
+import { createRef } from 'react';
+import type { OverlayUIHandle } from './OverlayUI';
 
 // #59: tauri-plugin-shell の open() から tauri-plugin-opener の openUrl() への移行。
 // 地図セルのクリックが正しい引数で openUrl を呼ぶことをピン留めする（GPS座標→URL整形の
@@ -47,6 +49,7 @@ const requiredProps = {
   progress: 0,
   progressDurationMs: 0,
   isPausedByUser: false,
+  isIdle: false,
   onPrevious: noop,
   onNext: noop,
   onOpenPickTab: noop,
@@ -186,6 +189,95 @@ describe('OverlayUI status message timers do not interfere with each other (#66 
     expect(screen.queryByText('コピー完了: /picks/a.tmp')).toBeNull();
 
     vi.useRealTimers();
+  });
+});
+
+// #66レビューmust4: `image.path.split('\\').pop() || image.path.split('/').pop()`は
+// バックスラッシュが無いPOSIXパスだと「区切りが無いので元の文字列全体」を返して
+// しまい、それが空でないため`||`の右辺（'/'区切り）に一切フォールバックしなかった
+// （フルパスがそのままファイル名として表示される不具合）。
+describe('OverlayUI fileName extraction handles POSIX paths (#66レビューmust4)', () => {
+  it('shows only the basename, not the full path, for a POSIX-style path', () => {
+    const image = makeImage({ path: '/photos/2024/summer/beach.jpg' });
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    expect(screen.getByText('beach.jpg')).toBeTruthy();
+    expect(screen.queryByText('/photos/2024/summer/beach.jpg')).toBeNull();
+  });
+
+  it('still shows only the basename for a Windows-style backslash path', () => {
+    const image = makeImage({ path: 'C:\\Users\\kako\\Pictures\\beach.jpg' });
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    expect(screen.getByText('beach.jpg')).toBeTruthy();
+  });
+});
+
+// #66レビューshould: 「…」メニュー・除外サブメニューにaria-haspopup/aria-expanded
+// を付け、App.tsxのグローバルESCハンドラがrefのisMenuOpen/closeMenuでメニューを
+// 閉じられるようにする命令的API。
+describe('OverlayUI "…" menu accessibility + imperative handle (#66レビューshould)', () => {
+  it('exposes aria-haspopup/aria-expanded on the menu button, toggling with open state', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const menuButton = screen.getByTitle('メニュー');
+    expect(menuButton.getAttribute('aria-haspopup')).toBe('menu');
+    expect(menuButton.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(menuButton);
+    expect(menuButton.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('ref.isMenuOpen()/closeMenu() reflect and control the "…" menu and exclude submenu', () => {
+    const ref = createRef<OverlayUIHandle>();
+    const image = makeImage();
+    render(<OverlayUI ref={ref} image={image} {...requiredProps} />);
+
+    expect(ref.current?.isMenuOpen()).toBe(false);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    expect(ref.current?.isMenuOpen()).toBe(true);
+
+    act(() => {
+      ref.current?.closeMenu();
+    });
+    expect(ref.current?.isMenuOpen()).toBe(false);
+    expect(screen.queryByText('ファイルマネージャーで開く')).toBeNull();
+  });
+
+  it('isMenuOpen() is also true while just the exclude submenu is open', () => {
+    const ref = createRef<OverlayUIHandle>();
+    const image = makeImage();
+    render(<OverlayUI ref={ref} image={image} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    expect(ref.current?.isMenuOpen()).toBe(true);
+  });
+});
+
+// #66レビューshould: idle中に一時停止していても手がかりを残すため、プログレス
+// ラインはバー/ステータスメッセージとは独立して常時表示する（isIdleの影響を
+// 受けない）。
+describe('OverlayUI progress line stays independent of the idle fade (#66レビューshould)', () => {
+  it('does not put opacity-0 on the progress line container when isIdle is true', () => {
+    const image = makeImage();
+    const { container } = render(<OverlayUI image={image} {...requiredProps} isIdle={true} />);
+
+    // プログレスラインは`bottom-0`の専用コンテナ（バー本体は`bottom-6`）。
+    const progressLine = container.querySelector('.bottom-0');
+    expect(progressLine).toBeTruthy();
+    expect(progressLine?.className).not.toContain('opacity-0');
+  });
+
+  it('puts opacity-0 on the bar/status wrapper (not the progress line) when isIdle is true', () => {
+    const image = makeImage();
+    const { container } = render(<OverlayUI image={image} {...requiredProps} isIdle={true} />);
+
+    const barPositionDiv = container.querySelector('.bottom-6');
+    const fadeWrapper = barPositionDiv?.parentElement;
+    expect(fadeWrapper?.className).toContain('opacity-0');
   });
 });
 
