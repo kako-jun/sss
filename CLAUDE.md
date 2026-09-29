@@ -415,7 +415,7 @@ CREATE TABLE scan_history (
   13. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。
       即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
-  14. `get_display_stats`: 統計データ取得（グラフ用、全画像の表示回数）
+  14. `get_display_stats`: 統計データ取得（グラフ用の表示回数ヒストグラム。表示回数ごとのファイル数・最小/最大/平均のみ返し、全件の一覧は返さない）
   15. `get_default_share_directory`: ピック先デフォルトパス取得
   16. `reset_all_data`: 全データ初期化（#64）。中核ロジックは`commands::system::
 reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と

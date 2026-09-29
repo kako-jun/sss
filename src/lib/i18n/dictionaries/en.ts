@@ -151,10 +151,20 @@ export const en = {
 
   // === Settings: Stats ===
   seriesFileCount: 'Files',
-  seriesDisplayCount: 'Display Count',
   axisDisplayCount: 'Times shown',
   noStatsData: 'No data yet. Run a scan first.',
-  viewedFilesCountLabel: 'Files shown at least once:',
+  statViewedLabel: 'Shown at least once',
+  statAverageLabel: 'Average times shown',
+  statRangeLabel: 'Fewest to most',
+  fairnessEvenBadge: 'Even (gap of 1 or less)',
+  fairnessSpreadBadge: 'Gap of {n} between most and least shown',
+  chartMeanLabel: 'Avg {value}',
+  chartTooltipTimes: 'Shown {count}x',
+  chartTooltipFiles: '{files} files ({percent}%)',
+  chartAriaLabel:
+    'Display count distribution chart. {files} files, fewest {min}, most {max}, average {mean}',
+  viewAsTable: 'View as table',
+  tableColumnShare: 'Share',
   displayCountDistributionTitle: 'Display Count per Image',
   fairnessExplanation:
     'If the fair-shuffle algorithm is working correctly, every photo gets shown equally often.',

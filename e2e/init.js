@@ -26,6 +26,9 @@
   // 壊れたPNGバイト列で実ブラウザに本物のonErrorを起こさせる）。
   const seqs = {
     slides: ['/p/a.png', '/p/b.png'],
+    // #67: 統計タブ用（背景に写真1枚を出しておく）。
+    stats: ['/p/a.png'],
+    statsspread: ['/p/a.png'],
     i2v_vv: ['/p/a.png', '/p/v.webm', '/p/v2.webm', '/p/a.png'],
     one: ['/p/a.png'],
     toast: ['/p/a.png'],
@@ -139,8 +142,41 @@
           return [];
         case 'get_display_stats':
           // #67: 集計済みのヒストグラム（全件一覧ではない）。
+          // 'stats' = 完全平等ランダムが働いた状態（差1以内）、'statsspread' = 偏りのある状態。
+          if (sc === 'stats') {
+            return {
+              files: 12000,
+              min: 2,
+              max: 3,
+              mean: 2.7,
+              bins: [
+                { count: 2, files: 3600 },
+                { count: 3, files: 8400 },
+              ],
+            };
+          }
+          if (sc === 'statsspread') {
+            return {
+              files: 12000,
+              min: 0,
+              max: 9,
+              mean: 3.4,
+              bins: [
+                { count: 0, files: 900 },
+                { count: 1, files: 1800 },
+                { count: 2, files: 2700 },
+                { count: 3, files: 3100 },
+                { count: 4, files: 2000 },
+                { count: 5, files: 1100 },
+                { count: 6, files: 300 },
+                { count: 9, files: 100 },
+              ],
+            };
+          }
           return { files: 0, min: 0, max: 0, mean: 0, bins: [] };
         case 'get_stats':
+          if (sc === 'stats') return { totalImages: 12000, displayedImages: 12000 };
+          if (sc === 'statsspread') return { totalImages: 12000, displayedImages: 11100 };
           return { totalImages: (seqs[sc] || seqs.slides).length, displayedImages: 0 };
         case 'get_default_share_directory':
           return '/tmp/sss-picked';

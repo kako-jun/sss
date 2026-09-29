@@ -154,10 +154,19 @@ export const ja = {
 
   // === 設定画面: 統計グラフ ===
   seriesFileCount: 'ファイル数',
-  seriesDisplayCount: '表示回数',
   axisDisplayCount: '表示回数',
   noStatsData: 'データがありません。スキャンを実行してください。',
-  viewedFilesCountLabel: '1回でも表示済みのファイル数:',
+  statViewedLabel: '表示済み',
+  statAverageLabel: '平均表示回数',
+  statRangeLabel: '最少〜最多',
+  fairnessEvenBadge: '均等（差は1回以内）',
+  fairnessSpreadBadge: '最多と最少の差 {n}回',
+  chartMeanLabel: '平均 {value}',
+  chartTooltipTimes: '{count}回表示',
+  chartTooltipFiles: '{files}ファイル（{percent}%）',
+  chartAriaLabel: '表示回数の分布グラフ。{files}ファイル、最少{min}回、最多{max}回、平均{mean}回',
+  viewAsTable: '表で見る',
+  tableColumnShare: '割合',
   displayCountDistributionTitle: '画像ごとの表示回数',
   fairnessExplanation:
     '完全平等ランダムアルゴリズムが正しく動作していれば、全てのファイルが均等に表示されます',

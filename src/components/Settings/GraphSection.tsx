@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getDisplayStats, getStats, resetAllDisplayCounts } from '../../lib/tauri';
 import type { DisplayStats, Stats } from '../../types';
+import { Check } from 'lucide-react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import { useT, useLocale } from '../../lib/i18n';
+import { EVEN_SPREAD_MAX, percentOf, spreadOf } from '../../lib/displayCountChart';
+import { CHART_HEIGHT, buildDisplayCountOptions } from './displayCountPlot';
 
 export function GraphSection() {
   const t = useT();
@@ -54,106 +57,37 @@ export function GraphSection() {
       return;
     }
 
-    // 既存のグラフを破棄
-    if (plotRef.current) {
-      plotRef.current.destroy();
-      plotRef.current = null;
+    const host = chartRef.current;
+    plotRef.current?.destroy();
+    plotRef.current = new uPlot(
+      buildDisplayCountOptions(displayStats, host.clientWidth, locale),
+      // X軸: 表示回数 / Y軸: その回数のファイル数（ヒストグラム。#67）
+      [displayStats.bins.map((bin) => bin.count), displayStats.bins.map((bin) => bin.files)],
+      host,
+    );
+
+    // 設定モーダルの幅変化にも追従する（window の resize だけでは足りない）。
+    let observer: InstanceType<typeof window.ResizeObserver> | null = null;
+    const handleResize = () =>
+      plotRef.current?.setSize({ width: host.clientWidth, height: CHART_HEIGHT });
+    if (typeof window.ResizeObserver !== 'undefined') {
+      observer = new window.ResizeObserver(handleResize);
+      observer.observe(host);
+    } else {
+      window.addEventListener('resize', handleResize);
     }
 
-    // X軸: 表示回数 / Y軸: その回数のファイル数（ヒストグラム。#67）
-    const xData = displayStats.bins.map((bin) => bin.count);
-    const yData = displayStats.bins.map((bin) => bin.files);
-
-    const data: uPlot.AlignedData = [xData, yData];
-
-    const opts: uPlot.Options = {
-      width: chartRef.current.clientWidth,
-      height: 300,
-      series: [
-        {
-          label: t('seriesDisplayCount'),
-        },
-        {
-          label: t('seriesFileCount'),
-          stroke: 'rgba(255, 255, 255, 0.5)',
-          fill: 'rgba(255, 255, 255, 0.05)',
-          width: 1,
-          points: {
-            show: true,
-          },
-        },
-      ],
-      axes: [
-        {
-          label: t('axisDisplayCount'),
-          stroke: 'rgba(255,255,255,0.3)',
-          labelFont: '11px sans-serif',
-          labelSize: 12,
-          labelGap: 8,
-          grid: {
-            stroke: 'rgba(255,255,255,0.05)',
-            width: 1,
-          },
-          ticks: {
-            stroke: 'rgba(255,255,255,0.1)',
-            width: 1,
-          },
-          values: (_u: uPlot, vals: number[]) => vals.map((v: number) => Math.round(v).toString()), // 整数のみ表示
-        },
-        {
-          label: t('seriesFileCount'),
-          stroke: 'rgba(255,255,255,0.3)',
-          labelFont: '11px sans-serif',
-          labelSize: 12,
-          labelGap: 8,
-          grid: {
-            stroke: 'rgba(255,255,255,0.05)',
-            width: 1,
-          },
-          ticks: {
-            stroke: 'rgba(255,255,255,0.1)',
-            width: 1,
-          },
-        },
-      ],
-      scales: {
-        x: {
-          time: false,
-          range: [displayStats.min - 0.5, displayStats.max + 0.5],
-        },
-      },
-      legend: {
-        show: true,
-        live: false,
-      },
-    };
-
-    plotRef.current = new uPlot(opts, data, chartRef.current);
-
-    // ウィンドウリサイズ対応
-    const handleResize = () => {
-      if (plotRef.current && chartRef.current) {
-        plotRef.current.setSize({
-          width: chartRef.current.clientWidth,
-          height: 300,
-        });
-      }
-    };
-
-    window.addEventListener('resize', handleResize);
-
     return () => {
+      observer?.disconnect();
       window.removeEventListener('resize', handleResize);
-      if (plotRef.current) {
-        plotRef.current.destroy();
-        plotRef.current = null;
-      }
+      plotRef.current?.destroy();
+      plotRef.current = null;
     };
   }, [displayStats, isLoading, locale, t]);
 
   if (isLoading) {
     return (
-      <div className="p-4 bg-black/30 rounded text-center text-white/30 text-sm border border-white/5">
+      <div className="p-4 bg-black/30 rounded-lg text-center text-white/50 text-sm">
         {t('loadingLabel')}
       </div>
     );
@@ -161,29 +95,109 @@ export function GraphSection() {
 
   if (!displayStats || displayStats.files === 0) {
     return (
-      <div className="p-4 bg-black/30 rounded text-center text-white/30 text-sm border border-white/5">
+      <div className="p-4 bg-black/30 rounded-lg text-center text-white/50 text-sm">
         {t('noStatsData')}
       </div>
     );
   }
 
+  const spread = spreadOf(displayStats);
+  const isEven = spread <= EVEN_SPREAD_MAX;
+  const viewedPercent = stats ? percentOf(stats.displayedImages, stats.totalImages) : 0;
+  const meanText = displayStats.mean.toLocaleString(locale, { maximumFractionDigits: 1 });
+
   return (
     <div className="space-y-4">
-      {stats && (
-        <div className="flex justify-between text-white/40 text-sm">
-          <span>{t('viewedFilesCountLabel')}</span>
-          <span className="font-mono text-white/60">
-            {stats.displayedImages.toLocaleString()} / {stats.totalImages.toLocaleString()}
+      <div className="grid grid-cols-3 gap-2">
+        {stats && (
+          <div className="bg-black/40 rounded-lg p-3">
+            <div className="text-xs text-white/50">{t('statViewedLabel')}</div>
+            <div className="mt-1 font-mono text-white/80">
+              <span className="text-2xl">{stats.displayedImages.toLocaleString(locale)}</span>
+              <span className="text-sm text-white/50">
+                {' / '}
+                {stats.totalImages.toLocaleString(locale)}
+              </span>
+            </div>
+            <div className="mt-2 h-0.5 rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-white/60"
+                style={{ width: `${Math.min(100, viewedPercent)}%` }}
+              />
+            </div>
+          </div>
+        )}
+        <div className="bg-black/40 rounded-lg p-3">
+          <div className="text-xs text-white/50">{t('statAverageLabel')}</div>
+          <div className="mt-1 font-mono text-2xl text-white/80">{meanText}</div>
+        </div>
+        <div className="bg-black/40 rounded-lg p-3">
+          <div className="text-xs text-white/50">{t('statRangeLabel')}</div>
+          <div className="mt-1 font-mono text-2xl text-white/80">
+            {displayStats.min}
+            {'\u2013'}
+            {displayStats.max}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-black/40 rounded-lg p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-medium text-white/70">
+            {t('displayCountDistributionTitle')}
+          </h3>
+          <span
+            data-testid="fairness-badge"
+            className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-0.5 text-xs text-white/70"
+          >
+            {isEven && <Check className="h-3 w-3" aria-hidden="true" />}
+            {isEven ? t('fairnessEvenBadge') : t('fairnessSpreadBadge', { n: spread })}
           </span>
         </div>
-      )}
+        <div
+          ref={chartRef}
+          role="img"
+          aria-label={t('chartAriaLabel', {
+            files: displayStats.files.toLocaleString(locale),
+            min: displayStats.min,
+            max: displayStats.max,
+            mean: meanText,
+          })}
+          className="w-full"
+        />
+        <p className="mt-3 text-xs text-white/50">{t('fairnessExplanation')}</p>
 
-      <div className="bg-black/30 rounded p-4 border border-white/5">
-        <h3 className="text-sm font-medium text-white/50 mb-4 uppercase tracking-wider">
-          {t('displayCountDistributionTitle')}
-        </h3>
-        <div ref={chartRef} className="w-full" />
-        <div className="mt-3 text-xs text-white/25">{t('fairnessExplanation')}</div>
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs text-white/50 hover:text-white/80 transition-colors">
+            {t('viewAsTable')}
+          </summary>
+          <div className="mt-2 max-h-48 overflow-y-auto">
+            <table className="w-full text-xs text-white/70">
+              <thead className="text-white/50">
+                <tr>
+                  <th className="py-1 text-left font-normal">{t('axisDisplayCount')}</th>
+                  <th className="py-1 text-right font-normal">{t('seriesFileCount')}</th>
+                  <th className="py-1 text-right font-normal">{t('tableColumnShare')}</th>
+                </tr>
+              </thead>
+              <tbody className="font-mono">
+                {displayStats.bins.map((bin) => (
+                  <tr key={bin.count}>
+                    <td className="py-0.5 text-left">{bin.count}</td>
+                    <td className="py-0.5 text-right">{bin.files.toLocaleString(locale)}</td>
+                    <td className="py-0.5 text-right">
+                      {percentOf(bin.files, displayStats.files).toLocaleString(locale, {
+                        minimumFractionDigits: 1,
+                        maximumFractionDigits: 1,
+                      })}
+                      %
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </div>
 
       <button

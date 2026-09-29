@@ -1169,6 +1169,102 @@ const scenarios = [
     },
   },
   {
+    // #67: 統計タブ。集計済みヒストグラムが実ブラウザで実際に描画される
+    // （canvasに幅・高さがあり、平均ラベルを描く余白が確保されている）・均等バッジ・
+    // 棒へのホバーでツールチップが出る（computed styleで可視判定）・表ビューの
+    // 行が出る・720px幅でも横にはみ出さない、を確認する。
+    name: 'Stats tab draws the histogram, even-badge, hover tooltip and table view (#67)',
+    hash: 'stats',
+    async run(page) {
+      await page.waitForTimeout(600);
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const tabs = [...document.querySelectorAll('.overflow-x-auto > button')];
+        const statsTab = tabs.find((b) => b.textContent.includes('統計'));
+        if (!statsTab) throw new Error('統計タブが見つからない');
+        statsTab.click();
+      });
+      await page.waitForSelector('.u-over', { timeout: 3000 });
+      const chart = await page.evaluate(() => {
+        const canvas = document.querySelector('.uplot canvas');
+        const rect = canvas ? canvas.getBoundingClientRect() : null;
+        const badge = document.querySelector('[data-testid="fairness-badge"]');
+        return {
+          canvasW: rect ? Math.round(rect.width) : 0,
+          canvasH: rect ? Math.round(rect.height) : 0,
+          badge: badge ? badge.textContent : null,
+          legend: !!document.querySelector('.u-legend'),
+        };
+      });
+      const over = await page.locator('.u-over').boundingBox();
+      // 棒2本（2回と3回）のうち右側の棒（3回）の中心付近へマウスを載せる。
+      await page.mouse.move(over.x + over.width * 0.58, over.y + over.height * 0.7);
+      await page.waitForTimeout(150);
+      const tip = await page.evaluate(() => {
+        const el = document.querySelector('.u-over .pointer-events-none.z-10');
+        return el
+          ? { display: getComputedStyle(el).display, text: el.textContent }
+          : { display: 'missing', text: '' };
+      });
+      await page.mouse.move(over.x - 40, over.y - 40);
+      await page.waitForTimeout(150);
+      const tipAfter = await page.evaluate(() => {
+        const el = document.querySelector('.u-over .pointer-events-none.z-10');
+        return el ? getComputedStyle(el).display : 'missing';
+      });
+      await page.click('summary');
+      const rows = await page.evaluate(() => document.querySelectorAll('tbody tr').length);
+      const pass =
+        chart.canvasW > 300 &&
+        chart.canvasH >= 240 &&
+        chart.badge !== null &&
+        chart.badge.includes('均等') &&
+        !chart.legend &&
+        tip.display === 'block' &&
+        tip.text.includes('回表示') &&
+        tipAfter === 'none' &&
+        rows === 2;
+      return { pass, detail: JSON.stringify({ chart, tip, tipAfter, rows }) };
+    },
+  },
+  {
+    // #67: 偏りがある分布ではバッジが「均等」でなく差を示し、720px幅でも
+    // 設定モーダルが横スクロールを起こさない（チャートがモーダル幅に追従する）。
+    name: 'Stats tab flags a wide spread and fits at 720px width (#67)',
+    hash: 'statsspread',
+    viewport: { width: 720, height: 800 },
+    async run(page) {
+      await page.waitForTimeout(600);
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const tabs = [...document.querySelectorAll('.overflow-x-auto > button')];
+        const statsTab = tabs.find((b) => b.textContent.includes('統計'));
+        if (!statsTab) throw new Error('統計タブが見つからない');
+        statsTab.click();
+      });
+      await page.waitForSelector('.u-over', { timeout: 3000 });
+      const m = await page.evaluate(() => {
+        const badge = document.querySelector('[data-testid="fairness-badge"]');
+        const canvas = document.querySelector('.uplot canvas');
+        const dialog = document.querySelector('[role="dialog"]');
+        const panel = canvas ? canvas.closest('.overflow-y-auto') : null;
+        return {
+          badge: badge ? badge.textContent : null,
+          canvasRight: canvas ? Math.round(canvas.getBoundingClientRect().right) : 0,
+          dialogRight: dialog ? Math.round(dialog.getBoundingClientRect().right) : 0,
+          overflowX: panel ? panel.scrollWidth > panel.clientWidth : null,
+        };
+      });
+      const pass =
+        m.badge !== null &&
+        m.badge.includes('差 9回') &&
+        m.canvasRight > 0 &&
+        m.canvasRight <= m.dialogRight &&
+        m.overflowX !== true;
+      return { pass, detail: JSON.stringify(m) };
+    },
+  },
+  {
     // #66 問題9(#61レビュー由来): 除外ルールの解除ボタンがhoverのみで表示され、
     // キーボード/タッチで見えなかった。既定でも薄く(opacity>0)見えることを確認する。
     name: 'Exclude rule remove button is visible (opacity>0) without hovering (#66 問題9)',
