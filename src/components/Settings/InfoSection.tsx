@@ -79,9 +79,10 @@ export function InfoSection() {
           無し）とボタン内のアイコンの左端が揃っていなかった。ボタンの当たり判定は
           保ったまま`-ml-4`で見た目の左端だけ引き戻す。 */}
       <div>
+        {/* #66レビュー2巡目nit: /40→/50（他の説明/補助テキストと同じ濃さに統一）。 */}
         <button
           onClick={handleOpenGitHub}
-          className="flex items-center gap-2 px-4 py-2 -ml-4 text-white/40 hover:text-white/70 hover:bg-white/8 rounded-lg transition-colors text-sm"
+          className="flex items-center gap-2 px-4 py-2 -ml-4 text-white/50 hover:text-white/70 hover:bg-white/8 rounded-lg transition-colors text-sm"
         >
           <ExternalLink size={16} />
           {t('viewOnGitHub')}

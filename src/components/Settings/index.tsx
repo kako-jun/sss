@@ -89,7 +89,12 @@ export function Settings({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: MODAL_ANIMATION_DURATION }}
-      className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50"
+      // #66レビュー2巡目should2: 垂直中央寄せ(items-center)だと、タブ切替で
+      // 内容の高さが変わるたびにモーダル自体の上端位置が上下に動いてしまう
+      // （内容に追従する高さ設計と、画面中央に固定したい見た目が両立しない）。
+      // 上寄せ(items-start + pt-[12vh])にすることで、ヘッダー・タブ行の位置は
+      // タブ切替に関わらず常に固定され、下端だけが内容量に応じて伸縮する。
+      className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-start justify-center pt-[12vh] z-50"
       onClick={onClose}
     >
       <motion.div
@@ -102,7 +107,7 @@ export function Settings({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.97, opacity: 0 }}
         transition={{ duration: MODAL_ANIMATION_DURATION }}
-        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-2xl w-full mx-8 max-h-[80vh] overflow-hidden border border-white/10 flex flex-col"
+        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-2xl w-full mx-8 max-h-[76vh] overflow-hidden border border-white/10 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">
@@ -149,10 +154,13 @@ export function Settings({
                 aria-controls={`tabpanel-${id}`}
                 tabIndex={selected ? 0 : -1}
                 onClick={() => selectTab(id)}
+                // #66レビュー2巡目nit: 非選択タブの文字色を/40→/50に
+                // （言語セグメントの非選択と揃える。DESIGN.mdのテキスト階層に
+                // 合わせて統一）。
                 className={`px-3 py-2 text-sm transition-colors whitespace-nowrap flex-shrink-0 outline-offset-[-2px] ${
                   selected
                     ? 'text-white/90 font-medium border-b-2 border-white/80'
-                    : 'text-white/40 hover:text-white/70 border-b-2 border-transparent'
+                    : 'text-white/50 hover:text-white/70 border-b-2 border-transparent'
                 }`}
               >
                 {t(labelKey)}
@@ -167,8 +175,10 @@ export function Settings({
             縮めても「固定値を置く」こと自体が内容追従の原則に反するため撤廃し、
             完全に内容の高さへ追従させる（タブ切替時の見た目のガタつきより、
             短い内容のタブが間延びして見えることの方を避ける）。最大は
-            モーダル自体のmax-h-[80vh]に任せてスクロールする。各パネルに
-            role=tabpanel/aria-labelledbyを付け、対応するタブと対応付ける。 */}
+            モーダル自体のmax-h-[76vh]に任せてスクロールする（#66レビュー
+            2巡目should2: 上寄せpt-[12vh]と合わせて下端にも同程度の余白が
+            残るように80vh→76vhへ調整）。各パネルに role=tabpanel/
+            aria-labelledbyを付け、対応するタブと対応付ける。 */}
         <div className="flex-1 overflow-y-auto">
           {activeTab === 'scan' && (
             <div role="tabpanel" id="tabpanel-scan" aria-labelledby="tab-scan" tabIndex={0}>

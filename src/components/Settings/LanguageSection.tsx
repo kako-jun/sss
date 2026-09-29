@@ -42,10 +42,12 @@ export function LanguageSection() {
           <button
             key={option}
             onClick={() => handleChange(option)}
+            // #66レビュー2巡目nit: 非選択の文字色を/40→/50に（設定タブ行の
+            // 非選択スタイルと揃える。DESIGN.mdのテキスト階層に合わせて統一）。
             className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
               setting === option
                 ? 'bg-white/15 text-white/80'
-                : 'text-white/40 hover:text-white/60 hover:bg-white/5'
+                : 'text-white/50 hover:text-white/70 hover:bg-white/5'
             }`}
           >
             {labelFor(option)}

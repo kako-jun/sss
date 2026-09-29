@@ -67,7 +67,8 @@ export function ExcludeRulesSection() {
   };
 
   if (loading) {
-    return <div className="text-white/30 text-sm">{t('loadingLabel')}</div>;
+    // #66レビュー2巡目nit: /30→/50（他の説明/補助テキストと同じ濃さに統一）。
+    return <div className="text-white/50 text-sm">{t('loadingLabel')}</div>;
   }
 
   return (
