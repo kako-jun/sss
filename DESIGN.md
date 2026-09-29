@@ -223,10 +223,17 @@ Each section itself follows the same three-part rhythm:
 ```
 <div>
   <h3 className="text-sm font-medium text-white/70">{heading}</h3>
-  <p className="text-xs text-white/40 mt-1">{description}</p>  {/* optional */}
+  <p className="text-xs text-white/50 mt-1">{description}</p>  {/* optional */}
 </div>
 <div className="mt-4">{control(s)}</div>          {/* via the outer space-y-4 */}
 ```
+
+Description opacity was bumped from `/40` to `/50` (#66レビュー2巡目nit): this
+is body copy a user needs to read to understand the control, so it should sit
+at the same resting tone as every other "explanation/hint/non-selected" text in
+Settings (empty-state messages, the seconds unit label, the language segment's
+non-selected option, tab row's non-selected label, the EXIF checkbox label) —
+see the contrast-floor note in §2 "Text".
 
 The description is optional but preferred wherever the heading alone doesn't
 make the control's effect obvious (e.g. "Display Interval" needs "5–60s, before
@@ -353,10 +360,17 @@ there's no separate grid system to document.
 
 ### Key Dimensions
 
-- Modal: `max-w-2xl w-full mx-8`, `max-h-[80vh]` (content area has no min-height
+- Modal: `max-w-2xl w-full mx-8`, `max-h-[76vh]` (content area has no min-height
   at all — #66/#66レビューshould: it fully tracks content, shrinking for short
-  tabs and scrolling past `max-h-[80vh]` for long ones, instead of always
-  reserving half the screen)
+  tabs and scrolling past `max-h-[76vh]` for long ones, instead of always
+  reserving half the screen). The backdrop uses `items-start justify-center
+pt-[12vh]` rather than vertical centering (#66レビュー2巡目should2): with a
+  content-tracking height, centering means the header/tab row physically move
+  up and down every time you switch tabs (a short tab centers higher, a tall
+  one lower). Anchoring the top edge at a fixed `pt-[12vh]` keeps the header
+  and tab row pinned in place; only the bottom edge moves as content grows or
+  shrinks. `76vh` (rather than `80vh`) leaves a roughly symmetric ~12vh margin
+  at the bottom too
 - Floating control bar: `w-[calc(100%-2rem)] max-w-xl` (#66)
 - Icon sizes: `w-4 h-4` (16px) standard, `w-5 h-5` (20px) for the center
   play/pause emphasis
