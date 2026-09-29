@@ -64,7 +64,7 @@ npm run tauri:build
 - **Left arrow**: go to the previous photo/video
 - **Right arrow**: go to the next photo/video
 - **Space**: toggle pause/resume
-- **F / F11**: toggle fullscreen and windowed mode
+- **F / F11**: toggle fullscreen and windowed mode (on macOS, `F11` is often bound to the OS's Mission Control and may never reach the app; use `F`, or `fn + F11`, instead)
 - **?**: show the keyboard shortcuts overlay
 
 ### Exclude rules

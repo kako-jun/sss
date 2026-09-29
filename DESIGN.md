@@ -41,6 +41,15 @@ All colors are black or white at varying opacity. This is the entire palette.
 | `text-white/20` | `rgba(255,255,255,0.20)` | Inactive icon default  |
 | `text-white/15` | `rgba(255,255,255,0.15)` | Placeholder            |
 
+**Contrast floor for informational text (#66レビューshould)**: `/30` and `/40` stay
+fine for genuinely disabled controls, decorative icon glyphs, or anything with a
+3:1 non-text contrast requirement (WCAG 2.4.11) — but any body copy that conveys
+information a sighted user is meant to read (Settings section descriptions, empty
+-state messages, hints, inline dates) must clear the 4.5:1 normal-text ratio (WCAG
+1.4.3), which on this pure-black canvas means `/50` or higher. Several Settings
+sections were sitting at `/30`/`/40` for this kind of copy and were bumped to `/50`
+during the #66 review pass.
+
 ### Borders
 
 | Class             | Value                    | Usage           |
@@ -344,8 +353,9 @@ there's no separate grid system to document.
 
 ### Key Dimensions
 
-- Modal: `max-w-2xl w-full mx-8`, `max-h-[80vh]` (content area `min-h-[260px]`,
-  #66 — shrinks to fit short tabs, scrolls past 80vh instead of always
+- Modal: `max-w-2xl w-full mx-8`, `max-h-[80vh]` (content area has no min-height
+  at all — #66/#66レビューshould: it fully tracks content, shrinking for short
+  tabs and scrolling past `max-h-[80vh]` for long ones, instead of always
   reserving half the screen)
 - Floating control bar: `w-[calc(100%-2rem)] max-w-xl` (#66)
 - Icon sizes: `w-4 h-4` (16px) standard, `w-5 h-5` (20px) for the center
@@ -419,7 +429,15 @@ uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
 - Create large, dramatic buttons or hover effects
 - Add a light theme
 - Import custom fonts beyond Inter
-- Use opacity values outside standard increments (/5, /8, /10, /15, /20, /25, /30, etc.)
+- Use opacity values outside standard increments (/5, /8, /10, /15, /20, /25, /30, etc.).
+  Tailwind 3.4's own opacity scale is 5-step (0, 5, 10, ..., 95, 100) — `/8` is the
+  one value on this list that isn't a multiple of 5, and it's only usable because
+  `tailwind.config.js` adds `theme.extend.opacity: { 8: '0.08' }` explicitly
+  (#66レビューmust3: without that entry, `border-white/8`/`bg-white/8` silently
+  generate no CSS at all and fall back to Preflight's default `border-color:
+currentColor`, rendering a visibly brighter border than intended). Adding any
+  further non-multiple-of-5 value here requires the same `tailwind.config.js`
+  addition, verified against the built `dist/assets/*.css`
 - Reach for `rounded` (4px) on anything but a tiny inline badge — buttons/cards
   are `rounded-lg`, floating surfaces are `rounded-2xl`/`rounded-full` (#66)
 
@@ -444,12 +462,19 @@ This is a Tauri desktop app — no mobile breakpoints. The UI adapts to window r
 - The top-right button row (exit, shortcuts, window mode, settings) fades with the
   same rule as the bottom overlay — it must never stay solid while the overlay is
   hidden (#66). Shared via `idleFadeClassName()` in `constants.ts`
-- `focus-within:opacity-100` on both fading containers keeps them visible while a
-  keyboard user has tabbed into a control inside — a focused-but-invisible element
-  is a focus-visibility failure, not just a visual nit
+- `has-[:focus-visible]:opacity-100` on both fading containers keeps them visible
+  while a keyboard user has tabbed into a control inside — a focused-but-invisible
+  element is a focus-visibility failure, not just a visual nit. **Not**
+  `focus-within:` (#66レビューmust2(a)): in real Chromium/WebView2, a plain mouse
+  click leaves DOM focus on the clicked button, which keeps `focus-within` true
+  forever and the bar never fades on idle even though the user isn't interacting
+  with it. `:focus-visible` only matches focus that the browser attributes to
+  keyboard/intentional navigation, so mouse-click residue correctly stops
+  counting as "still in use"
 - The mouse cursor itself hides (`cursor-none`) on the same idle timeout while the
-  slideshow is showing (not while the Settings modal is open) — a photo-viewing app
-  should not leave a static cursor sitting on top of the image (#66)
+  slideshow is showing (not while the Settings modal or the Shortcuts overlay is
+  open, #66レビューshould) — a photo-viewing app should not leave a static cursor
+  sitting on top of the image (#66)
 
 ### Touch Targets
 
