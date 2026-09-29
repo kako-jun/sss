@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { setLanguageSetting } from '../../lib/i18n/store';
 
 // #80: GraphSectionはuPlotでチャートを描画する。src/test/setup.tsに追加した
@@ -139,5 +139,182 @@ describe('GraphSection i18n (#80)', () => {
     const rows = container.querySelectorAll('tbody tr');
     expect(rows.length).toBe(3);
     expect(rows[1].textContent).toBe('2660.0%');
+  });
+});
+
+// #67: 均等バッジの境界（EVEN_SPREAD_MAX = 1）。差が 0/1 なら「均等」、2 から差を示す。
+describe('GraphSection fairness badge boundary (#67)', () => {
+  const stats = (min: number, max: number) => ({
+    files: 4,
+    min,
+    max,
+    mean: (min + max) / 2,
+    bins:
+      min === max
+        ? [{ count: min, files: 4 }]
+        : [
+            { count: min, files: 2 },
+            { count: max, files: 2 },
+          ],
+  });
+  const load = (min: number, max: number) => {
+    getDisplayStats.mockResolvedValue(stats(min, max));
+    getStats.mockResolvedValue({ totalImages: 4, displayedImages: 4 });
+    render(<GraphSection />);
+  };
+
+  it('treats a single bin (spread 0) as even', async () => {
+    load(3, 3);
+    await waitFor(() => {
+      expect(screen.getByTestId('fairness-badge').textContent).toBe('均等（差は1回以内）');
+    });
+  });
+
+  it('treats a spread of exactly 1 as even', async () => {
+    load(2, 3);
+    await waitFor(() => {
+      expect(screen.getByTestId('fairness-badge').textContent).toBe('均等（差は1回以内）');
+    });
+  });
+
+  it('reports the gap once the spread reaches 2', async () => {
+    load(2, 4);
+    await waitFor(() => {
+      expect(screen.getByTestId('fairness-badge').textContent).toBe('最多と最少の差 2回');
+    });
+  });
+
+  it('draws the check icon only for the even badge', async () => {
+    load(2, 3);
+    await waitFor(() => {
+      expect(screen.getByTestId('fairness-badge').querySelector('svg')).not.toBeNull();
+    });
+  });
+
+  it('draws no check icon for the spread badge', async () => {
+    load(2, 4);
+    await waitFor(() => {
+      expect(screen.getByTestId('fairness-badge').textContent).toBe('最多と最少の差 2回');
+    });
+    expect(screen.getByTestId('fairness-badge').querySelector('svg')).toBeNull();
+  });
+});
+
+describe('GraphSection summary cards and table (#67)', () => {
+  it('shows viewed/total, the rounded mean and the min-max range', async () => {
+    getDisplayStats.mockResolvedValue({
+      files: 3,
+      min: 1,
+      max: 3,
+      mean: 1.66,
+      bins: [
+        { count: 1, files: 2 },
+        { count: 3, files: 1 },
+      ],
+    });
+    getStats.mockResolvedValue({ totalImages: 1234, displayedImages: 3 });
+
+    const { container } = render(<GraphSection />);
+
+    await waitFor(() => {
+      expect(screen.getByText('表示済み')).toBeTruthy();
+    });
+    const text = container.textContent ?? '';
+    expect(text).toContain('3 / 1,234');
+    expect(text).toContain('1.7');
+    expect(text).toContain('1–3');
+  });
+
+  it('shows a 100% row for a single-bin table', async () => {
+    getDisplayStats.mockResolvedValue({
+      files: 5,
+      min: 2,
+      max: 2,
+      mean: 2,
+      bins: [{ count: 2, files: 5 }],
+    });
+    getStats.mockResolvedValue({ totalImages: 5, displayedImages: 5 });
+
+    const { container } = render(<GraphSection />);
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('tbody tr').length).toBe(1);
+    });
+    expect(container.querySelector('tbody tr')!.textContent).toBe('25100.0%');
+  });
+
+  it('shows the "no data" message and no chart when files is 0 even if getStats has totals', async () => {
+    getDisplayStats.mockResolvedValue({ files: 0, min: 0, max: 0, mean: 0, bins: [] });
+    getStats.mockResolvedValue({ totalImages: 10, displayedImages: 0 });
+
+    const { container } = render(<GraphSection />);
+
+    await waitFor(() => {
+      expect(screen.getByText('データがありません。スキャンを実行してください。')).toBeTruthy();
+    });
+    expect(container.querySelector('.u-over')).toBeNull();
+    expect(screen.queryByTestId('fairness-badge')).toBeNull();
+  });
+
+  it('falls back to the "no data" message and logs when loading fails', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getDisplayStats.mockRejectedValue(new Error('db locked'));
+    getStats.mockResolvedValue({ totalImages: 1, displayedImages: 0 });
+
+    render(<GraphSection />);
+
+    await waitFor(() => {
+      expect(screen.getByText('データがありません。スキャンを実行してください。')).toBeTruthy();
+    });
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
+describe('GraphSection reset flow (#67)', () => {
+  const stats = {
+    files: 2,
+    min: 1,
+    max: 2,
+    mean: 1.5,
+    bins: [
+      { count: 1, files: 1 },
+      { count: 2, files: 1 },
+    ],
+  };
+
+  it('does not reset or reload when the confirmation is cancelled', async () => {
+    getDisplayStats.mockResolvedValue(stats);
+    getStats.mockResolvedValue({ totalImages: 2, displayedImages: 2 });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<GraphSection />);
+    await waitFor(() => expect(screen.getByText('表示回数をリセット')).toBeTruthy());
+    fireEvent.click(screen.getByText('表示回数をリセット'));
+
+    expect(confirm).toHaveBeenCalledWith('すべての画像の表示回数をリセットしますか？');
+    expect(resetAllDisplayCounts).not.toHaveBeenCalled();
+    expect(getDisplayStats).toHaveBeenCalledTimes(1);
+    confirm.mockRestore();
+  });
+
+  it('resets and then reloads the stats when confirmed, showing the empty state', async () => {
+    getDisplayStats
+      .mockResolvedValueOnce(stats)
+      .mockResolvedValueOnce({ files: 0, min: 0, max: 0, mean: 0, bins: [] });
+    getStats.mockResolvedValue({ totalImages: 2, displayedImages: 0 });
+    resetAllDisplayCounts.mockResolvedValue(undefined);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<GraphSection />);
+    await waitFor(() => expect(screen.getByText('表示回数をリセット')).toBeTruthy());
+    fireEvent.click(screen.getByText('表示回数をリセット'));
+
+    await waitFor(() => {
+      expect(screen.getByText('データがありません。スキャンを実行してください。')).toBeTruthy();
+    });
+    expect(resetAllDisplayCounts).toHaveBeenCalledTimes(1);
+    expect(getDisplayStats).toHaveBeenCalledTimes(2);
+    confirm.mockRestore();
   });
 });

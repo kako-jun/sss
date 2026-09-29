@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 
 const getThumbnail = vi.fn();
 
@@ -67,6 +67,141 @@ describe('Thumbnail (#67)', () => {
     trigger([{ isIntersecting: true }]);
     await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
     expect(getThumbnail).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+});
+
+// #67 レビュー指摘D: path prop が変わったとき前のパスの表示を残さない。
+describe('Thumbnail path change (#67)', () => {
+  it('drops the previous path image while the new path is loading', async () => {
+    let resolveSecond: (v: unknown) => void = () => {};
+    getThumbnail
+      .mockResolvedValueOnce({ kind: 'image', path: '/cache/thumbs/first.jpg' })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const { container, rerender } = render(<Thumbnail path="/photos/first.jpg" />);
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+
+    rerender(<Thumbnail path="/photos/second.jpg" />);
+
+    expect(container.querySelector('img')).toBeNull();
+    await act(async () => {
+      resolveSecond({ kind: 'image', path: '/cache/thumbs/second.jpg' });
+    });
+    await waitFor(() =>
+      expect(container.querySelector('img')!.getAttribute('src')).toBe(
+        'asset://localhost//cache/thumbs/second.jpg',
+      ),
+    );
+  });
+
+  it('drops the previous video label when switching to an image path', async () => {
+    getThumbnail
+      .mockResolvedValueOnce({ kind: 'video' })
+      .mockResolvedValueOnce({ kind: 'image', path: '/cache/thumbs/p.jpg' });
+    const { container, rerender } = render(<Thumbnail path="/v/clip.mp4" />);
+    await waitFor(() => expect(screen.getByText('clip.mp4')).toBeTruthy());
+
+    rerender(<Thumbnail path="/p/photo.jpg" />);
+
+    expect(screen.queryByText('clip.mp4')).toBeNull();
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+  });
+
+  it('ignores a slow response for the previous path (no stale overwrite)', async () => {
+    let resolveFirst: (v: unknown) => void = () => {};
+    getThumbnail
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ kind: 'image', path: '/cache/thumbs/second.jpg' });
+    const { container, rerender } = render(<Thumbnail path="/photos/first.jpg" />);
+    rerender(<Thumbnail path="/photos/second.jpg" />);
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+
+    await act(async () => {
+      resolveFirst({ kind: 'image', path: '/cache/thumbs/first.jpg' });
+    });
+
+    expect(container.querySelector('img')!.getAttribute('src')).toBe(
+      'asset://localhost//cache/thumbs/second.jpg',
+    );
+  });
+
+  it('requests the thumbnail again for the new path', async () => {
+    getThumbnail.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/t.jpg' });
+    const { container, rerender } = render(<Thumbnail path="/photos/a.jpg" />);
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+
+    rerender(<Thumbnail path="/photos/b.jpg" />);
+
+    await waitFor(() => expect(getThumbnail).toHaveBeenCalledWith('/photos/b.jpg'));
+    expect(getThumbnail).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears the failed placeholder state when the path changes', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getThumbnail
+      .mockRejectedValueOnce(new Error('decode failed'))
+      .mockResolvedValueOnce({ kind: 'image', path: '/cache/thumbs/ok.jpg' });
+    const { container, rerender } = render(<Thumbnail path="/photos/broken.jpg" />);
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+
+    rerender(<Thumbnail path="/photos/ok.jpg" />);
+
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+    spy.mockRestore();
+  });
+});
+
+describe('Thumbnail labels (#67)', () => {
+  it('shows only the last segment of a Windows path for a video', async () => {
+    getThumbnail.mockResolvedValue({ kind: 'video' });
+    render(<Thumbnail path={'C:\\Videos\\holiday\\clip.mp4'} />);
+
+    await waitFor(() => expect(screen.getByText('clip.mp4')).toBeTruthy());
+  });
+
+  it('renders a decorative image with empty alt and no drag', async () => {
+    getThumbnail.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/x.jpg' });
+    const { container } = render(<Thumbnail path="/photos/a.jpg" />);
+
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+    const img = container.querySelector('img')!;
+    expect(img.getAttribute('alt')).toBe('');
+    expect(img.getAttribute('draggable')).toBe('false');
+  });
+
+  it('requests the thumbnail once and only after the observer reports it intersecting', async () => {
+    const observed: { disconnect: number } = { disconnect: 0 };
+    let trigger: (entries: { isIntersecting: boolean }[]) => void = () => {};
+    class FakeObserver {
+      constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
+        trigger = cb;
+      }
+      observe() {}
+      disconnect() {
+        observed.disconnect += 1;
+      }
+    }
+    vi.stubGlobal('IntersectionObserver', FakeObserver);
+    getThumbnail.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/x.jpg' });
+
+    const { container } = render(<Thumbnail path="/photos/a.jpg" />);
+    act(() => trigger([{ isIntersecting: false }]));
+    expect(getThumbnail).not.toHaveBeenCalled();
+
+    act(() => trigger([{ isIntersecting: true }]));
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+    expect(getThumbnail).toHaveBeenCalledTimes(1);
+    expect(observed.disconnect).toBeGreaterThan(0);
     vi.unstubAllGlobals();
   });
 });

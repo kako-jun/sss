@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   EVEN_SPREAD_MAX,
+  FILE_COUNT_INCRS,
   chartXRange,
   chartYRange,
   formatCompact,
@@ -64,5 +65,74 @@ describe('chart numbers (#67)', () => {
   it('formatCompact shortens large counts per locale', () => {
     expect(formatCompact(12_500, 'en')).toBe('12.5K');
     expect(formatCompact(500, 'en')).toBe('500');
+  });
+});
+
+describe('chartXRange edges (#67)', () => {
+  it('keeps a lone zero-count bin at the left edge with the surplus on the right', () => {
+    expect(chartXRange(0, 0)).toEqual([-0.5, 5.5]);
+  });
+
+  it('centres a lone high-count bin', () => {
+    expect(chartXRange(10, 10)).toEqual([7, 13]);
+  });
+
+  it('adds no extra padding when the range already spans the minimum slots', () => {
+    expect(chartXRange(0, 5)).toEqual([-0.5, 5.5]);
+  });
+
+  it('tops a slightly narrow range up to the minimum slots without going below zero', () => {
+    expect(chartXRange(0, 4)).toEqual([-0.5, 5.5]);
+  });
+});
+
+describe('integerTicks edges (#67)', () => {
+  it('keeps every integer at exactly the max tick count', () => {
+    expect(integerTicks(-0.5, 10.5)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it('switches to a step of 2 as soon as the span exceeds the max tick count', () => {
+    expect(integerTicks(-0.5, 11.5)).toEqual([0, 2, 4, 6, 8, 10]);
+  });
+
+  it('returns a single tick when the range covers one integer', () => {
+    expect(integerTicks(2.5, 3.5)).toEqual([3]);
+  });
+
+  it('is empty when the whole range is negative', () => {
+    expect(integerTicks(-5, -1)).toEqual([]);
+  });
+});
+
+describe('chart numbers edges (#67)', () => {
+  it('spreadOf is 0 when every file has the same count', () => {
+    expect(spreadOf({ min: 4, max: 4 })).toBe(0);
+  });
+
+  it('chartYRange rounds the headroom up to a whole file', () => {
+    expect(chartYRange(1)).toEqual([0, 2]);
+  });
+
+  it('percentOf returns 100 for the whole and treats a negative denominator as zero', () => {
+    expect(percentOf(7, 7)).toBe(100);
+    expect(percentOf(3, -1)).toBe(0);
+  });
+
+  it('percentOf returns 0 for zero files of a positive total', () => {
+    expect(percentOf(0, 10)).toBe(0);
+  });
+
+  it('formatCompact uses the locale-specific unit for Japanese', () => {
+    expect(formatCompact(15_000, 'ja')).toBe('1.5万');
+  });
+
+  it('formatCompact shortens millions in English', () => {
+    expect(formatCompact(1_200_000, 'en')).toBe('1.2M');
+  });
+
+  it('FILE_COUNT_INCRS is strictly ascending and integer-only (no fractional Y ticks)', () => {
+    expect(FILE_COUNT_INCRS.every((n) => Number.isInteger(n))).toBe(true);
+    expect(FILE_COUNT_INCRS.every((n, i) => i === 0 || n > FILE_COUNT_INCRS[i - 1])).toBe(true);
+    expect(FILE_COUNT_INCRS[0]).toBe(1);
   });
 });

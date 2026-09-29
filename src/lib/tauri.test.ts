@@ -220,6 +220,17 @@ describe('tauri command wrappers', () => {
     expect(invoke).toHaveBeenCalledWith('get_thumbnail', { imagePath: '/a.jpg' });
   });
 
+  it('getThumbnail passes a video result through untouched (#67)', async () => {
+    invoke.mockResolvedValue({ kind: 'video' });
+    expect(await tauri.getThumbnail('/a.mp4')).toEqual({ kind: 'video' });
+    expect(invoke).toHaveBeenCalledWith('get_thumbnail', { imagePath: '/a.mp4' });
+  });
+
+  it('getThumbnail propagates a backend rejection instead of swallowing it (#67)', async () => {
+    invoke.mockRejectedValue('Not a supported image file');
+    await expect(tauri.getThumbnail('/a.txt')).rejects.toBe('Not a supported image file');
+  });
+
   it('propagates rejections from invoke', async () => {
     invoke.mockRejectedValue(new Error('backend boom'));
     await expect(tauri.getNextImage()).rejects.toThrow('backend boom');
