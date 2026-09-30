@@ -1,8 +1,8 @@
 import { X } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import { getPickedImages, deletePickedImage } from '../../lib/tauri';
 import { useT } from '../../lib/i18n';
+import { Thumbnail } from './Thumbnail';
 
 export function PickSection() {
   const t = useT();
@@ -48,12 +48,7 @@ export function PickSection() {
         <div className="grid grid-cols-4 gap-2">
           {images.map((path) => (
             <div key={path} className="relative group">
-              <img
-                src={convertFileSrc(path)}
-                alt=""
-                className="w-full aspect-square object-cover rounded border border-white/5"
-                loading="lazy"
-              />
+              <Thumbnail path={path} />
               <button
                 onClick={() => handleDelete(path)}
                 // #66 問題9: hoverのみで表示されるとキーボード/タッチで見えなかった。

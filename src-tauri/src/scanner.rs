@@ -10,8 +10,8 @@ use walkdir::WalkDir;
 /// 10万件規模で大量のエラーが出ても、結果を肥大化させず「件数＋代表例」に留める。
 const MAX_ERROR_EXAMPLES: usize = 5;
 
-/// 画像ファイルの拡張子
-const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif"];
+/// 画像ファイルの拡張子（対応形式の正本。ピック一覧・サムネイル生成もこれを参照する、#67）
+pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif"];
 
 /// 動画ファイルの拡張子（HTMLのvideoタグでネイティブ再生可能な形式のみ）
 /// avi/mkv/flv/wmv等の旧フォーマットはffmpeg同梱後に対応予定
@@ -411,29 +411,43 @@ impl ImageScanner {
     }
 
     /// 画像ファイルかチェック
+    #[cfg(test)]
     fn is_image_file(&self, path: &Path) -> bool {
-        if let Some(ext) = path.extension() {
-            if let Some(ext_str) = ext.to_str() {
-                return IMAGE_EXTENSIONS.contains(&ext_str.to_lowercase().as_str());
-            }
-        }
-        false
+        is_image_path(path)
     }
 
     /// 動画ファイルかチェック
+    #[cfg(test)]
     fn is_video_file(&self, path: &Path) -> bool {
-        if let Some(ext) = path.extension() {
-            if let Some(ext_str) = ext.to_str() {
-                return VIDEO_EXTENSIONS.contains(&ext_str.to_lowercase().as_str());
-            }
-        }
-        false
+        is_video_path(path)
     }
 
     /// メディアファイル（画像または動画）かチェック
     fn is_media_file(&self, path: &Path) -> bool {
-        self.is_image_file(path) || self.is_video_file(path)
+        is_media_path(path)
     }
+}
+
+/// 拡張子（大文字小文字を区別しない）が `extensions` のいずれかに一致するか。
+fn has_extension_in(path: &Path, extensions: &[&str]) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| extensions.contains(&ext.to_lowercase().as_str()))
+}
+
+/// 画像ファイルか（拡張子による判定。`IMAGE_EXTENSIONS` が正本、#67）
+pub fn is_image_path(path: &Path) -> bool {
+    has_extension_in(path, IMAGE_EXTENSIONS)
+}
+
+/// 動画ファイルか（拡張子による判定。`VIDEO_EXTENSIONS` が正本）
+pub fn is_video_path(path: &Path) -> bool {
+    has_extension_in(path, VIDEO_EXTENSIONS)
+}
+
+/// 画像または動画か。スキャン・ピック一覧が同じ定義を使う（#67）
+pub fn is_media_path(path: &Path) -> bool {
+    is_image_path(path) || is_video_path(path)
 }
 
 #[cfg(test)]
@@ -858,5 +872,33 @@ mod tests {
         assert!(scanner.is_media_file(Path::new("test.webm")));
         // それ以外は非メディア
         assert!(!scanner.is_media_file(Path::new("test.txt")));
+    }
+
+    // ---- 独立QA観点表からの追加テスト（#67） ----
+
+    #[test]
+    fn media_path_needs_a_real_extension() {
+        // 拡張子なし
+        assert!(!is_media_path(Path::new("photo")));
+        assert!(!is_media_path(Path::new("/dir/mp4")));
+        // ドットファイル名 `.jpg` は拡張子ではなくファイル名（std は extension=None）
+        assert!(!is_media_path(Path::new(".jpg")));
+        assert!(!is_media_path(Path::new("/dir/.mp4")));
+        // 末尾ドットのみ
+        assert!(!is_media_path(Path::new("photo.")));
+        // 通常の拡張子は大文字小文字によらず真
+        assert!(is_media_path(Path::new("a.JPG")));
+        assert!(is_media_path(Path::new("/dir/b.Mp4")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn media_path_with_non_utf8_extension_is_false_and_does_not_panic() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let path = Path::new(OsStr::from_bytes(b"/dir/a.\xff\xfe"));
+        assert!(!is_media_path(path));
+        assert!(!is_image_path(path));
+        assert!(!is_video_path(path));
     }
 }

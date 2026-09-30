@@ -33,10 +33,22 @@ export interface ScanProgress {
   errorExamples: string[];
 }
 
-// 統計情報
-export interface Stats {
-  totalImages: number;
-  displayedImages: number;
+// 表示回数ヒストグラムの1階級（`count` 回表示されたファイルが `files` 件、#67）
+export interface DisplayCountBin {
+  count: number;
+  files: number;
+}
+
+// 表示回数の分布（統計グラフ用、#67）。バックエンドの `DisplayStats` と対応。
+// 全ファイルの (パス, 回数) 一覧ではなく、集計済みの要約とヒストグラムだけを受け取る。
+export interface DisplayStats {
+  // 集計対象のファイル数（プレイリストのメンバー数）
+  files: number;
+  min: number;
+  max: number;
+  mean: number;
+  // 表示回数の昇順。ファイルが1件も無い階級は含まれない（疎な表現）
+  bins: DisplayCountBin[];
 }
 
 // 最近表示した画像
@@ -45,6 +57,9 @@ export interface RecentImage {
   displayCount: number;
   lastDisplayed: string;
 }
+
+// 設定画面サムネイルの取得結果（#67）。静止画は縮小済み JPEG のパス、動画はサムネイル無し。
+export type ThumbnailResult = { kind: 'image'; path: string } | { kind: 'video' };
 
 // 除外ルール1件（"glob": 通常のglobパターン・末尾 `/` はディレクトリ名照合。
 // "date": 撮影日（YYYY-MM-DD）による除外）

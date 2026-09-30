@@ -382,6 +382,44 @@ unaffected by any ancestor's transform/filter. If you add another
 click-to-close-anything `fixed` element nested inside a transformed/blurred/
 animated ancestor, portal it the same way.
 
+### Charts (#67)
+
+The stats tab's display-count distribution (`GraphSection` + `displayCountPlot.ts`,
+uPlot) follows the same rule as everything else: no hue. The chart is data in
+service of one question — "is every photo shown equally often?" — so it is built to
+answer that at a glance and then get out of the way. The photos stay the hero.
+
+- **Form**: a histogram (X = times shown, integer slots; Y = number of files). Fair
+  shuffling shows up as one or two adjacent tall bars; bias shows up as a wide
+  spread. The Y axis always starts at 0 (bars are never truncated).
+- **Headline first**: three stat tiles above the plot (`bg-black/40 rounded-lg p-3`,
+  label `text-xs text-white/50`, value `font-mono text-2xl text-white/80`) — shown
+  at least once (with a `h-0.5` progress hairline), average times shown, fewest to
+  most. A neutral pill next to the title states the verdict in words: "Even (gap of
+  1 or less)" with a check icon, or "Gap of N between most and least shown". The
+  verdict is a text + icon, never a color.
+- **Ink** (canvas can't use Tailwind classes; these are the same white opacities):
+  bars `rgba(255,255,255,0.72)`, axis numbers/labels `0.55` (clears the 4.5:1
+  informational-text floor on black), horizontal grid `0.06` (recessive), mean line
+  `0.9` dashed. No vertical grid, no tick marks, no legend for a single series (the
+  title names it). Bars have a rounded data end (radius 0.3) and a square baseline;
+  a bin that has files but would render under 2px still gets a 2px mark so it is
+  never invisible.
+- **Type**: `11px` Inter (same family as the UI) for axis numbers and labels. Large
+  Y values are compacted (`12.5K` / `1.2万`); X ticks are integers only, thinned to
+  1/2/5/10... steps.
+- **Direct label**: the mean is labelled on the plot ("Avg 2.7"); no numbers on
+  every bar.
+- **Hover**: the hovered integer slot gets a `bg-white/10` column and a tooltip
+  (`bg-black/90 rounded-lg text-xs`, "Shown 3x" / "8,400 files (70.0%)"). Empty
+  slots read as "0 files" — gaps are information. The tooltip is HTML, not canvas.
+- **Accessibility**: the chart host is `role="img"` with a translated summary
+  `aria-label`; a "View as table" `<details>` lists every bin (count / files /
+  share). The chart follows the modal width via `ResizeObserver`.
+- **Not applicable**: dark-only app, so there is no light-mode palette; the
+  categorical/status palette rules don't apply because the chart is a single
+  monochrome series.
+
 ## 5. Layout Principles
 
 ### Container

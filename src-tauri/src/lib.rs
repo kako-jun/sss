@@ -11,8 +11,10 @@ pub mod commands;
 pub mod database;
 pub mod ignore;
 pub mod image_processor;
+pub mod pick;
 pub mod playlist;
 pub mod scanner;
+pub mod thumbnail;
 
 use asset_scope::{sanitize_allow_dir, startup_allow_dirs};
 use cache_worker::CacheWorker;
@@ -153,7 +155,6 @@ pub fn run() {
             commands::image::get_previous_image,
             commands::image::undo_display_count,
             commands::file_operations::open_in_explorer,
-            commands::stats::get_stats,
             commands::stats::get_playlist_info,
             commands::settings::get_last_directory_path,
             commands::system::exit_app,
@@ -170,6 +171,7 @@ pub fn run() {
             commands::file_operations::get_recent_images,
             commands::file_operations::get_picked_images,
             commands::file_operations::delete_picked_image,
+            commands::file_operations::get_thumbnail,
             commands::file_operations::reset_all_display_counts,
             commands::settings::get_os_locale,
         ])

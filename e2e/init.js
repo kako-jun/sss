@@ -26,6 +26,13 @@
   // 壊れたPNGバイト列で実ブラウザに本物のonErrorを起こさせる）。
   const seqs = {
     slides: ['/p/a.png', '/p/b.png'],
+    // #67: 統計タブ用（背景に写真1枚を出しておく）。
+    stats: ['/p/a.png'],
+    statsspread: ['/p/a.png'],
+    // #67: 一度も表示していないプレイリスト（全件 0 回）の統計タブ。
+    statszero: ['/p/a.png'],
+    // #67: ピック/履歴タブのサムネイル（静止画+動画の混在）。
+    thumbs: ['/p/a.png'],
     i2v_vv: ['/p/a.png', '/p/v.webm', '/p/v2.webm', '/p/a.png'],
     one: ['/p/a.png'],
     toast: ['/p/a.png'],
@@ -134,12 +141,63 @@
         // Reactツリーごとクラッシュしていた（エラーバウンダリが無いため白画面化）。
         // 各タブが単独で開けることを確認するため、空の既定値を返す。
         case 'get_ignore_patterns':
-        case 'get_picked_images':
-        case 'get_recent_images':
-        case 'get_display_stats':
           return [];
-        case 'get_stats':
-          return { totalImages: (seqs[sc] || seqs.slides).length, displayedImages: 0 };
+        case 'get_picked_images':
+          // #67: 'thumbs' = 静止画と動画が混在するピック一覧。
+          return sc === 'thumbs' ? ['/p/a.png', '/p/v.webm'] : [];
+        case 'get_recent_images':
+          return sc === 'thumbs'
+            ? [
+                { path: '/p/a.png', displayCount: 3, lastDisplayed: '2026-01-01T00:00:00Z' },
+                { path: '/p/v.webm', displayCount: 1, lastDisplayed: '2026-01-02T00:00:00Z' },
+              ]
+            : [];
+        case 'get_thumbnail':
+          // #67: 設定画面のサムネイルはバックエンドが縮小した JPEG のパスを返す。
+          // 'thumbs' では静止画は（縮小済みの代役として）160x120 のモック画像、動画は
+          // { kind: 'video' }。それ以外のシナリオは従来どおり全件 video 扱い。
+          if (sc === 'thumbs' && args && !String(args.imagePath).endsWith('.webm')) {
+            return { kind: 'image', path: args.imagePath };
+          }
+          return { kind: 'video' };
+        case 'get_display_stats':
+          // #67: 集計済みのヒストグラム（全件一覧ではない）。
+          // 'stats' = 完全平等ランダムが働いた状態（差1以内）、'statsspread' = 偏りのある状態。
+          if (sc === 'stats') {
+            return {
+              files: 12000,
+              min: 2,
+              max: 3,
+              mean: 2.7,
+              bins: [
+                { count: 2, files: 3600 },
+                { count: 3, files: 8400 },
+              ],
+            };
+          }
+          if (sc === 'statsspread') {
+            return {
+              files: 12000,
+              min: 0,
+              max: 9,
+              mean: 3.4,
+              bins: [
+                { count: 0, files: 900 },
+                { count: 1, files: 1800 },
+                { count: 2, files: 2700 },
+                { count: 3, files: 3100 },
+                { count: 4, files: 2000 },
+                { count: 5, files: 1100 },
+                { count: 6, files: 300 },
+                { count: 9, files: 100 },
+              ],
+            };
+          }
+          if (sc === 'statszero') {
+            // 全件が 0 回（一度も表示していない）。ビンは 0 回の 1 本だけ。
+            return { files: 500, min: 0, max: 0, mean: 0, bins: [{ count: 0, files: 500 }] };
+          }
+          return { files: 0, min: 0, max: 0, mean: 0, bins: [] };
         case 'get_default_share_directory':
           return '/tmp/sss-picked';
         // #66: 情報タブの表示バージョン（getVersion()、@tauri-apps/api/appが

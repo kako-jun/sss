@@ -247,6 +247,26 @@ async function captureForViewport(browser, { width, height, locale, localeTag })
     await page.close();
   });
 
+  // --- 統計タブ（#67）: 均等な分布と偏りのある分布。集計済みヒストグラムを
+  //     init.js の 'stats' / 'statsspread' シナリオが返す。ホバー時の
+  //     ツールチップ状態も撮る。 ---
+  for (const hash of ['stats', 'statsspread']) {
+    await tryStep(`${hash}_${suffix}`, async () => {
+      const page = await openScenario(browser, { ...opts, hash });
+      await page.waitForTimeout(900);
+      await openSettings(page);
+      await clickTabByIndex(page, TAB_LABELS.indexOf('stats'));
+      await page.waitForSelector('.u-over', { timeout: 3000 });
+      await page.waitForTimeout(300);
+      await shoot(page, `${hash}_${suffix}`);
+      const over = await page.locator('.u-over').boundingBox();
+      await page.mouse.move(over.x + over.width * 0.58, over.y + over.height * 0.7);
+      await page.waitForTimeout(200);
+      await shoot(page, `${hash}_hover_${suffix}`);
+      await page.close();
+    });
+  }
+
   // --- ショートカット一覧（#66で新規追加。刷新前のコードには存在しない） ---
   await tryStep(`shortcuts_${suffix}`, async () => {
     const page = await openScenario(browser, { ...opts, hash: 'slides' });

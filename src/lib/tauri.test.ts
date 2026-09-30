@@ -20,9 +20,9 @@ import type {
   ImageInfo,
   ImageNavigationResult,
   ScanProgress,
-  Stats,
   RecentImage,
   IgnoreRule,
+  DisplayStats,
 } from '../types';
 
 beforeEach(() => {
@@ -112,13 +112,6 @@ describe('tauri command wrappers', () => {
     expect(invoke).toHaveBeenCalledWith('open_in_explorer', { imagePath: '/a.jpg' });
   });
 
-  it('getStats invokes get_stats and returns Stats', async () => {
-    const stats: Stats = { totalImages: 5, displayedImages: 2 };
-    invoke.mockResolvedValue(stats);
-    expect(await tauri.getStats()).toEqual(stats);
-    expect(invoke).toHaveBeenCalledWith('get_stats');
-  });
-
   it('getPlaylistInfo returns the [position, total, canGoBack] tuple', async () => {
     invoke.mockResolvedValue([3, 100, true]);
     const result = await tauri.getPlaylistInfo();
@@ -154,15 +147,20 @@ describe('tauri command wrappers', () => {
     });
   });
 
-  it('getDisplayStats returns the [label, count] pairs', async () => {
-    invoke.mockResolvedValue([
-      ['2024-01', 5],
-      ['2024-02', 8],
-    ]);
-    expect(await tauri.getDisplayStats()).toEqual([
-      ['2024-01', 5],
-      ['2024-02', 8],
-    ]);
+  it('getDisplayStats returns the aggregated histogram (not a per-file list, #67)', async () => {
+    const stats: DisplayStats = {
+      files: 3,
+      min: 1,
+      max: 2,
+      mean: 5 / 3,
+      bins: [
+        { count: 1, files: 1 },
+        { count: 2, files: 2 },
+      ],
+    };
+    invoke.mockResolvedValue(stats);
+    expect(await tauri.getDisplayStats()).toEqual(stats);
+    expect(invoke).toHaveBeenCalledWith('get_display_stats');
   });
 
   it('getIgnorePatterns returns rules with pattern + ruleType (glob/date)', async () => {
@@ -203,6 +201,26 @@ describe('tauri command wrappers', () => {
     invoke.mockResolvedValue(undefined);
     await tauri.deletePickedImage('/a.jpg');
     expect(invoke).toHaveBeenCalledWith('delete_picked_image', { imagePath: '/a.jpg' });
+  });
+
+  it('getThumbnail invokes get_thumbnail with imagePath and returns the tagged result (#67)', async () => {
+    invoke.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/x.jpg' });
+    expect(await tauri.getThumbnail('/a.jpg')).toEqual({
+      kind: 'image',
+      path: '/cache/thumbs/x.jpg',
+    });
+    expect(invoke).toHaveBeenCalledWith('get_thumbnail', { imagePath: '/a.jpg' });
+  });
+
+  it('getThumbnail passes a video result through untouched (#67)', async () => {
+    invoke.mockResolvedValue({ kind: 'video' });
+    expect(await tauri.getThumbnail('/a.mp4')).toEqual({ kind: 'video' });
+    expect(invoke).toHaveBeenCalledWith('get_thumbnail', { imagePath: '/a.mp4' });
+  });
+
+  it('getThumbnail propagates a backend rejection instead of swallowing it (#67)', async () => {
+    invoke.mockRejectedValue('Not a supported image file');
+    await expect(tauri.getThumbnail('/a.txt')).rejects.toBe('Not a supported image file');
   });
 
   it('propagates rejections from invoke', async () => {

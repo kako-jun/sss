@@ -1,4 +1,4 @@
-use crate::asset_scope::{resolve_and_sanitize_share_directory, resolve_share_directory};
+use crate::asset_scope::{default_share_directory, resolve_share_directory, sanitize_allow_dir};
 use crate::commands::playlist_persistence;
 use crate::commands::types::{AppState, ExcludeOutcome};
 use crate::ignore::{glob_check_pattern, IgnoreFilter, IgnoreRule, RuleType};
@@ -40,7 +40,7 @@ pub(crate) fn home_pictures_dir() -> Result<PathBuf, String> {
 /// デフォルトのピック先ディレクトリパスを取得
 #[tauri::command]
 pub async fn get_default_share_directory() -> Result<String, String> {
-    let share_directory = home_pictures_dir()?.join("sss-picked");
+    let share_directory = default_share_directory(&home_pictures_dir()?);
     Ok(share_directory.to_str().unwrap_or("").to_string())
 }
 
@@ -122,14 +122,10 @@ pub async fn pick_image(
         return Err("Image file does not exist".to_string());
     }
 
-    // コピー先ディレクトリを取得（設定から、なければデフォルト）
+    // コピー先ディレクトリ（設定から、なければデフォルト。解決は get_picked_directory に一本化）
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    let share_setting = db
-        .get_setting("share_directory_path")
-        .map_err(|e| e.to_string())?;
+    let share_directory = get_picked_directory(&db)?;
     drop(db);
-    let pictures_dir = home_pictures_dir()?;
-    let share_directory = resolve_share_directory(&pictures_dir, share_setting.as_deref());
 
     // ディレクトリが存在しない場合は作成
     if !share_directory.exists() {
@@ -141,7 +137,7 @@ pub async fn pick_image(
     // ある（新規環境の既定ピック先など）。実在が保証された今このタイミングで改めて許可し、
     // 「ピック済み」タブのサムネイル/動画表示が次回起動を待たずに動くようにする
     // （レビュー #73 must）。
-    match resolve_and_sanitize_share_directory(&pictures_dir, share_setting.as_deref()) {
+    match sanitize_allow_dir(&share_directory) {
         Some(safe_dir) => {
             if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
                 eprintln!(
@@ -158,27 +154,8 @@ pub async fn pick_image(
         }
     }
 
-    // ファイル名を取得
-    let file_name = source_path.file_name().ok_or("Failed to get file name")?;
-
-    let dest_path = share_directory.join(file_name);
-
-    // 重複チェック：同名ファイルがある場合はタイムスタンプを付与
-    let final_dest_path = if dest_path.exists() {
-        let stem = dest_path.file_stem().unwrap_or_default().to_string_lossy();
-        let ext = dest_path.extension().unwrap_or_default().to_string_lossy();
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        share_directory.join(format!("{stem}_{timestamp}.{ext}"))
-    } else {
-        dest_path
-    };
-
-    // ファイルをコピー
-    fs::copy(source_path, &final_dest_path).map_err(|e| format!("Failed to copy file: {e}"))?;
-
+    // 同名ファイルがあれば連番（name_1.ext）を付け、決して上書きしない
+    let final_dest_path = crate::pick::copy_with_unique_name(source_path, &share_directory)?;
     Ok(final_dest_path.to_string_lossy().to_string())
 }
 
@@ -455,6 +432,42 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
     Ok(filtered)
 }
 
+/// `get_thumbnail` の結果（#67）。動画は静止画サムネイルを作らず、フロントがアイコンで示す。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ThumbnailResult {
+    /// 静止画。`path` は長辺256pxのJPEG（キャッシュ配下＝asset scope 許可済み）。
+    Image { path: String },
+    /// 動画。サムネイルは無い。
+    Video,
+}
+
+/// 設定画面（履歴・ピック済み）用の小さなサムネイルを返す（#67）。
+/// 原本（5000万画素級）を `<img>` に直接読ませる代わりに、バックエンドで縮小して
+/// キャッシュする。デコードは重いのでブロッキングスレッドで実行する。
+#[tauri::command]
+pub async fn get_thumbnail(
+    image_path: String,
+    state: State<'_, AppState>,
+) -> Result<ThumbnailResult, String> {
+    let source = PathBuf::from(&image_path);
+    if crate::scanner::is_video_path(&source) {
+        return Ok(ThumbnailResult::Video);
+    }
+    if !crate::scanner::is_image_path(&source) {
+        return Err("Not a supported image file".to_string());
+    }
+    let cache_dir = state.cache_dir.clone();
+    let thumb = tauri::async_runtime::spawn_blocking(move || {
+        crate::thumbnail::ensure_thumbnail(&source, &cache_dir)
+    })
+    .await
+    .map_err(|e| format!("Thumbnail task failed: {e}"))??;
+    Ok(ThumbnailResult::Image {
+        path: thumb.to_string_lossy().to_string(),
+    })
+}
+
 /// ピック済みフォルダのパスを取得するヘルパー
 pub(crate) fn get_picked_directory(db: &crate::database::Database) -> Result<PathBuf, String> {
     let share_setting = db
@@ -477,29 +490,8 @@ pub async fn get_picked_images(state: State<'_, AppState>) -> Result<Vec<String>
         return Ok(Vec::new());
     }
 
-    let image_extensions = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif"];
-
-    let mut images: Vec<String> = Vec::new();
-    let entries =
-        fs::read_dir(&picked_dir).map_err(|e| format!("Failed to read directory: {e}"))?;
-
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("Failed to read entry: {e}"))?;
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if image_extensions
-                    .iter()
-                    .any(|e| ext.to_ascii_lowercase() == *e)
-                {
-                    images.push(path.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-
-    images.sort();
-    Ok(images)
+    // 拡張子の判定はスキャナと同じ定義（画像＋動画）を使う
+    crate::pick::list_picked_media(&picked_dir)
 }
 
 /// ピック済み画像を削除
@@ -512,21 +504,9 @@ pub async fn delete_picked_image(
     let picked_dir = get_picked_directory(&db)?;
     drop(db);
 
-    let path = Path::new(&image_path);
-
-    // 安全チェック: sss-picked フォルダ内のファイルのみ削除可能
-    let canonical_path = path
-        .canonicalize()
-        .map_err(|e| format!("Failed to resolve path: {e}"))?;
-    let canonical_dir = picked_dir
-        .canonicalize()
-        .map_err(|e| format!("Failed to resolve picked directory: {e}"))?;
-
-    if !canonical_path.starts_with(&canonical_dir) {
-        return Err("Cannot delete files outside the picked directory".to_string());
-    }
-
-    fs::remove_file(path).map_err(|e| format!("Failed to delete file: {e}"))?;
+    // 安全チェック: ピックフォルダ内の通常のメディアファイルのみ削除可能
+    let target = crate::pick::validate_picked_delete_target(Path::new(&image_path), &picked_dir)?;
+    fs::remove_file(&target).map_err(|e| format!("Failed to delete file: {e}"))?;
     Ok(())
 }
 

@@ -64,16 +64,6 @@ body {
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* uPlot dark theme adjustments */
-.u-legend {
-  color: rgba(255, 255, 255, 0.3) !important;
-  font-size: 11px !important;
-}
-
-.u-value {
-  color: rgba(255, 255, 255, 0.5) !important;
-}
-
 /* Focus-visible ring (#66 a11y: 旧 rgba(255,255,255,0.15) は黒背景に対して
    コントラスト比 ~1.5:1 しかなく、WCAG 2.4.11 (非テキストコントラスト、3:1)を
    満たさなかった。0.6まで明るくし、キーボード操作時だけ表示する

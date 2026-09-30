@@ -1,12 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type {
+  DisplayStats,
+  ThumbnailResult,
   ExcludeOutcome,
   IgnoreRule,
   ImageNavigationResult,
   RecentImage,
   ScanProgress,
-  Stats,
 } from '../types';
 import { t } from './i18n';
 
@@ -90,13 +91,6 @@ export async function openInExplorer(imagePath: string): Promise<void> {
 }
 
 /**
- * 統計情報を取得
- */
-export async function getStats(): Promise<Stats> {
-  return await invoke<Stats>('get_stats');
-}
-
-/**
  * プレイリスト情報を取得 (position, total, canGoBack)
  */
 export async function getPlaylistInfo(): Promise<[number, number, boolean] | null> {
@@ -160,10 +154,11 @@ export async function excludeImage(
 }
 
 /**
- * 統計データを取得（グラフ用）
+ * 表示回数の分布を取得（グラフ用、#67）。全件の一覧ではなく、バックエンドで
+ * 集計した要約とヒストグラムだけが返る。
  */
-export async function getDisplayStats(): Promise<Array<[string, number]>> {
-  return await invoke<Array<[string, number]>>('get_display_stats');
+export async function getDisplayStats(): Promise<DisplayStats> {
+  return await invoke<DisplayStats>('get_display_stats');
 }
 
 /**
@@ -212,6 +207,14 @@ export async function getRecentImages(): Promise<RecentImage[]> {
  */
 export async function getPickedImages(): Promise<string[]> {
   return await invoke<string[]>('get_picked_images');
+}
+
+/**
+ * 設定画面用の小さなサムネイルを取得する（#67）。
+ * 静止画はバックエンドが縮小してキャッシュした JPEG のパスを返す。動画は `{ kind: 'video' }`。
+ */
+export async function getThumbnail(imagePath: string): Promise<ThumbnailResult> {
+  return await invoke<ThumbnailResult>('get_thumbnail', { imagePath });
 }
 
 /**

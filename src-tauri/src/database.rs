@@ -970,12 +970,12 @@ impl Database {
 
     /// `directory` 配下の全画像の表示回数を取得（グラフ用、パスでソート）。
     ///
-    /// #63 PR#77レビューS2: `get_stats`の`total_images`と母数を揃えるためディレクトリ
-    /// 配下に限定する（以前はDB全件を返しており、GraphSectionに他ディレクトリの画像
-    /// まで混ざって表示されうる状態だった）。`commands::stats::get_stats`はこの結果を
-    /// さらにプレイリストのメンバーシップで絞り込んで`displayed_images`を数える
-    /// （PR#77レビュー2巡目 nit: ディレクトリ配下限定だけでは、表示後に除外ルールが
-    /// 付いたファイルの`display_count`がまだ数に残ってしまうため）。
+    /// #63 PR#77レビューS2: プレイリストの母数と揃えるためディレクトリ配下に限定する
+    /// （以前はDB全件を返しており、GraphSectionに他ディレクトリの画像まで混ざって
+    /// 表示されうる状態だった）。`commands::stats::get_display_stats`はこの結果を
+    /// さらにプレイリストのメンバーシップで絞り込む（PR#77レビュー2巡目 nit:
+    /// ディレクトリ配下限定だけでは、表示後に除外ルールが付いたファイルの
+    /// `display_count`がまだ数に残ってしまうため）。
     pub fn get_all_display_counts_under(&self, directory: &str) -> Result<Vec<(String, i32)>> {
         let dir_trimmed = directory.trim_end_matches(['/', '\\']);
         let (lower, upper) = directory_scope_bounds(dir_trimmed, std::path::MAIN_SEPARATOR);
@@ -1940,8 +1940,8 @@ mod tests {
     /// （指定ディレクトリ配下のimage_stats全件）から`display_count>0`だけを数えた件数は
     /// 独立に数える。#63 PR#77レビューS2でディレクトリ限定に変更したので、スコープ外
     /// (`/other`)の表示済み画像が数に混ざらないことも合わせて確認する
-    /// （`commands::stats::get_stats`は、この結果をさらにプレイリストのメンバーシップで
-    /// 絞り込む。そちらは`tests/get_stats_membership.rs`で検証する）。
+    /// （`commands::stats::get_display_stats`は、この結果をさらにプレイリストの
+    /// メンバーシップで絞り込む。そちらは`tests/display_stats_membership.rs`で検証する）。
     #[test]
     fn total_and_displayed_image_counts_are_independent() {
         let path = temp_db_path("image_counts");
