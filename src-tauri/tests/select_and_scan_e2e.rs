@@ -326,6 +326,29 @@ fn dialog_guard_rejects_when_scanning_or_dialog_already_open() {
     assert!(acquire_dialog_guard(&scan, &dialog2, false).is_ok());
 }
 
+/// ダイアログを閉じてガードを drop した後、スキャン実行中でもピック先の選択が
+/// `dialogInProgress` にならない。ダイアログ表示中は二重に弾かれ、スキャンを伴う選択は
+/// スキャン中なら（ダイアログを出す前に）`scanInProgress` になる。
+#[test]
+fn dialog_guard_is_released_after_dialog_closes_even_while_scanning() {
+    let scan = AtomicBool::new(false);
+    let dialog = AtomicBool::new(false);
+
+    let guard = acquire_dialog_guard(&scan, &dialog, true).unwrap();
+    assert_eq!(
+        acquire_dialog_guard(&scan, &dialog, false).err(),
+        Some("dialogInProgress".to_string())
+    );
+    drop(guard);
+    scan.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    assert!(acquire_dialog_guard(&scan, &dialog, false).is_ok());
+    assert_eq!(
+        acquire_dialog_guard(&scan, &dialog, true).err(),
+        Some("scanInProgress".to_string())
+    );
+}
+
 #[test]
 fn select_share_directory_saves_acceptable_choice_and_cancel_is_none() {
     let env = env("share");

@@ -86,12 +86,14 @@ pub async fn select_share_directory(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    let _dialog_guard = crate::commands::scan::acquire_dialog_guard(
-        &state.scan_in_progress,
-        &crate::commands::scan::DIALOG_IN_PROGRESS,
-        false,
-    )?;
-    let picked = pick_directory_blocking(app.clone(), title).await?;
+    let picked = {
+        let _dialog_guard = crate::commands::scan::acquire_dialog_guard(
+            &state.scan_in_progress,
+            &crate::commands::scan::DIALOG_IN_PROGRESS,
+            false,
+        )?;
+        pick_directory_blocking(app.clone(), title).await?
+    };
     let Some(saved) = perform_select_share_directory(
         &PrePicked(picked),
         None,

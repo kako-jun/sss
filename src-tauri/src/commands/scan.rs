@@ -684,7 +684,10 @@ where
     Ok((progress, safe_dir))
 }
 
-/// ダイアログ表示中フラグ（プロセス全体で1つ）。WebView が `select_and_scan` /
+/// ダイアログ表示中フラグ（プロセス全体で1つ）。ダイアログはOS全体で同時に1つしか意味を
+/// 持たないためプロセス static とした（`AppState` のフィールドにすると、`AppState` を直接
+/// 構築する既存の結合テスト 8 ファイルすべてに波及するため見送り）。テストは
+/// `acquire_dialog_guard` に自前のフラグを渡すので、この static には干渉しない。WebView が `select_and_scan` /
 /// `select_share_directory` を連打してもダイアログが重ねて出ないようにする（#93レビュー）。
 pub static DIALOG_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
@@ -803,8 +806,14 @@ pub async fn select_and_scan(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Option<ScanProgress>, String> {
-    let _dialog_guard = acquire_dialog_guard(&state.scan_in_progress, &DIALOG_IN_PROGRESS, true)?;
-    let picked = pick_directory_blocking(app.clone(), title).await?;
+    // ダイアログ表示中だけガードを保持し、閉じた直後（スキャン開始前）に drop する。
+    // スキャン中の二重実行は `scan_in_progress`/`ScanGuard` が弾くので、ここで保持し続けると
+    // スキャン中のピック先選択が「ダイアログが既に開いています」と誤って出てしまう。
+    let picked = {
+        let _dialog_guard =
+            acquire_dialog_guard(&state.scan_in_progress, &DIALOG_IN_PROGRESS, true)?;
+        pick_directory_blocking(app.clone(), title).await?
+    };
     match perform_select_and_scan(
         &PrePicked(picked),
         None,

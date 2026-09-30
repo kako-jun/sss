@@ -45,6 +45,15 @@ describe('backend error code -> message resolution (#80)', () => {
       expect(resolveScanErrorMessage('someFutureCode', '/x')).toBe('someFutureCode');
     });
 
+    it('keeps a Windows drive path (containing ":" and backslashes) intact as the detail (#93)', () => {
+      expect(resolveScanErrorMessage('directoryNotFound:C:\\Users\\me\\pics', '/previous')).toBe(
+        '指定したフォルダが見つかりません: C:\\Users\\me\\pics',
+      );
+      expect(resolveScanErrorMessage('directoryUnsafe:D:\\', '/previous')).toBe(
+        'セキュリティ上の理由でこのフォルダは使用できません: D:\\',
+      );
+    });
+
     it('uses the ":detail" path (the rejected folder) in preference to the caller path (#93)', () => {
       expect(resolveScanErrorMessage('directoryNotFound:/chosen/new', '/previous')).toBe(
         '指定したフォルダが見つかりません: /chosen/new',
