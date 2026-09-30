@@ -78,6 +78,8 @@ export const ja = {
   errorPathNotManaged: 'このファイルはスライドショーの管理外のためコピーできません',
   errorShareDirectoryInvalid:
     'このフォルダはピック先に指定できません（ルート・ホームフォルダ・相対パスなどは不可）',
+  errorShareDirectoryLoadFailed: 'ピック先を読み込めませんでした',
+  errorShareDirectoryRefreshFailed: 'ピック先は保存しましたが、表示の更新に失敗しました',
   errorShareDirectorySaveFailed: 'ピック先の保存に失敗しました',
   errorNotMediaFile: '画像・動画ファイルではないためコピーできません',
   excludeFailed: 'エラー: 除外失敗',

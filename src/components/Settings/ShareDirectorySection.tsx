@@ -18,33 +18,46 @@ export function ShareDirectorySection() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        // デフォルトパスを取得
-        const defaultDirectory = await getDefaultShareDirectory();
-        setDefaultPath(defaultDirectory);
-
+        // デフォルトパス（入力欄のプレースホルダ）。失敗しても解決済みパスの表示は続ける
+        setDefaultPath(await getDefaultShareDirectory());
+      } catch (err) {
+        console.error('Failed to load default share directory:', err);
+      }
+      try {
         // 実際に使われる解決済みパスを表示する（保存値が不正なら既定にフォールバック済み）
         setShareDirectoryPath(await getShareDirectory());
       } catch (err) {
         console.error('Failed to load share directory setting:', err);
+        // 入力欄が空のまま黙らないよう、失敗を表示する
+        setError(t('errorShareDirectoryLoadFailed'));
       }
     };
 
     loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSelectDirectory = async () => {
+    let directory: string | null;
     try {
-      const directory = await selectDirectory();
-      if (directory) {
-        // #87: バックエンドが不正なピック先（ルート・ホーム等）を拒否することがあるため、
-        // 保存に成功してから表示を更新する。
-        await saveSetting('share_directory_path', directory);
-        setShareDirectoryPath(await getShareDirectory());
-        setError(null);
-      }
+      directory = await selectDirectory();
+      if (!directory) return;
+      // #87: バックエンドが不正なピック先（ルート・ホーム等）を拒否することがあるため、
+      // 保存に成功してから表示を更新する。
+      await saveSetting('share_directory_path', directory);
     } catch (err) {
       console.error('Failed to select share directory:', err);
       setError(resolveShareDirectoryErrorMessage(String(err)));
+      return;
+    }
+    // 保存は成功している。表示の再取得に失敗しても保存失敗とは別扱いにする
+    // （表示は据え置き、保存済みである旨を出す）。
+    try {
+      setShareDirectoryPath(await getShareDirectory());
+      setError(null);
+    } catch (err) {
+      console.error('Failed to refresh share directory:', err);
+      setError(t('errorShareDirectoryRefreshFailed'));
     }
   };
 
