@@ -88,6 +88,7 @@ export const en = {
   errorImageFileNotFound: 'File not found',
   openInExplorerFailed: "Error: couldn't open the file manager",
   excludeFailed: 'Error: exclude failed',
+  errorExcludeNotManaged: "This file isn't managed by the slideshow, so it can't be excluded",
   // #78: brief toast right after exclude/pick, with an Undo button for a few seconds
   undoButton: 'Undo',
   undoExcludeDone: 'Exclusion undone',

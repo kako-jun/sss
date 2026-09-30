@@ -82,6 +82,20 @@ export function resolveOpenInExplorerErrorMessage(raw: string): string {
   }
 }
 
+/**
+ * `exclude_image` が返すエラーコードを表示文言へ変換する（#92）。既知コード以外は
+ * 従来どおり汎用の除外失敗文言にする。
+ */
+export function resolveExcludeErrorMessage(raw: string): string {
+  const { code } = splitBackendError(raw);
+  switch (code) {
+    case 'pathNotManaged':
+      return t('errorExcludeNotManaged');
+    default:
+      return t('excludeFailed');
+  }
+}
+
 /** `save_setting`（`share_directory_path`）が返すエラーコードを表示文言へ変換する（#87）。 */
 export function resolveShareDirectoryErrorMessage(raw: string): string {
   const { code } = splitBackendError(raw);

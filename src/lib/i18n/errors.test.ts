@@ -5,6 +5,7 @@ import {
   resolveScanErrorMessage,
   resolveAddPatternErrorMessage,
   resolveResetAllDataErrorMessage,
+  resolveExcludeErrorMessage,
   resolveOpenInExplorerErrorMessage,
   resolvePickErrorMessage,
   resolveShareDirectoryErrorMessage,
@@ -61,6 +62,15 @@ describe('backend error code -> message resolution (#80)', () => {
       expect(resolveShareDirectoryErrorMessage('Failed to save setting: x')).toBe(
         'ピック先の保存に失敗しました',
       );
+    });
+  });
+
+  describe('resolveExcludeErrorMessage', () => {
+    it('translates pathNotManaged and falls back to the generic failure', () => {
+      expect(resolveExcludeErrorMessage('pathNotManaged')).toBe(
+        'このファイルはスライドショーの管理外のため除外できません',
+      );
+      expect(resolveExcludeErrorMessage('exifReadFailed')).toBe('エラー: 除外失敗');
     });
   });
 

@@ -270,6 +270,9 @@ fn persist_current_playlist(state: &State<AppState>, playlist: &crate::playlist:
 
 /// 除外機能：画像をDBのignore_rulesに追加
 ///
+/// #92: 対象は DB 登録済み（`file_metadata`/`image_stats`）のパスのみ。管理外は
+/// `pathNotManaged`（存在確認・EXIF 日付のオラクル遮断）。
+///
 /// #80: 戻り値は完成済みの日本語文字列でなく `ExcludeOutcome`（構造化データ）。
 /// エラーもユーザー向け文言でなくエラーコードで返す（呼び出し元のOverlayUIは
 /// 現状これらのエラーメッセージ自体を表示せずconsole.errorのみに流している
@@ -281,6 +284,18 @@ pub async fn exclude_image(
     state: State<'_, AppState>,
 ) -> Result<ExcludeOutcome, String> {
     let path = Path::new(&image_path);
+
+    // #92: 除外できるのは DB 登録済み（プレイリスト構成員・表示履歴）のパスだけ。
+    // 管理外の任意パスは、存在確認・EXIF 撮影日の読み取り・除外ルール追加のいずれよりも
+    // 前に `pathNotManaged` で拒否する（存在有無や任意ファイルの撮影日が漏れない）。
+    let known = {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.is_known_media_path(&image_path).unwrap_or_else(|e| {
+            eprintln!("exclude_image: is_known_media_path failed (treated as unmanaged): {e}");
+            false
+        })
+    };
+    crate::pick::ensure_registered_media_path(path, known)?;
 
     if !path.exists() {
         return Err("imageFileNotFound".to_string());
