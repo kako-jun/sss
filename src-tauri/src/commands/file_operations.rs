@@ -57,23 +57,31 @@ pub async fn get_share_directory(state: State<'_, AppState>) -> Result<String, S
 
 /// ファイラで画像を選択状態で開く（OS別）
 #[tauri::command]
-pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
-    // チルダ（~）を展開
-    let expanded_path = if image_path.starts_with("~/") || image_path == "~" {
-        let home = dirs::home_dir().ok_or("Failed to get home directory")?;
-        if image_path == "~" {
-            home
-        } else {
-            home.join(&image_path[2..])
-        }
-    } else {
-        PathBuf::from(&image_path)
+pub async fn open_in_explorer(
+    image_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // #92: 任意パスの存在確認・ファイラ表示をさせない（管理下＝DB 登録 or ピックフォルダ内のみ）。
+    // UI は表示中の画像の絶対パスを渡すので `~` 展開は不要（管理外扱いになる）。
+    let (share_directory, known) = {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            get_picked_directory(&db)?,
+            db.is_known_media_path(&image_path).unwrap_or_else(|e| {
+                eprintln!(
+                    "open_in_explorer: is_known_media_path failed (treated as unmanaged): {e}"
+                );
+                false
+            }),
+        )
     };
+    let managed_path =
+        crate::pick::ensure_managed_media_path(Path::new(&image_path), &share_directory, known)?;
+    let path = managed_path.as_path();
 
-    let path = expanded_path.as_path();
-
+    // 管理下と確認できた後でのみ存在を確認する（管理外は上で拒否済みで、存在有無は漏れない）。
     if !path.exists() {
-        return Err(format!("File does not exist: {}", path.display()));
+        return Err("imageFileNotFound".to_string());
     }
 
     let image_path = path.to_str().ok_or("Invalid path")?.to_string();

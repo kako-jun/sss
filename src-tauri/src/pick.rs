@@ -129,7 +129,26 @@ pub fn validate_picked_delete_target(
     Ok(image_path.to_path_buf())
 }
 
-/// `get_thumbnail`/`pick_image` が読んでよいパスかを検証し、**以降の処理に使うパス**を返す（#87）。
+/// DB 登録パス（プレイリスト構成員・表示履歴）だけを許可する検証（#92）。
+/// `exclude_image` のようにピックフォルダ内のファイルまでは対象にしない操作で使う。
+/// 登録値と一致しない（`known_in_db == false`）なら `pathNotManaged`。スキャナは symlink
+/// ファイルを登録しないので、登録後に symlink へ差し替えられたパスも `pathNotManaged`。
+/// 存在確認はしない（管理外のパスに対してディスクへ触れない＝存在有無のオラクルにならない）。
+pub fn ensure_registered_media_path(path: &Path, known_in_db: bool) -> Result<PathBuf, String> {
+    if !known_in_db {
+        return Err("pathNotManaged".to_string());
+    }
+    let is_symlink = fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    if is_symlink {
+        Err("pathNotManaged".to_string())
+    } else {
+        Ok(path.to_path_buf())
+    }
+}
+
+/// `get_thumbnail`/`pick_image`/`open_in_explorer` が扱ってよいパスかを検証し、**以降の処理に使うパス**を返す（#87）。
 ///
 /// 許可するのは次のどちらかだけ。
 /// - `known_in_db`: スキャン済みのプレイリスト構成員・表示履歴として DB に登録済みのパス
@@ -149,14 +168,7 @@ pub fn ensure_managed_media_path(
 ) -> Result<PathBuf, String> {
     let not_managed = || "pathNotManaged".to_string();
     if known_in_db {
-        let is_symlink = fs::symlink_metadata(path)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false);
-        return if is_symlink {
-            Err(not_managed())
-        } else {
-            Ok(path.to_path_buf())
-        };
+        return ensure_registered_media_path(path, true);
     }
     let canonical_path = path.canonicalize().map_err(|_| not_managed())?;
     let canonical_dir = picked_dir.canonicalize().map_err(|_| not_managed())?;

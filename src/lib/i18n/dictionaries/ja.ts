@@ -82,6 +82,9 @@ export const ja = {
   errorShareDirectoryRefreshFailed: 'ピック先は保存しましたが、表示の更新に失敗しました',
   errorShareDirectorySaveFailed: 'ピック先の保存に失敗しました',
   errorNotMediaFile: '画像・動画ファイルではないためコピーできません',
+  errorOpenNotManaged: 'このファイルはスライドショーの管理外のためファイラで開けません',
+  errorImageFileNotFound: 'ファイルが見つかりません',
+  openInExplorerFailed: 'エラー: ファイラを開けませんでした',
   excludeFailed: 'エラー: 除外失敗',
   // #78: 除外/ピック直後の控えめなトースト（数秒だけ「取り消す」を出す）
   undoButton: '取り消す',

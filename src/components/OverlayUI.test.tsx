@@ -160,6 +160,19 @@ describe('OverlayUI pick rejection message (#87)', () => {
   });
 });
 
+describe('OverlayUI open-in-file-manager rejection message (#92)', () => {
+  it('shows a localized message when the backend rejects an unmanaged path', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    openInExplorer.mockRejectedValue('pathNotManaged');
+    render(<OverlayUI image={makeImage()} {...requiredProps} />);
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('ファイルマネージャーで開く'));
+    expect(
+      await screen.findByText('このファイルはスライドショーの管理外のためファイラで開けません'),
+    ).toBeTruthy();
+  });
+});
+
 describe('OverlayUI status message timers do not interfere with each other (#66 問題6)', () => {
   it('keeps a newly shown message visible for its own full duration even if triggered right after a previous one', async () => {
     // 完全に決定的な擬似タイマー（自動進行なし）で制御し、mockの解決に必要な

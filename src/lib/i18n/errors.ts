@@ -66,6 +66,22 @@ export function resolvePickErrorMessage(raw: string): string {
   }
 }
 
+/**
+ * `open_in_explorer` が返すエラーコードを表示文言へ変換する（#92）。既知コード以外は
+ * 汎用の失敗文言にする。
+ */
+export function resolveOpenInExplorerErrorMessage(raw: string): string {
+  const { code } = splitBackendError(raw);
+  switch (code) {
+    case 'pathNotManaged':
+      return t('errorOpenNotManaged');
+    case 'imageFileNotFound':
+      return t('errorImageFileNotFound');
+    default:
+      return t('openInExplorerFailed');
+  }
+}
+
 /** `save_setting`（`share_directory_path`）が返すエラーコードを表示文言へ変換する（#87）。 */
 export function resolveShareDirectoryErrorMessage(raw: string): string {
   const { code } = splitBackendError(raw);
