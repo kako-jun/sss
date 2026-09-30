@@ -74,6 +74,9 @@ export const en = {
   pickCopyDone: 'Copied to {path}',
   pickCopyFailed: "Couldn't copy the photo",
   errorPathNotManaged: "This file isn't managed by the slideshow, so it can't be copied",
+  errorShareDirectoryInvalid:
+    "This folder can't be used as the pick destination (not allowed: root, home folder, relative paths, etc.)",
+  errorShareDirectorySaveFailed: "Couldn't save the pick destination",
   errorNotMediaFile: "This isn't an image or video file, so it can't be copied",
   excludeFailed: 'Error: exclude failed',
   excludeAddedFile: 'Exclude rule added: {pattern}',

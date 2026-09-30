@@ -7,11 +7,13 @@ import {
   getDefaultShareDirectory,
 } from '../../lib/tauri';
 import { useT } from '../../lib/i18n';
+import { resolveShareDirectoryErrorMessage } from '../../lib/i18n/errors';
 
 export function ShareDirectorySection() {
   const t = useT();
   const [shareDirectoryPath, setShareDirectoryPath] = useState<string>('');
   const [defaultPath, setDefaultPath] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -35,11 +37,15 @@ export function ShareDirectorySection() {
     try {
       const directory = await selectDirectory();
       if (directory) {
-        setShareDirectoryPath(directory);
+        // #87: バックエンドが不正なピック先（ルート・ホーム等）を拒否することがあるため、
+        // 保存に成功してから表示を更新する。
         await saveSetting('share_directory_path', directory);
+        setShareDirectoryPath(directory);
+        setError(null);
       }
     } catch (err) {
       console.error('Failed to select share directory:', err);
+      setError(resolveShareDirectoryErrorMessage(String(err)));
     }
   };
 
@@ -64,6 +70,11 @@ export function ShareDirectorySection() {
           {t('selectButtonLabel')}
         </button>
       </div>
+      {error && (
+        <p role="alert" className="text-xs text-red-300/80">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

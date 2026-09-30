@@ -66,6 +66,17 @@ export function resolvePickErrorMessage(raw: string): string {
   }
 }
 
+/** `save_setting`（`share_directory_path`）が返すエラーコードを表示文言へ変換する（#87）。 */
+export function resolveShareDirectoryErrorMessage(raw: string): string {
+  const { code } = splitBackendError(raw);
+  switch (code) {
+    case 'shareDirectoryInvalid':
+      return t('errorShareDirectoryInvalid');
+    default:
+      return t('errorShareDirectorySaveFailed');
+  }
+}
+
 /** `reset_all_data`（`reset_core`）が返すエラーコードを表示文言へ変換する。 */
 export function resolveResetAllDataErrorMessage(raw: string): string {
   const { code } = splitBackendError(raw);

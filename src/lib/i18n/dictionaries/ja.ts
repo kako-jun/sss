@@ -74,6 +74,9 @@ export const ja = {
   pickCopyDone: 'コピー完了: {path}',
   pickCopyFailed: 'エラー: コピー失敗',
   errorPathNotManaged: 'このファイルはスライドショーの管理外のためコピーできません',
+  errorShareDirectoryInvalid:
+    'このフォルダはピック先に指定できません（ルート・ホームフォルダ・相対パスなどは不可）',
+  errorShareDirectorySaveFailed: 'ピック先の保存に失敗しました',
   errorNotMediaFile: '画像・動画ファイルではないためコピーできません',
   excludeFailed: 'エラー: 除外失敗',
   excludeAddedFile: '除外パターン追加: {pattern}',

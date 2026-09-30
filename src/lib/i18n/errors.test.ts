@@ -6,6 +6,7 @@ import {
   resolveAddPatternErrorMessage,
   resolveResetAllDataErrorMessage,
   resolvePickErrorMessage,
+  resolveShareDirectoryErrorMessage,
 } from './errors';
 
 /**
@@ -47,6 +48,17 @@ describe('backend error code -> message resolution (#80)', () => {
       // pathパラメータの補間だけが行われ、detail自体は捨てられる。
       expect(resolveScanErrorMessage('directoryNotFound:unexpected', '/missing')).toBe(
         '指定したフォルダが見つかりません: /missing',
+      );
+    });
+  });
+
+  describe('resolveShareDirectoryErrorMessage', () => {
+    it('translates shareDirectoryInvalid and falls back for unknown errors', () => {
+      expect(resolveShareDirectoryErrorMessage('shareDirectoryInvalid')).toContain(
+        'ピック先に指定できません',
+      );
+      expect(resolveShareDirectoryErrorMessage('Failed to save setting: x')).toBe(
+        'ピック先の保存に失敗しました',
       );
     });
   });
