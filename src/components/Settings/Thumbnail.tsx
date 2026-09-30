@@ -70,22 +70,35 @@ export function Thumbnail({ path }: { path: string }) {
     };
   }, [path, visible]);
 
+  // 動画・失敗はどちらもアイコン+ファイル名で示す（何のファイルか分かるように）。
+  const iconLabel =
+    state.status === 'video' ? (
+      <Film className="w-6 h-6" aria-hidden="true" />
+    ) : state.status === 'failed' ? (
+      <ImageOff className="w-6 h-6" aria-hidden="true" />
+    ) : null;
+
   return (
     <div
       ref={ref}
-      className="w-full aspect-square overflow-hidden rounded bg-black/40 flex items-center justify-center"
+      className="w-full aspect-square overflow-hidden rounded border border-white/5 bg-black/40 flex items-center justify-center"
     >
       {state.status === 'image' && (
-        <img src={state.src} alt="" className="w-full h-full object-cover" draggable={false} />
+        <img
+          src={state.src}
+          alt=""
+          className="w-full h-full object-cover"
+          draggable={false}
+          // キャッシュ削除・リセットでサムネイルファイルが消えている等で読めないとき、
+          // 壊れ画像アイコンを出さず失敗表示（アイコン+ファイル名）へ切り替える。
+          onError={() => setLoaded({ path, state: { status: 'failed' } })}
+        />
       )}
-      {state.status === 'video' && (
+      {iconLabel && (
         <div className="flex flex-col items-center gap-1 px-2 text-white/50 max-w-full">
-          <Film className="w-6 h-6" aria-hidden="true" />
+          {iconLabel}
           <span className="text-[10px] leading-tight truncate max-w-full">{baseName(path)}</span>
         </div>
-      )}
-      {state.status === 'failed' && (
-        <ImageOff className="w-5 h-5 text-white/50" aria-hidden="true" />
       )}
     </div>
   );

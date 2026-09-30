@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 
 const getThumbnail = vi.fn();
 
@@ -46,7 +46,32 @@ describe('Thumbnail (#67)', () => {
 
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(container.querySelector('img')).toBeNull();
+    // 動画と同様にファイル名も出す（何のファイルか分かるように）。
+    await waitFor(() => expect(screen.getByText('broken.jpg')).toBeTruthy());
     spy.mockRestore();
+  });
+
+  it('switches to the failed placeholder when the thumbnail file cannot be loaded', async () => {
+    getThumbnail.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/gone.jpg' });
+    const { container } = render(<Thumbnail path="/photos/gone.jpg" />);
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+
+    // キャッシュ削除・リセット後などでサムネイルファイルが読めない。
+    act(() => {
+      fireEvent.error(container.querySelector('img')!);
+    });
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('gone.jpg')).toBeTruthy();
+  });
+
+  it('draws the same thin border as the old grid tile around every state', async () => {
+    getThumbnail.mockResolvedValue({ kind: 'video' });
+    const { container } = render(<Thumbnail path="/v/clip.mp4" />);
+    await waitFor(() => expect(screen.getByText('clip.mp4')).toBeTruthy());
+    const box = container.firstElementChild!;
+    expect(box.classList.contains('border')).toBe(true);
+    expect(box.classList.contains('border-white/5')).toBe(true);
   });
 
   it('does not request a thumbnail until it scrolls into view', async () => {
