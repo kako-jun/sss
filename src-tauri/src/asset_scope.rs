@@ -225,38 +225,49 @@ fn normalize_unc_server_share(rest: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    // 判定は Unix 形式の絶対パス前提（Windows では `/home/..` が絶対パスにならない）。
-    #[cfg(unix)]
+    /// 実在する一時ディレクトリを「ホーム」に見立てる（canonicalize の OS 差
+    /// （macOS の /var → /private/var 等）を踏まないよう、実パスで組む）。
+    fn fake_home(tag: &str) -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("sss_share_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let home = base.join("home").join("kako");
+        std::fs::create_dir_all(&home).unwrap();
+        (base, home)
+    }
+
     #[test]
     fn share_directory_rejects_relative_root_home_and_ancestors() {
-        let home = Path::new("/home/kako");
+        let (base, home) = fake_home("rej");
+        let root = home.ancestors().last().unwrap().to_path_buf();
+        let escaping = home.join("..").join("x");
         for bad in [
-            "",
-            "relative/picked",
-            "/",
-            "/home",
-            "/home/kako",
-            "/home/kako/../x",
+            PathBuf::new(),
+            PathBuf::from("relative/picked"),
+            root,
+            base.join("home"),
+            home.clone(),
+            escaping,
         ] {
             assert!(
-                !is_acceptable_share_directory(Path::new(bad), Some(home)),
+                !is_acceptable_share_directory(&bad, Some(&home)),
                 "{bad:?} は拒否"
             );
         }
         // ホーム不明は安全側で拒否。
-        assert!(!is_acceptable_share_directory(Path::new("/mnt/x"), None));
+        assert!(!is_acceptable_share_directory(&base.join("mnt"), None));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
-    #[cfg(unix)]
     #[test]
     fn share_directory_accepts_nonexistent_paths_outside_the_home_chain() {
-        let home = Path::new("/home/kako");
-        for ok in ["/home/kako/Pictures/sss-picked", "/mnt/ssd/picked"] {
-            assert!(
-                is_acceptable_share_directory(Path::new(ok), Some(home)),
-                "{ok}"
-            );
+        let (base, home) = fake_home("ok");
+        for ok in [
+            home.join("Pictures").join("sss-picked"),
+            base.join("mnt").join("picked"),
+        ] {
+            assert!(is_acceptable_share_directory(&ok, Some(&home)), "{ok:?}");
         }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     use super::*;
