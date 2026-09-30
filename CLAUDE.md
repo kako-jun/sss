@@ -24,7 +24,7 @@
 - **スクリーンセーバー抑制**: keepawake v0.6 (クロスプラットフォーム対応)
 - **OSロケール取得**: sys-locale v0.3（`get_os_locale`用。`tauri-plugin-os`は使わない）
 - **プラグイン**（`lib.rs` の `run()` で登録。`Cargo.toml` の下限は JS 側 `@tauri-apps/plugin-*` の minor に揃える）:
-  - tauri-plugin-dialog 2.8 (フォルダ選択ダイアログ)
+  - tauri-plugin-dialog 2.8 (フォルダ選択ダイアログ。Rust 側 API のみ使用し、JS 側の権限は付与しない #93)
   - tauri-plugin-opener 2.6 (URLを開く。capability は `https://*` のみ許可)
   - tauri-plugin-process 2.4 (フロントの `exit(0)`。capability は `process:allow-exit` のみ)
   - tauri-plugin-single-instance 2.5 (単一インスタンス。JS側パッケージなし)
@@ -195,15 +195,15 @@
 
 `components/Settings/index.tsx` が7タブを持つ（`TabType`: `scan`/`options`/`exclude`/`pick`/`history`/`stats`/`info`）。開くとスライドショーは一時停止し、閉じると再開する。ようこそ画面のボタンは `scan` タブで開く。
 
-| タブ（ja / en）            | 内容（コンポーネント）                                                                                                                                                                                |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| フォルダ / Folder          | フォルダ選択ダイアログ・スキャン実行・スキャン結果（ファイル数・新規・削除・処理時間・読み取りエラー）（`ScanSection`）。スキャン後も設定画面は閉じない                                               |
-| オプション / Options       | 表示間隔5〜60秒（`IntervalSection`）・EXIF回転（`SettingsSection`、`apply_exif_rotation`）・動画の音声/最大再生時間（`VideoSection`）・ピック先（`ShareDirectorySection`）・言語（`LanguageSection`） |
-| 除外ルール / Exclude Rules | ルール一覧・解除・手動追加（`ExcludeRulesSection`）                                                                                                                                                   |
-| ピック / Picks             | ピック済みメディアのサムネイル一覧・削除（`PickSection`）                                                                                                                                             |
-| 履歴 / History             | 最近表示した100件のサムネイル一覧・除外（`HistorySection`）                                                                                                                                           |
-| 統計グラフ / Stats         | 表示回数ヒストグラム・表ビュー・表示回数リセット（`GraphSection`）                                                                                                                                    |
-| 情報 / Info                | バージョン・GitHubリンク・全データ初期化（`InfoSection`）                                                                                                                                             |
+| タブ（ja / en）            | 内容（コンポーネント）                                                                                                                                                                                           |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| フォルダ / Folder          | 「選択」（Rust側ダイアログで選んで即スキャン、#93）・「スキャン」（前回フォルダの再スキャン）・スキャン結果（ファイル数・新規・削除・処理時間・読み取りエラー）（`ScanSection`）。スキャン後も設定画面は閉じない |
+| オプション / Options       | 表示間隔5〜60秒（`IntervalSection`）・EXIF回転（`SettingsSection`、`apply_exif_rotation`）・動画の音声/最大再生時間（`VideoSection`）・ピック先（`ShareDirectorySection`）・言語（`LanguageSection`）            |
+| 除外ルール / Exclude Rules | ルール一覧・解除・手動追加（`ExcludeRulesSection`）                                                                                                                                                              |
+| ピック / Picks             | ピック済みメディアのサムネイル一覧・削除（`PickSection`）                                                                                                                                                        |
+| 履歴 / History             | 最近表示した100件のサムネイル一覧・除外（`HistorySection`）                                                                                                                                                      |
+| 統計グラフ / Stats         | 表示回数ヒストグラム・表ビュー・表示回数リセット（`GraphSection`）                                                                                                                                               |
+| 情報 / Info                | バージョン・GitHubリンク・全データ初期化（`InfoSection`）                                                                                                                                                        |
 
 保存キー（`app_settings`）: `last_directory_path` / `display_interval`（ms） / `apply_exif_rotation` / `share_directory_path` / `language` / `video_audio_enabled` / `video_max_duration_sec` / `sssignore_migrated`。
 
@@ -216,7 +216,7 @@
 - **バックエンドのユーザー向けエラー**: Rust側は文言でなくエラーコード（`Result<_, String>` のErrに `"directoryNotFound"` や `"invalidPattern:{detail}"` のようなコード文字列）を返す。フロントは `src/lib/i18n/errors.ts` の `resolveScanErrorMessage`/`resolveAddPatternErrorMessage`/`resolveResetAllDataErrorMessage`/`resolveStartupDirectoryError` でロケールに応じた文言へ変換する。ログ専用（`console.error`/`eprintln!`）の文言は英語のままでよく、コード化の対象外
 - **確定文言を状態に持たない**: `App.tsx`の`directoryError`、`ScanSection`の`error`、`ExcludeRulesSection`の`addError`、`InfoSection`の`resetMessage`は、変換済みの表示文言でなく生のエラーコード/辞書キーを状態として保持し、レンダーのたびに現在のロケールへ解決する。`setState`時点で文言に固定すると、表示中に言語を切り替えたときに旧言語のまま固まる（新旧混在）
 - **日付は言語によらず常に `YYYY-MM-DD`**（ISO、スラッシュ不可）。数値の桁区切りは `toLocaleString()` など言語に応じて変えてよい
-- **ウィンドウタイトル・`<html lang>`・ダイアログtitle**もロケールに追従する（`App.tsx`のロケール変更effect、`selectDirectory()`の`t('selectDirectoryDialogTitle')`）
+- **ウィンドウタイトル・`<html lang>`・ダイアログtitle**もロケールに追従する（`App.tsx`のロケール変更effect、`selectAndScan()`/`selectShareDirectory()`が渡す`t('selectDirectoryDialogTitle')`/`t('selectShareDirectoryDialogTitle')`）
 
 ## データベーススキーマ
 
@@ -287,7 +287,7 @@ CREATE TABLE playlist_position (
     エラーにはせず空リストへフォールバックする（#62レビューS3）。特に `history`
     だけが壊れていても `shuffled_list`/`next_index` は健全なまま読め、続きから
     再開できる。
-  - **#62レビューS1**: `scan_directory` のスキャン完了を待たずに表示を始められる
+  - **#62レビューS1**: `select_and_scan`/`rescan_last_directory` のスキャン完了を待たずに表示を始められる
     よう、独立した `restore_playlist` コマンドが起動直後にまずこの読み出しを行う
     （詳細は §3 コマンド一覧、`docs/architecture.md` §5③）。
   - **#62レビューS2**: ディレクトリの一致判定は生の文字列比較ではなく
@@ -423,13 +423,10 @@ CREATE TABLE app_settings (
 
 ### src-tauri/src/commands/
 
-- Tauriコマンドハンドラ（27個。`lib.rs` の `invoke_handler` 登録数と下の番号が一致する）
-  1. `scan_directory`: フォルダスキャン（リアルタイム進捗イベント付き）。プレイリストの
-     新規作成/差分更新に加え、メモリ上にプレイリストが無い場合（`restore_playlist` が
-     復元できなかった、またはまだ呼ばれていない）はDB保存済みのプレイリスト状態を
-     読み、対象ディレクトリが一致すれば復元して差分適用する
+- Tauriコマンドハンドラ（29個。`lib.rs` の `invoke_handler` 登録数と下の番号が一致する）
+  1. `select_and_scan`: **フォルダ選択ダイアログを Rust 側で開き**（`tauri-plugin-dialog` の Rust API。`commands::dialog::DirectoryPicker` trait 越しで、本番は `TauriDirectoryPicker`、テストは固定値スタブ）、選ばれたフォルダだけをスキャンする（#93）。JS から渡せるのはダイアログのタイトル文字列のみで、パス文字列を受け取る引数は無い。戻り値は `Some(ScanProgress)`／`None`（キャンセル。エラーにしない）。スキャン成功後に asset scope 許可と `last_directory_path` の保存を行う（本体は Tauri 非依存の `perform_select_and_scan`／共通部 `scan_chosen_directory`）。フォルダ不在は `directoryNotFound`、`sanitize_allow_dir` 拒否は `directoryUnsafe`、二重実行は `scanInProgress`（`ScanGuard`）。スキャン（リアルタイム進捗イベント付き）はプレイリストの新規作成/差分更新に加え、メモリ上にプレイリストが無い場合（`restore_playlist` が復元できなかった、またはまだ呼ばれていない）はDB保存済みのプレイリスト状態を読み、対象ディレクトリが一致すれば復元して差分適用する
   2. `restore_playlist`: 起動直後、DB保存済みのプレイリスト状態を**スキャン完了を
-     待たずに**復元する（#62レビューS1）。フロントはまずこれを呼び、`true`（復元
+     待たずに**復元する（#62レビューS1）。**引数なし**で、対象は DB 保存済みの前回フォルダ（`last_directory_path`）のみ（#93）。フロントはまずこれを呼び、`true`（復元
      成功、または既に初期化済みで既存維持）ならスキャンをバックグラウンドへ回して
      即座に表示を始め、`false`（保存なし/ディレクトリ不一致/対象ディレクトリに今
      アクセスできない/スキャン中）ならスキャン完了を待つ従来のフローに
@@ -459,11 +456,11 @@ CREATE TABLE app_settings (
      `noHistory`（エラーではなく単純な境界）
   5. `open_in_explorer`: ファイルマネージャーで開く（OS別対応）。**対象は管理下パスのみ**（#92）: `pick_image`/`get_thumbnail` と同じ`pick::ensure_managed_media_path`（DB登録 or ピックフォルダ内）を通し、管理外は存在有無に関わらず同一の`pathNotManaged`で拒否（存在確認のオラクルにならない）。管理下だが実在しない場合のみ`imageFileNotFound`。`~`展開は廃止（UIは絶対パスを渡す）。Windowsではcanonicalの`\\?\`接頭辞を除去してからファイラへ渡す（`pick::strip_verbatim_prefix`）。検証部は`pick::resolve_open_target`に切り出し単体テスト済み。**`exclude_image`とは非対称**（こちらはピックフォルダ内の実在ファイルも開ける）。フロントは`resolveOpenInExplorerErrorMessage`でja/en表示
   6. `get_playlist_info`: プレイリスト情報取得（位置、総数、戻れるか）
-  7. `get_last_directory_path`: 最後にスキャンしたフォルダパス取得
+  7. `get_last_directory_path`: 最後にスキャンしたフォルダパス取得（読み取り専用。設定画面の表示用）
   8. `exit_app`: アプリケーション終了
-  9. `save_setting`: 設定を保存
+  9. `save_setting`: 設定を保存。**書き込めるキーは許可リスト（`WRITABLE_SETTING_KEYS`: `display_interval`/`language`/`apply_exif_rotation`/`video_audio_enabled`/`video_max_duration_sec`）のみ**で、それ以外は`settingKeyNotWritable`（#93。`last_directory_path`・`share_directory_path`・`sssignore_migrated` は WebView から書き換えられない）
   10. `get_setting`: 設定を取得
-  11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67。**元パスは管理下＋メディア拡張子のみ**: DB（`file_metadata`/`image_stats`）に文字列一致で登録済み、またはピックフォルダ内の実体ファイル（`canonicalize`で`..`・フォルダ外symlinkを拒否）。管理外は`pathNotManaged`、非メディアは`notMediaFile`のエラーコードで拒否。検証は`pick::ensure_managed_media_path`（canonicalパスを返し後続処理はそれを使う。DB登録パスでもsymlinkは拒否）。**基準のピック先も検証**: `get_picked_directory`は`resolve_validated_share_directory`で不正な保存値（相対・`..`・ルート・ホーム/その祖先）を既定へフォールバックし、`save_setting`は`share_directory_path`を保存前に`is_acceptable_share_directory`で検証（`shareDirectoryInvalid`）。**拒否するのは**ルート（Windowsはホームと同一ドライブのみ。`D:\`・UNC共有ルートは可）・ホーム自身とその祖先・システム領域（`/etc` `/usr` `/System` `/Library` 等、Windowsは`SystemRoot`/`ProgramFiles`）・ホーム配下の`.ssh/.gnupg/.aws/.kube`・Linuxの`/root`・macOSの`~/Library/Keychains`・相対/`..`（`/opt`と`/run`は外付け/自動マウント`/run/media`を壊すため対象外）。**それ以外の任意ディレクトリは保存できる**（管理下扱いは画像・動画拡張子のファイルのみ。allowlistは外付け/NASを壊すため採らない）。比較は実パス化し、macOS/Windowsは大文字小文字無視。設定画面は`get_share_directory`（解決済みパス）を表示。**脅威モデル**: 防ぐのは素朴な任意パス指定。WebViewが`scan_directory`/設定を正規手順で操作するケースは防がない（フォルダ選択はJS側ダイアログ前提の既存設計、#87）
+  11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67。**元パスは管理下＋メディア拡張子のみ**: DB（`file_metadata`/`image_stats`）に文字列一致で登録済み、またはピックフォルダ内の実体ファイル（`canonicalize`で`..`・フォルダ外symlinkを拒否）。管理外は`pathNotManaged`、非メディアは`notMediaFile`のエラーコードで拒否。検証は`pick::ensure_managed_media_path`（canonicalパスを返し後続処理はそれを使う。DB登録パスでもsymlinkは拒否）。**基準のピック先も検証**: `get_picked_directory`は`resolve_validated_share_directory`で不正な保存値（相対・`..`・ルート・ホーム/その祖先）を既定へフォールバックし、ピック先の保存は`select_share_directory`（#93。ダイアログ選択→`is_acceptable_share_directory`で検証→保存、拒否は`shareDirectoryInvalid`）だけで、`save_setting`からは書けない。**拒否するのは**ルート（Windowsはホームと同一ドライブのみ。`D:\`・UNC共有ルートは可）・ホーム自身とその祖先・システム領域（`/etc` `/usr` `/System` `/Library` 等、Windowsは`SystemRoot`/`ProgramFiles`）・ホーム配下の`.ssh/.gnupg/.aws/.kube`・Linuxの`/root`・macOSの`~/Library/Keychains`・相対/`..`（`/opt`と`/run`は外付け/自動マウント`/run/media`を壊すため対象外）。**それ以外の任意ディレクトリは保存できる**（管理下扱いは画像・動画拡張子のファイルのみ。allowlistは外付け/NASを壊すため採らない）。比較は実パス化し、macOS/Windowsは大文字小文字無視。設定画面は`get_share_directory`（解決済みパス）を表示。**脅威モデル**: 防ぐのは素朴な任意パス指定（#87）。さらに#93でフォルダ選択をRust側ダイアログに統合したため、WebViewがダイアログを経ずに任意フォルダを管理下にする経路は無い（残余は「セキュリティ設計」節）
   12. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。**対象はDB登録パス（`file_metadata`/`image_stats`）のみ**（#92）: `pick::ensure_registered_media_path`で管理外（登録済みでも symlink に差し替えられたパスを含む）を、存在確認・EXIF撮影日の読み取り・ルール追加より前に`pathNotManaged`で拒否する（任意ファイルの存在有無・撮影日が漏れず、`image_stats`行も作られない）。登録済みで実在しない場合のみ`imageFileNotFound`。フロントは`resolveExcludeErrorMessage`でja/en表示。**`open_in_explorer`とは非対称**（`open_in_explorer`はピックフォルダ内の実在ファイルも許可、`exclude_image`は除外ルール・`image_stats`行を作るため登録済みパスのみ）。同類の`undo_display_count`は直前に加算したパスとの一致を要求するため問題なし
       即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
@@ -491,7 +488,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
       ため撤回した。プロセス再起動なら asset scope・メモリ状態が新規プロセスとして
       確実に作り直される（詳細は`docs/architecture.md`§5⑤）。`tauri dev`実行時の
       挙動は未検証（`beforeDevCommand`ごとkillされ得る）で、実機確認は`tauri build`
-      （`--debug`可）の成果物で行う。`scan_directory`と同じ`ScanGuard`で
+      （`--debug`可）の成果物で行う。`select_and_scan`/`rescan_last_directory`と同じ`ScanGuard`で
       スキャンと排他する
   17. `get_ignore_patterns`: 除外ルール一覧を取得
   18. `remove_ignore_pattern`: 除外ルールを削除
@@ -504,6 +501,8 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
   25. `get_share_directory`: 実際に使われるピック先（検証済み解決。不正な保存値は既定へフォールバック済み）を返す。設定画面はこれを表示する（#87）
   26. `undo_display_count`: 表示回数の加算を取り消す（直前に加算したパスと一致する場合のみ。画像読み込み失敗時の`onError`用、#65）
   27. `get_os_locale`: OSのロケール（例: `ja-JP`）を返す（言語`auto`の決定用、#82）
+  28. `rescan_last_directory`: DB保存済みの前回フォルダ（過去にダイアログで選ばれたパス）を再スキャンする。**引数なし**（#93）。起動時の自動スキャン・設定画面の「スキャン」ボタンが使う。保存が無ければ`noLastDirectory`。検証・排他・進捗イベント・asset scope許可・保存は`select_and_scan`と共通（`scan_chosen_directory`）
+  29. `select_share_directory`: ピック先をダイアログ（Rust側）で選んで保存する（#93）。検証は`is_acceptable_share_directory`（拒否は`shareDirectoryInvalid`）、保存後にasset scopeへ許可。戻り値は保存パス／`None`（キャンセル）。本体は`perform_select_share_directory`
 
 ## Reactコンポーネント構成
 
@@ -551,7 +550,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 ### src/lib/
 
 - `tauri.ts`: Tauriコマンドのラッパー関数
-- `startup.ts`: 起動シーケンス（設定読込→`restore_playlist`→バックグラウンドスキャン）
+- `startup.ts`: 起動シーケンス（設定読込→`restore_playlist`→バックグラウンドの`rescan_last_directory`）。どちらも引数なし（#93）
 - `keyboardShortcuts.ts`・`photoGestures.ts`: ショートカット判定・写真上のクリック/ホイール判定（純関数）
 - `displayCountChart.ts`: 統計グラフの目盛り・範囲の純関数
 - `i18n/`: 辞書（ja/en）・`t()`・ロケール状態・バックエンドエラーコードの解決
@@ -575,11 +574,12 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 ## セキュリティ設計
 
-- **capability**（`src-tauri/capabilities/main.json`）: `core:default`・`dialog:allow-open`・`opener:allow-open-url`（`https://*` のみ）・`process:allow-exit` だけ。ファイル読み書きはすべて自前の Tauri コマンド経由で `plugin-fs` は使わない
+- **capability**（`src-tauri/capabilities/main.json`）: `core:default`・`opener:allow-open-url`（`https://*` のみ）・`process:allow-exit` だけ。ファイル読み書きはすべて自前の Tauri コマンド経由で `plugin-fs` は使わない。フォルダ選択ダイアログは Rust 側で開くため `dialog:*` 権限は付与しない（#93。JS から `plugin:dialog|*` は呼べない）
 - **CSP**（`tauri.conf.json`）: `default-src 'self'`。`img-src` は `'self' asset: https://asset.localhost https://tile.openstreetmap.org data:`、`media-src` は `'self' asset: https://asset.localhost`、`connect-src` は `'self' ipc: http://ipc.localhost https://ipc.localhost`
-- **asset scope**: `tauri.conf.json` の静的 scope は空。キャッシュ・ピック先・スキャン履歴のフォルダ・スキャン対象を、起動時と `scan_directory`/`restore_playlist`/`save_setting`/`pick_image` で `sanitize_allow_dir`（相対パス・存在しないパス・ルート等を拒否）を通してから動的に許可する
+- **asset scope**: `tauri.conf.json` の静的 scope は空。キャッシュ・ピック先・スキャン履歴のフォルダ・スキャン対象を、起動時と `select_and_scan`/`rescan_last_directory`/`restore_playlist`/`select_share_directory`/`pick_image` で `sanitize_allow_dir`（相対パス・存在しないパス・ルート等を拒否）を通してから動的に許可する
 - **管理下パス**（#87・#92）: `pick_image`・`get_thumbnail`（静止画）・`open_in_explorer`・`exclude_image`・`undo_exclude` は、DB登録済み（またはピックフォルダ内）のメディアファイルだけを対象にする。ピック先の設定値もルート・ホーム・システム領域などを拒否する
-- **脅威モデル**: 防ぐのは、WebView から素朴に任意パスを渡して任意ファイルを読む/コピーする/存在確認する操作。WebView が `scan_directory` や設定を正規の手順で操作して任意フォルダを管理下に入れるケースは防がない（フォルダ選択は JS 側ダイアログ前提の既存設計。`scan_directory` の再設計は #93 で別途検討中で、この残余リスクの追跡先）。詳細は「Rustモジュール構成 > commands」の 11・12 と CHANGELOG の #87・#92
+- **フォルダ選択はダイアログ経由のみ**（#93）: スキャン対象・ピック先は、Rust 側で開いたダイアログ（`select_and_scan`/`select_share_directory`）で選ばれたパスか、過去にそうして DB に保存されたパス（`rescan_last_directory`/`restore_playlist`。引数なし）だけになる。JS から任意のパス文字列を受け取ってスキャン・asset scope 許可・ピック先にする経路は無い（旧 `scan_directory(directoryPath)` は廃止）。`save_setting` は書き込み許可リスト方式で、DB 保存値（`last_directory_path`/`share_directory_path`）の WebView からの書き換えも塞ぐ。ダイアログ抽象（`DirectoryPicker`）はテスト・e2e の IPC モックで差し替える
+- **脅威モデル**: 防ぐのは、WebView（乗っ取られた場合を含む）から任意パスを渡して、任意ファイルを読む/コピーする/存在確認する、任意フォルダをスキャン・管理下にする・ピック先にする操作（#87・#92・#93）。**残余リスク**: (1) WebView が IPC で `select_and_scan`/`select_share_directory` を呼ぶこと自体は止められない（ネイティブダイアログが開く＝ユーザーに見える操作で、対象はユーザーがダイアログで選んだフォルダだけ。ダイアログを勝手に確定する手段は WebView に無いが、ユーザーを騙してダイアログで選ばせる社会工学は防げない）。(2) ダイアログで選ばれたフォルダは、スキャン対象ならホームドライブのルート以外（`sanitize_allow_dir`）、ピック先ならルート・ホーム・システム領域等以外（`is_acceptable_share_directory`）であればそのまま許可する（allowlist は外付け/NAS を壊すため採らない）。(3) `get_setting` は任意キーを読める（機密は保存していない）。(4) OS 権限で動く本体プロセスが侵害された場合は対象外。詳細は「Rustモジュール構成 > commands」の 1・11・12・28・29 と CHANGELOG の #87・#92・#93
 
 ## クロスプラットフォーム対応
 
