@@ -122,6 +122,14 @@ export const ja = {
   displayIntervalTitle: '表示間隔',
   displayIntervalDescription: '次の写真・動画に切り替わるまでの秒数（5〜60秒）',
   exifRotationLabel: 'EXIF回転情報に従って画像を自動回転',
+  videoSectionTitle: '動画',
+  videoAudioLabel: '動画の音声を再生する',
+  videoAudioDescription: 'オフのときは無音で再生します',
+  videoMaxDurationLabel: '動画の最大再生時間',
+  videoMaxDurationDescription: '長い動画は、この時間で次の写真・動画へ進みます',
+  videoMaxDurationUnlimited: '無制限',
+  videoMaxDurationSeconds: '{count}秒',
+  videoMaxDurationMinutes: '{count}分',
   pickDestinationTitle: 'ピック先フォルダ',
 
   // === 設定画面: 除外ルール ===
