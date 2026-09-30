@@ -127,3 +127,39 @@ describe('HistorySection thumbnails (#67)', () => {
     expect(getThumbnail).not.toHaveBeenCalled();
   });
 });
+
+// #92: 除外失敗はコンソールだけでなく、ローカライズしたメッセージを画面に出す。
+describe('HistorySection exclude failure message (#92)', () => {
+  const images: RecentImage[] = [
+    { path: '/photos/a.jpg', displayCount: 3, lastDisplayed: '2026-01-01T00:00:00Z' },
+  ];
+
+  it('shows the localized message when the backend rejects an unmanaged path and keeps the row', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    getRecentImages.mockResolvedValue(images);
+    excludeImage.mockRejectedValue('pathNotManaged');
+    render(<HistorySection />);
+
+    await waitFor(() => expect(screen.getByTitle('除外')).toBeTruthy());
+    fireEvent.click(screen.getByTitle('除外'));
+    fireEvent.click(screen.getByText('この写真を除外'));
+
+    expect(
+      await screen.findByText('このファイルはスライドショーの管理外のため除外できません'),
+    ).toBeTruthy();
+    expect(screen.getByTitle('除外')).toBeTruthy();
+  });
+
+  it('falls back to the generic failure message for other errors', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    getRecentImages.mockResolvedValue(images);
+    excludeImage.mockRejectedValue(new Error('boom'));
+    render(<HistorySection />);
+
+    await waitFor(() => expect(screen.getByTitle('除外')).toBeTruthy());
+    fireEvent.click(screen.getByTitle('除外'));
+    fireEvent.click(screen.getByText('この写真を除外'));
+
+    expect(await screen.findByText('エラー: 除外失敗')).toBeTruthy();
+  });
+});
