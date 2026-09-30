@@ -53,10 +53,13 @@ npm run tauri:build
 #### Mouse
 
 - **Move the mouse**: shows the overlay UI and pauses the slideshow automatically
-- **Click outside the overlay**: hides the UI immediately and resumes
+- **Click the photo**: toggles pause/resume (rapid clicks and double-clicks count as one; it doesn't interfere with the overlay buttons or the Settings dialog, #78)
+- **Wheel over the photo / horizontal trackpad swipe**: previous/next photo (one step per gesture, so inertial scrolling doesn't skip several photos, #78)
 - **Previous button**: goes back to the previous photo/video (from history, does not increase its display count)
 - **Next button**: advances immediately
 - **"…" menu** (inside the overlay): open the file manager, view your picks, or exclude by date/file/folder
+- **Undo**: for a few seconds right after an exclude or a pick, a small toast offers "Undo". It removes the exclude rule and puts the photo back into the unplayed part of the playlist, or deletes the file the pick just copied (no confirmation dialog, #78)
+- **Window state is remembered**: the window mode (fullscreen/windowed), position and size are saved on exit and restored on the next launch. If the saved display is gone, the window opens at the default position (#78)
 - **Top-right buttons** (exit, shortcuts, window mode, settings): shown while you're using the mouse, and fade out on idle just like the overlay
 
 #### Keyboard shortcuts
@@ -66,7 +69,7 @@ npm run tauri:build
 - **Right arrow**: go to the next photo/video
 - **Space**: toggle pause/resume
 - **F / F11**: toggle fullscreen and windowed mode (on macOS, `F11` is often bound to the OS's Mission Control and may never reach the app; use `F`, or `fn + F11`, instead)
-- **?**: show the keyboard shortcuts overlay
+- **?**: show the keyboard shortcuts overlay (it also lists the click/wheel gestures on the photo)
 
 ### Exclude rules
 

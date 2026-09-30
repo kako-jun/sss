@@ -25,6 +25,7 @@
   - tauri-plugin-dialog v2 (ダイアログ)
   - tauri-plugin-opener v2 (URLを開く)
   - tauri-plugin-single-instance v2 (単一インスタンス)
+  - tauri-plugin-window-state v2 (ウィンドウ状態の保存/復元、#78)
 
 ### フロントエンド
 
@@ -52,6 +53,7 @@
   - 画像: JPG, PNG, GIF, BMP, WEBP など
   - 動画: MP4, WebM, OGV, M4V（旧フォーマットはffmpeg同梱後に対応予定 #45）
 - **表示モード**: 4K最適化 (3840x2160)
+- **ウィンドウ状態の記憶**（#78）: `tauri-plugin-window-state` を `lib.rs` の `run()` で登録する（`StateFlags::all() & !VISIBLE`＝全画面/最大化・位置・サイズ・装飾を保存/復元し、表示状態は対象外）。保存はアプリ終了時（`RunEvent::Exit`、`exit_app`/`exit(0)`/ウィンドウを閉じる）にアプリ設定ディレクトリの `.window-state.json` へ、復元はウィンドウ生成時（フロント起動前）。保存位置がどの実在ディスプレイにも交差しなければ位置は復元せずOS既定位置に出る（ディスプレイが外れた場合）。初回起動（状態ファイル無し）は `tauri.conf.json` の全画面のまま。`taskkill /F` 等の強制終了では保存されない（サイネージ用途の運用メモ）。全データ初期化（`reset_all_data`）はこのファイルを消さない（DBの設定ではないため）。フロントは `getCurrentWindow().isFullscreen()` で実態へ同期する既存の仕組みでそのまま追従する
 - **EXIF回転**: `img`要素に`crossOrigin`/`image-orientation`を明示指定せず、WebView既定の動作（`image-orientation: from-image`＝EXIFに従い自動回転）に任せる。`apply_exif_rotation=false`なのにEXIFが回転を要求している画像だけ例外で、バックエンドが「格納画素のまま・EXIF無し」のキャッシュに差し替える（原本を返すとWebViewが勝手に回転し設定と食い違うため）。crossOriginを付けてCSSで明示切替する設計は、wryのWebKitGTK実装がassetスキームをCORS有効登録しておらずLinux本番で画像が出なくなるリスクがあるため撤去した
 - **画像処理**: 4K超/WebView非対応形式(TIFF等)/`apply_exif_rotation=false`時の回転要求のいずれかに該当する画像だけをキャッシュ対象にし、自動リサイズ(Lanczos3フィルタ)でキャッシュフォルダに保存。出力フォーマットはデコード後の実データのアルファ有無で決定(透過ならPNG、無ければJPEG品質90%明示)。アニメGIF/WebPは静止フレーム化を避けるため常にキャッシュ対象外
 - **画像ロード**: Tauriの`convertFileSrc()`でプロトコル経由読み込み（クロスプラットフォーム対応）
@@ -121,7 +123,9 @@
 
 3. **右: 副次操作**
    - **ピック**: ファイルをピック先フォルダにコピー
-   - **…メニュー**: 開く（ファイルマネージャー、Windows: explorer /select、Linux: nautilus/dolphin/xdg-open）・ピックを見る・除外（3粒度）
+
+- **取り消し**（#78）: 除外/ピックの直後は約6秒だけ、状態メッセージの代わりに「取り消す」ボタン付きのトーストを出す（idleフェードの外に置くので、マウスを動かさなくても押せる。確認ダイアログは増やさない）。直近の1件のみ。除外の取り消し=`undo_exclude`、ピックの取り消し=既存の `delete_picked_image`（コピーしたファイルだけを削除）
+- **…メニュー**: 開く（ファイルマネージャー、Windows: explorer /select、Linux: nautilus/dolphin/xdg-open）・ピックを見る・除外（3粒度）
 
 4. **UI操作**
    - マウス移動で表示、3秒アイドルで自動非表示（右上の常設ボタン・マウスカーソル自体も同時に非表示、#66）
@@ -140,6 +144,9 @@
   ある場合は無効化し、その要素自身のクリック相当の挙動と二重に作用しないようにする）
 - **F / F11**: フルスクリーンとウィンドウモードを切り替える（右上のボタンと同じ処理を
   呼ぶ、#66）
+- **写真クリック**（#78）: 一時停止/再開のトグル（`Space` と同じ状態を切り替える）。350ms以内の連打（ダブルクリック）は1回に畳む（`lib/photoGestures.ts` の `createClickDebouncer`）。クリック時に `resetIdle()` でオーバーレイを起こし、⏸/▶の状態が見えるようにする
+- **写真上のホイール/トラックパッド横スワイプ**（#78）: 縦横で絶対値の大きい軸の累積が40px相当を超えたら前/次へ1回だけ（下・左スワイプ=次、上・右スワイプ=前）。発火後は200ms以上イベントが途切れるまでロック（慣性スクロールで多重に進まない。`createWheelNavigator`）。`ctrl`/`meta`+ホイール（ピンチ）は無視
+- 写真上の操作は `App.tsx` が `Slideshow` だけを包む `display: contents` のラッパーに付ける。オーバーレイ・右上ピル・モーダル・案内画面は兄弟要素なので干渉しない
 - **?**: キーボードショートカット一覧のオーバーレイを開閉する（右上のキーボード
   アイコンボタンからも同じものを開ける、#66）
 - 上記のSpace/F/F11/?は設定画面を開いている間は無効（矢印キーと同じ方針）
@@ -375,7 +382,7 @@ CREATE TABLE scan_history (
 
 ### src-tauri/src/commands/
 
-- Tauriコマンドハンドラ（23個）
+- Tauriコマンドハンドラ（24個）
   1. `scan_directory`: フォルダスキャン（リアルタイム進捗イベント付き）。プレイリストの
      新規作成/差分更新に加え、メモリ上にプレイリストが無い場合（`restore_playlist` が
      復元できなかった、またはまだ呼ばれていない）はDB保存済みのプレイリスト状態を
@@ -419,6 +426,7 @@ CREATE TABLE scan_history (
   12. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。
       即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
+      12b. `undo_exclude`: 直前の除外を取り消す（#78）。`exclude_image` の戻り値（`ExcludeOutcome`）をそのまま受け取り、`ruleAdded` が真の時だけルールを削除し（元からあったルールは消さない）、即時にプレイリストから外していた画像（`removedPaths`）を、除外ルール削除後の残りルールで再判定した上で `Playlist::update_images` の既存規則で**未再生区間**へ戻し、フル保存する。バックエンドは取り消し用の状態を持たない（`AppState` 不変）
   13. `get_display_stats`: 統計データ取得（グラフ用の表示回数ヒストグラム。表示回数ごとのファイル数・最小/最大/平均のみ返し、全件の一覧は返さない）
   14. `get_default_share_directory`: ピック先デフォルトパス取得
   15. `reset_all_data`: 全データ初期化（#64）。中核ロジックは`commands::system::
