@@ -50,11 +50,15 @@
     // 'vidset' = 設定UIの保存→再読み込みで復元（動画のみ。2秒の動画が回り続ける）。
     // 'vidcap' = 上限30秒+音声ON。動画→画像→画像（上限到達で次へ進むことを見る）。
     // 'vidend' = 上限60秒+音声OFF。動画(2秒)は上限に届かず onEnded で1回だけ進む。
-    // 'vidblock' = 音声ON + 音声付き play() が自動再生ポリシーで拒否される状況を模す。
+    // 'vidblock' = 音声ON + 起動直後から音声付き play() と autoplay 属性が拒否される状況
+    //   （起動時の拒否フォールバック: onLoadedData の startPlayback 経路）。
+    // 'vidresume' = 音声ON。起動時は許可され、一時停止中に拒否が有効になる状況
+    //   （再開時の拒否フォールバック: isPlaying effect の startPlayback 経路）。
     vidset: ['/p/v.webm', '/p/v2.webm'],
     vidcap: ['/p/v.webm', '/p/a.png', '/p/b.png'],
     vidend: ['/p/v.webm', '/p/a.png', '/p/b.png'],
     vidblock: ['/p/v.webm', '/p/a.png', '/p/b.png'],
+    vidresume: ['/p/v.webm', '/p/a.png', '/p/b.png'],
   };
 
   // #68: シナリオごとの保存済み設定の初期値。'vidset' だけは save_setting の結果を
@@ -63,6 +67,7 @@
     vidcap: { video_max_duration_sec: '30', video_audio_enabled: 'true' },
     vidend: { video_max_duration_sec: '60', video_audio_enabled: 'false' },
     vidblock: { video_audio_enabled: 'true' },
+    vidresume: { video_audio_enabled: 'true' },
   };
   const persisted = (() => {
     try {
@@ -71,16 +76,36 @@
       return {};
     }
   })();
-  if (sc === 'vidblock') {
+  if (sc === 'vidblock' || sc === 'vidresume') {
     // 実ブラウザは e2e 起動フラグで自動再生が常に許可される。音声付き(muted=false)の
     // play() だけを NotAllowedError で拒否し、WebViewの自動再生ポリシーを再現する。
+    // 拒否は window.__blockUnmutedPlay が true の間だけ有効:
+    //   vidblock  = 起動時から true（起動時の拒否経路）
+    //   vidresume = 最初は false。テスト側が一時停止後に true にする（再開時の拒否経路）
+    window.__blockUnmutedPlay = sc === 'vidblock';
+    window.__blockedPlays = 0;
     const originalPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function () {
-      if (!this.muted) {
+      if (window.__blockUnmutedPlay && !this.muted) {
+        window.__blockedPlays++;
         return Promise.reject(new DOMException('blocked by autoplay policy', 'NotAllowedError'));
       }
       return originalPlay.call(this);
     };
+    if (sc === 'vidblock') {
+      // autoplay 属性による自動再生も、ポリシー下では（拒否がPromiseで返らないまま）
+      // 始まらない。追加された <video> から属性を外して「起動時は一時停止のまま
+      // loadeddata を迎える」状況にし、onLoadedData の明示 play() で拒否を観測させる。
+      new MutationObserver((records) => {
+        for (const r of records) {
+          for (const n of r.addedNodes) {
+            const vids =
+              n.nodeName === 'VIDEO' ? [n] : n.querySelectorAll ? n.querySelectorAll('video') : [];
+            for (const v of vids) v.removeAttribute('autoplay');
+          }
+        }
+      }).observe(document, { childList: true, subtree: true });
+    }
   }
   media['/p/v2.webm'] = media['/p/v.webm'];
 

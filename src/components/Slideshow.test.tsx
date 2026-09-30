@@ -533,11 +533,28 @@ describe('Slideshow video autoplay fallback (#68)', () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  it('never touches play() on loadeddata while paused or when audio is OFF and already playing', () => {
-    const { container } = render(<Slideshow image={videoA()} isPlaying={false} />);
+  it('never touches play() on loadeddata while paused', () => {
+    const { container } = render(
+      <Slideshow image={videoA()} isPlaying={false} videoAudioEnabled={true} />,
+    );
     playSpy.mockClear();
     fireEvent.loadedData(container.querySelector('video')!);
     expect(playSpy).not.toHaveBeenCalled();
+  });
+
+  it('never touches play() on loadeddata when the video is already playing (audio OFF or ON)', () => {
+    for (const audio of [false, true]) {
+      const { container, unmount } = render(
+        <Slideshow image={videoA()} isPlaying={true} videoAudioEnabled={audio} />,
+      );
+      const video = container.querySelector('video') as HTMLVideoElement;
+      // autoPlay 属性で既に再生が始まっている状態（paused=false）
+      Object.defineProperty(video, 'paused', { configurable: true, get: () => false });
+      playSpy.mockClear();
+      fireEvent.loadedData(video);
+      expect(playSpy).not.toHaveBeenCalled();
+      unmount();
+    }
   });
 });
 
@@ -655,6 +672,8 @@ describe('Slideshow video max duration (#68)', () => {
     );
     // 上限を超えて再生し直さない（再開の意図は「次へ」として扱う）
     expect(playSpy).not.toHaveBeenCalled();
+    // 再開は「次へ」として onAdvance を再度呼ぶ（上限到達時の1回目 + 再開時の2回目）。
+    expect(onAdvance).toHaveBeenCalledTimes(2);
   });
 
   it('ignores the cap on a stale (exiting) video after the media already changed', () => {
@@ -712,17 +731,34 @@ describe('Slideshow video max duration (#68)', () => {
     expect(onAdvance).toHaveBeenCalledTimes(2);
   });
 
-  it('does not apply the cap to images', () => {
-    const onAdvance = vi.fn();
-    const { container } = render(
-      <Slideshow
-        image={makeImage()}
-        isPlaying={true}
-        videoMaxDurationSec={30}
-        onAdvance={onAdvance}
-      />,
-    );
-    expect(container.querySelector('video')).toBeNull();
-    expect(onAdvance).not.toHaveBeenCalled();
+  it('does not apply the cap to images: no advance from the component however long it is shown', () => {
+    vi.useFakeTimers();
+    try {
+      const onAdvance = vi.fn();
+      const onMediaReady = vi.fn();
+      const { container } = render(
+        <Slideshow
+          image={makeImage()}
+          isPlaying={true}
+          videoMaxDurationSec={30}
+          onAdvance={onAdvance}
+          onMediaReady={onMediaReady}
+        />,
+      );
+      const img = Array.from(container.querySelectorAll('img')).find(
+        (el) => el.getAttribute('alt') !== 'SSS Logo',
+      )!;
+      fireEvent.load(img);
+      // 上限(30秒)を大きく超えて経過させても、画像の次送りは表示間隔タイマー
+      // （呼び出し側）の責務であり、Slideshow 自身は onAdvance を呼ばない。
+      act(() => {
+        vi.advanceTimersByTime(10 * 60 * 1000);
+      });
+      expect(onMediaReady).toHaveBeenCalledTimes(1);
+      expect(onAdvance).not.toHaveBeenCalled();
+      expect(container.querySelector('video')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

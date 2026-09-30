@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 
 const getSetting = vi.fn();
 const saveSetting = vi.fn();
@@ -114,5 +114,62 @@ describe('VideoSection (#68)', () => {
     fireEvent.click(screen.getByLabelText('動画の音声を再生する'));
     await waitFor(() => expect(errorSpy).toHaveBeenCalled());
     errorSpy.mockRestore();
+  });
+
+  // 読込完了前に操作した値を、遅れて届いた保存値で上書きしない（touched ref）。
+  describe('operating before the saved values finish loading', () => {
+    function deferredLoads() {
+      const resolvers: Record<string, (v: string | null) => void> = {};
+      getSetting.mockImplementation(
+        (key: string) => new Promise<string | null>((resolve) => (resolvers[key] = resolve)),
+      );
+      return resolvers;
+    }
+
+    it('keeps the audio value the user toggled when a late saved "false" arrives', async () => {
+      const resolvers = deferredLoads();
+      render(<VideoSection />);
+      const checkbox = screen.getByLabelText('動画の音声を再生する') as HTMLInputElement;
+
+      fireEvent.click(checkbox);
+      expect(checkbox.checked).toBe(true);
+
+      await act(async () => {
+        resolvers['video_audio_enabled']('false');
+        resolvers['video_max_duration_sec'](null);
+      });
+      expect(checkbox.checked).toBe(true);
+    });
+
+    it('keeps the max duration the user picked when a late saved "0" arrives', async () => {
+      const resolvers = deferredLoads();
+      render(<VideoSection />);
+      const select = screen.getByLabelText('動画の最大再生時間') as HTMLSelectElement;
+
+      fireEvent.change(select, { target: { value: '120' } });
+      expect(select.value).toBe('120');
+
+      await act(async () => {
+        resolvers['video_audio_enabled'](null);
+        resolvers['video_max_duration_sec']('0');
+      });
+      expect(select.value).toBe('120');
+    });
+
+    it('still applies a saved value for the control the user did not touch', async () => {
+      const resolvers = deferredLoads();
+      render(<VideoSection />);
+      const checkbox = screen.getByLabelText('動画の音声を再生する') as HTMLInputElement;
+      const select = screen.getByLabelText('動画の最大再生時間') as HTMLSelectElement;
+
+      fireEvent.click(checkbox);
+
+      await act(async () => {
+        resolvers['video_audio_enabled']('false');
+        resolvers['video_max_duration_sec']('60');
+      });
+      expect(checkbox.checked).toBe(true);
+      expect(select.value).toBe('60');
+    });
   });
 });

@@ -619,12 +619,39 @@ const scenarios = [
     },
   },
   {
-    // #68: 音声付きの再生が自動再生ポリシーで拒否された場合、その動画をミュートへ
-    // 落として再生を続ける（止まったままにしない）。一時停止→再開の経路
-    // （play() の拒否を観測できる経路）で、音声付き play() だけを NotAllowedError
-    // にした状況を再現する。
-    name: 'video audio ON: a play() rejected by the autoplay policy falls back to muted and keeps playing (#68)',
+    // #68: 起動時の拒否経路。音声ON設定で、起動直後から音声付き play() と autoplay
+    // 属性が自動再生ポリシーで拒否される。操作なしで onLoadedData の明示 play() が
+    // 拒否(NotAllowedError)を観測し、その動画だけミュートへ落として再生に至る。
+    name: 'video audio ON at startup: a rejected play() falls back to muted and starts playing (#68)',
     hash: 'vidblock',
+    async run(page) {
+      await page.waitForSelector('video', { timeout: 5000 });
+      // 最初に「再生中」になった瞬間の状態を取る（2秒動画が終わって次へ進む前に）。
+      let playing = null;
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline) {
+        playing = await page.evaluate(() => {
+          const v = document.querySelector('video');
+          return v && !v.paused
+            ? { paused: v.paused, muted: v.muted, blocked: window.__blockedPlays }
+            : null;
+        });
+        if (playing) break;
+        await page.waitForTimeout(50);
+      }
+      return {
+        pass: !!playing && playing.muted === true && playing.blocked >= 1,
+        detail: `firstPlaying=${JSON.stringify(playing)}`,
+      };
+    },
+  },
+  {
+    // #68: 再開時の拒否経路。起動時は許可され音声付きで再生している状態から、一時停止
+    // 中にポリシーが拒否へ変わり、再開の play() が NotAllowedError で拒否される。
+    // 一時停止までは muted=false のまま（起動時経路のフォールバックが効いていない
+    // ことの確認）、再開でその要素がミュートへ落ちて再生を続ける。
+    name: 'video audio ON: a play() rejected on resume falls back to muted and keeps playing (#68)',
+    hash: 'vidresume',
     async run(page) {
       await page.waitForSelector('video', { timeout: 5000 });
       await page.evaluate(() => {
@@ -634,16 +661,24 @@ const scenarios = [
       await page.waitForTimeout(300);
       const pausedState = await page.evaluate(() => {
         const v = document.querySelector('video');
-        return { paused: v.paused, muted: v.muted };
+        const blockedBefore = window.__blockedPlays;
+        window.__blockUnmutedPlay = true; // ここから音声付き play() が拒否される
+        return { paused: v.paused, muted: v.muted, blockedBefore };
       });
       await clickButtonByTitle(page, '再生');
       await page.waitForTimeout(700);
       const resumed = await page.evaluate(() => {
         const v = document.querySelector('video');
-        return { paused: v.paused, muted: v.muted };
+        return { paused: v.paused, muted: v.muted, blocked: window.__blockedPlays };
       });
       return {
-        pass: pausedState.paused === true && resumed.paused === false && resumed.muted === true,
+        pass:
+          pausedState.paused === true &&
+          pausedState.muted === false &&
+          pausedState.blockedBefore === 0 &&
+          resumed.paused === false &&
+          resumed.muted === true &&
+          resumed.blocked >= 1,
         detail: `pausedState=${JSON.stringify(pausedState)} resumed=${JSON.stringify(resumed)}`,
       };
     },
