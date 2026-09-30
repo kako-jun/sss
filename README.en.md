@@ -81,8 +81,8 @@ cd src-tauri && cargo test   # backend tests
 ### First launch
 
 1. If no photo folder has ever been set, a welcome screen appears (the first launch is fullscreen)
-2. Click "Select Folder" to open Settings (Folder tab). Click "Select" to open the dialog and choose a folder with your photos/videos
-3. Start scanning with the "Scan" button. When it finishes, the number of new/deleted files and so on is shown
+2. Click "Select Folder" to open Settings (Folder tab). Click "Select" to open the dialog and choose a folder with your photos/videos (scanning starts as soon as you choose)
+3. When the scan finishes, the number of new/deleted files and so on is shown
 4. Close Settings (the X button at the top right, or ESC) and the slideshow plays
 
 On later launches the previous folder is restored automatically and shown right away; the scan for changes runs in the background.
@@ -125,15 +125,15 @@ A legacy `.sssignore` file (gitignore-style, in your home directory: Windows `%U
 
 Open it with the gear button at the top right (or the button on the welcome screen). It has seven tabs:
 
-| Tab           | Contents                                                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Folder        | Choose the photo folder and scan it (result: files, new, deleted, duration, read errors)                                 |
-| Options       | Display interval (5-60 s), follow EXIF rotation, video audio (default: off) and max playback time, pick folder, language |
-| Exclude Rules | List, remove and manually add exclude rules                                                                              |
-| Picks         | List and delete picked photos/videos                                                                                     |
-| History       | Recently shown photos (latest 100) and excluding from there                                                              |
-| Stats         | Display-count distribution (bar chart / table) and "Reset Display Counts"                                                |
-| Info          | Version, GitHub link, "Reset All Data" (erases all data and restarts the app; picked files are kept)                     |
+| Tab           | Contents                                                                                                                               |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Folder        | Choose the photo folder (it is scanned right away) or re-scan the selected folder (result: files, new, deleted, duration, read errors) |
+| Options       | Display interval (5-60 s), follow EXIF rotation, video audio (default: off) and max playback time, pick folder, language               |
+| Exclude Rules | List, remove and manually add exclude rules                                                                                            |
+| Picks         | List and delete picked photos/videos                                                                                                   |
+| History       | Recently shown photos (latest 100) and excluding from there                                                                            |
+| Stats         | Display-count distribution (bar chart / table) and "Reset Display Counts"                                                              |
+| Info          | Version, GitHub link, "Reset All Data" (erases all data and restarts the app; picked files are kept)                                   |
 
 A video advances after it plays to the end (or reaches the "Maximum video playback time"), not after the display interval. The language can be Auto (OS locale) / 日本語 / English.
 
@@ -150,7 +150,7 @@ A video advances after it plays to the end (or reaches the "Maximum video playba
 - **globset v0.4**: exclude-rule glob pattern matching
 - **keepawake v0.6**: screensaver suppression
 - **walkdir v2**: folder traversal
-- **Tauri plugins**: dialog (folder picker), opener (open URLs), process (exit), single-instance (prevents multiple launches), window-state (remembers window state)
+- **Tauri plugins**: dialog (folder picker; used only from the Rust side, no WebView permission), opener (open URLs), process (exit), single-instance (prevents multiple launches), window-state (remembers window state)
 
 ### Frontend (React)
 

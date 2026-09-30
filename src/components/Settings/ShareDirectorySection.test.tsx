@@ -2,14 +2,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const selectDirectory = vi.fn();
-const saveSetting = vi.fn();
+const selectShareDirectory = vi.fn();
 const getDefaultShareDirectory = vi.fn();
 const getShareDirectory = vi.fn();
 
 vi.mock('../../lib/tauri', () => ({
-  selectDirectory: (...args: unknown[]) => selectDirectory(...args),
-  saveSetting: (...args: unknown[]) => saveSetting(...args),
+  selectShareDirectory: (...args: unknown[]) => selectShareDirectory(...args),
   getDefaultShareDirectory: (...args: unknown[]) => getDefaultShareDirectory(...args),
   getShareDirectory: (...args: unknown[]) => getShareDirectory(...args),
 }));
@@ -21,8 +19,7 @@ function pathInput(): HTMLInputElement {
 }
 
 beforeEach(() => {
-  selectDirectory.mockReset();
-  saveSetting.mockReset();
+  selectShareDirectory.mockReset();
   getDefaultShareDirectory.mockReset();
   getShareDirectory.mockReset();
   getDefaultShareDirectory.mockResolvedValue('/home/me/Pictures/sss-picked');
@@ -49,22 +46,20 @@ describe('ShareDirectorySection (#87)', () => {
   it('saves the chosen directory and re-fetches the resolved path', async () => {
     render(<ShareDirectorySection />);
     await waitFor(() => expect(pathInput().value).toBe('/home/me/Pictures/sss-picked'));
-    selectDirectory.mockResolvedValue('/mnt/ssd/picked');
-    saveSetting.mockResolvedValue(undefined);
+    selectShareDirectory.mockResolvedValue('/mnt/ssd/picked');
     getShareDirectory.mockResolvedValue('/mnt/ssd/picked');
 
     fireEvent.click(screen.getByRole('button'));
 
     await waitFor(() => expect(pathInput().value).toBe('/mnt/ssd/picked'));
-    expect(saveSetting).toHaveBeenCalledWith('share_directory_path', '/mnt/ssd/picked');
+    expect(selectShareDirectory).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('shows the localized rejection and keeps the old display when saving is rejected', async () => {
     render(<ShareDirectorySection />);
     await waitFor(() => expect(pathInput().value).toBe('/home/me/Pictures/sss-picked'));
-    selectDirectory.mockResolvedValue('/');
-    saveSetting.mockRejectedValue('shareDirectoryInvalid');
+    selectShareDirectory.mockRejectedValue('shareDirectoryInvalid');
 
     fireEvent.click(screen.getByRole('button'));
 
@@ -76,8 +71,7 @@ describe('ShareDirectorySection (#87)', () => {
   it('treats a failed refresh after a successful save separately from a save failure', async () => {
     render(<ShareDirectorySection />);
     await waitFor(() => expect(pathInput().value).toBe('/home/me/Pictures/sss-picked'));
-    selectDirectory.mockResolvedValue('/mnt/ssd/picked');
-    saveSetting.mockResolvedValue(undefined);
+    selectShareDirectory.mockResolvedValue('/mnt/ssd/picked');
     getShareDirectory.mockRejectedValue('boom');
 
     fireEvent.click(screen.getByRole('button'));
@@ -87,12 +81,14 @@ describe('ShareDirectorySection (#87)', () => {
     expect(pathInput().value).toBe('/home/me/Pictures/sss-picked');
   });
 
-  it('does nothing when the dialog is cancelled', async () => {
+  it('does nothing (no error, no refresh) when the dialog is cancelled', async () => {
     render(<ShareDirectorySection />);
     await waitFor(() => expect(pathInput().value).not.toBe(''));
-    selectDirectory.mockResolvedValue(null);
+    selectShareDirectory.mockResolvedValue(null);
     fireEvent.click(screen.getByRole('button'));
-    await waitFor(() => expect(selectDirectory).toHaveBeenCalled());
-    expect(saveSetting).not.toHaveBeenCalled();
+    await waitFor(() => expect(selectShareDirectory).toHaveBeenCalled());
+    // キャンセルでは表示の再取得もエラー表示も起きない
+    expect(getShareDirectory).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

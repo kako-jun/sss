@@ -12,7 +12,7 @@ import {
   getPlaylistInfo,
   getLastDirectoryPath,
   restorePlaylist,
-  scanDirectory,
+  rescanLastDirectory,
   getSetting,
   getOsLocale,
   undoDisplayCount,
@@ -205,7 +205,7 @@ function App() {
           getSetting,
           getLastDirectoryPath,
           restorePlaylist,
-          scanDirectory,
+          rescanLastDirectory,
           initialize,
           listenScanProgress: (cb) =>
             listen<{ current: number; total: number }>('scan-progress', (event) =>
@@ -552,7 +552,7 @@ function App() {
     if (notice?.kind === 'error') {
       return { title: t('genericErrorTitle'), subtitle: notice.message };
     }
-    // #65レビュー修正: restorePlaylist失敗→前景scanDirectory自体が失敗した場合、
+    // #65レビュー修正: restorePlaylist失敗→前景rescanLastDirectory自体が失敗した場合、
     // initialize()（＝useSlideshowの最初のgetNextImage）が一度も呼ばれないため
     // notice はずっと null のまま。旧実装はこの分岐が無く emptyStateContent が
     // null になり、案内画面自体が描画されず directoryError も表示されなかった

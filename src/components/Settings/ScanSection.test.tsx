@@ -3,20 +3,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { setLanguageSetting } from '../../lib/i18n/store';
 
-// #73: scan_directory が asset scope の安全性チェックで拒否されると Err(String) を返す
+// #73: スキャン系コマンドが asset scope の安全性チェックで拒否されると Err(String) を返す
 // ようになった。Tauri コマンドの Err(String) は Error インスタンスではなく素の文字列で
 // reject されるため（handleScan の catch 参照）。
 // #80: バックエンドはユーザー向け文言でなくエラーコード（例: "directoryUnsafe"）を
 // 返すようになった。フロントは `resolveScanErrorMessage` でロケールに応じた文言へ
 // 変換して表示する（未知のコードはそのまま表示するフォールバックのみピン留めする）。
-const scanDirectory = vi.fn();
+// #93: 「スキャン」ボタンは DB 保存済みの前回フォルダの再スキャン（rescanLastDirectory、引数なし）、
+// 「選択」ボタンは Rust 側のダイアログ選択+スキャン（selectAndScan）。どちらもパスを渡さない。
+const rescanLastDirectory = vi.fn();
 const getLastDirectoryPath = vi.fn();
-const selectDirectory = vi.fn();
+const selectAndScan = vi.fn();
 
 vi.mock('../../lib/tauri', () => ({
-  scanDirectory: (...args: unknown[]) => scanDirectory(...args),
+  rescanLastDirectory: (...args: unknown[]) => rescanLastDirectory(...args),
   getLastDirectoryPath: (...args: unknown[]) => getLastDirectoryPath(...args),
-  selectDirectory: (...args: unknown[]) => selectDirectory(...args),
+  selectAndScan: (...args: unknown[]) => selectAndScan(...args),
 }));
 
 const listen = vi.fn();
@@ -27,9 +29,9 @@ vi.mock('@tauri-apps/api/event', () => ({
 import { ScanSection } from './ScanSection';
 
 beforeEach(() => {
-  scanDirectory.mockReset();
+  rescanLastDirectory.mockReset();
   getLastDirectoryPath.mockReset();
-  selectDirectory.mockReset();
+  selectAndScan.mockReset();
   listen.mockReset();
 
   getLastDirectoryPath.mockResolvedValue('/photos/existing');
@@ -51,9 +53,9 @@ async function clickScanOnceDirectoryLoaded() {
 
 describe('ScanSection scan error display', () => {
   it('translates the "directoryUnsafe" error code and interpolates the attempted directory', async () => {
-    // Rust側 commands::scan::scan_directory が sanitize_allow_dir で拒否した際に
+    // Rust側 commands::scan が sanitize_allow_dir で拒否した際に
     // 返す Err(String) を模した実際のエラーコード（#80）。
-    scanDirectory.mockRejectedValue('directoryUnsafe');
+    rescanLastDirectory.mockRejectedValue('directoryUnsafe');
 
     await clickScanOnceDirectoryLoaded();
 
@@ -64,8 +66,8 @@ describe('ScanSection scan error display', () => {
     });
   });
 
-  it('falls back to showing an unknown code as-is when scan_directory rejects with a plain string', async () => {
-    scanDirectory.mockRejectedValue('some future unrecognized code');
+  it('falls back to showing an unknown code as-is when the scan rejects with a plain string', async () => {
+    rescanLastDirectory.mockRejectedValue('some future unrecognized code');
 
     await clickScanOnceDirectoryLoaded();
 
@@ -74,9 +76,9 @@ describe('ScanSection scan error display', () => {
     });
   });
 
-  it('falls back to a generic message when scan_directory rejects with a non-string, non-Error value', async () => {
+  it('falls back to a generic message when the scan rejects with a non-string, non-Error value', async () => {
     // 同値分割: 文字列でも Error でもない reject 値（通常は起こらないが防御的分岐の確認）
-    scanDirectory.mockRejectedValue({ unexpected: 'shape' });
+    rescanLastDirectory.mockRejectedValue({ unexpected: 'shape' });
 
     await clickScanOnceDirectoryLoaded();
 
@@ -85,8 +87,8 @@ describe('ScanSection scan error display', () => {
     });
   });
 
-  it('shows an Error instance message when scan_directory rejects with an Error', async () => {
-    scanDirectory.mockRejectedValue(new Error('boom'));
+  it('shows an Error instance message when the scan rejects with an Error', async () => {
+    rescanLastDirectory.mockRejectedValue(new Error('boom'));
 
     await clickScanOnceDirectoryLoaded();
 
@@ -99,7 +101,7 @@ describe('ScanSection scan error display', () => {
   // たびに現在のロケールへ解決する。表示中に言語を切り替えても、旧言語の文言が
   // 残ったまま固まらず新しい言語へ即座に更新されることを固定する。
   it('re-resolves the shown error message to the new language after switching locale mid-display (no ja/en mixing)', async () => {
-    scanDirectory.mockRejectedValue('directoryUnsafe');
+    rescanLastDirectory.mockRejectedValue('directoryUnsafe');
     await clickScanOnceDirectoryLoaded();
 
     await waitFor(() => {
@@ -127,7 +129,7 @@ describe('ScanSection scan error display', () => {
 // 返ってくる。スキャン結果表示にそのまま出すことをピン留めする。
 describe('ScanSection scan result error summary', () => {
   it('shows the error count and examples when the scan completed with errors', async () => {
-    scanDirectory.mockResolvedValue({
+    rescanLastDirectory.mockResolvedValue({
       totalFiles: 100,
       newFiles: 5,
       deletedFiles: 0,
@@ -145,7 +147,7 @@ describe('ScanSection scan result error summary', () => {
   });
 
   it('does not show the error summary when the scan completed without errors', async () => {
-    scanDirectory.mockResolvedValue({
+    rescanLastDirectory.mockResolvedValue({
       totalFiles: 100,
       newFiles: 5,
       deletedFiles: 0,
@@ -160,5 +162,120 @@ describe('ScanSection scan result error summary', () => {
       expect(screen.getByText(/ファイル数/)).toBeTruthy();
     });
     expect(screen.queryByText(/読み取りエラー/)).toBeNull();
+  });
+});
+
+// #93: 「選択」ボタン = Rust 側ダイアログで選んでそのままスキャン。
+describe('ScanSection select (dialog + scan in one command, #93)', () => {
+  const progress = {
+    totalFiles: 7,
+    newFiles: 7,
+    deletedFiles: 0,
+    durationMs: 10,
+    errorCount: 0,
+    errorExamples: [],
+  };
+
+  async function renderLoaded(onScanComplete = () => {}) {
+    render(<ScanSection onScanComplete={onScanComplete} />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('/photos/existing')).toBeTruthy();
+    });
+  }
+
+  it('select scans the chosen folder, shows the result, refreshes the displayed folder and notifies completion', async () => {
+    const onScanComplete = vi.fn();
+    selectAndScan.mockResolvedValue(progress);
+    await renderLoaded(onScanComplete);
+    getLastDirectoryPath.mockResolvedValue('/photos/chosen');
+
+    fireEvent.click(screen.getByText('選択'));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('/photos/chosen')).toBeTruthy();
+    });
+    expect(selectAndScan).toHaveBeenCalledTimes(1);
+    expect(selectAndScan).toHaveBeenCalledWith();
+    expect(rescanLastDirectory).not.toHaveBeenCalled();
+    expect(onScanComplete).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/ファイル数/)).toBeTruthy();
+  });
+
+  it('cancelling the dialog (null) is not an error: nothing changes and no completion is notified', async () => {
+    const onScanComplete = vi.fn();
+    selectAndScan.mockResolvedValue(null);
+    await renderLoaded(onScanComplete);
+
+    fireEvent.click(screen.getByText('選択'));
+
+    await waitFor(() => expect(selectAndScan).toHaveBeenCalledTimes(1));
+    // 進行状態が解除され（選択ボタンが再び押せる）エラーも結果も出ない
+    await waitFor(() => {
+      expect((screen.getByText('選択').closest('button') as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    });
+    expect(onScanComplete).not.toHaveBeenCalled();
+    expect(screen.queryByText(/ファイル数/)).toBeNull();
+    expect(screen.queryByText(/見つかりません|使用できません/)).toBeNull();
+    expect(screen.getByDisplayValue('/photos/existing')).toBeTruthy();
+  });
+
+  it('shows the localized message when the chosen folder is rejected by the backend', async () => {
+    selectAndScan.mockRejectedValue('directoryUnsafe');
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText('選択'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('セキュリティ上の理由でこのフォルダは使用できません: /photos/existing'),
+      ).toBeTruthy();
+    });
+  });
+
+  it('shows the rejected NEW folder (not the previous one) when the chosen folder is rejected (#93)', async () => {
+    selectAndScan.mockRejectedValue('directoryUnsafe:/photos/new');
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText('選択'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('セキュリティ上の理由でこのフォルダは使用できません: /photos/new'),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText(/\/photos\/existing$/)).toBeNull();
+  });
+
+  it('shows the dialog-already-open message when another dialog is open (#93)', async () => {
+    selectAndScan.mockRejectedValue('dialogInProgress');
+    await renderLoaded();
+    fireEvent.click(screen.getByText('選択'));
+    await waitFor(() => {
+      expect(screen.getByText('フォルダ選択ダイアログが既に開いています')).toBeTruthy();
+    });
+  });
+
+  it('clears the previous scan result when starting a new selection (#93)', async () => {
+    rescanLastDirectory.mockResolvedValue(progress);
+    await renderLoaded();
+    fireEvent.click(screen.getByText('スキャン'));
+    await waitFor(() => expect(screen.getByText(/ファイル数/)).toBeTruthy());
+    selectAndScan.mockResolvedValue(null);
+    fireEvent.click(screen.getByText('選択'));
+    await waitFor(() => expect(screen.queryByText(/ファイル数/)).toBeNull());
+  });
+
+  it('rescan shows the no-last-directory message when nothing was ever selected', async () => {
+    rescanLastDirectory.mockRejectedValue('noLastDirectory');
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText('スキャン'));
+
+    await waitFor(() => {
+      expect(screen.getByText('スキャンするフォルダがまだ選択されていません')).toBeTruthy();
+    });
+    expect(rescanLastDirectory).toHaveBeenCalledWith();
   });
 });

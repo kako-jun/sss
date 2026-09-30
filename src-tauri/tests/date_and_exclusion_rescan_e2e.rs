@@ -1,4 +1,4 @@
-//! #61 レビュー M2 の回帰テスト。`scan_directory` コマンドの本体である `perform_scan`
+//! #61 レビュー M2 の回帰テスト。スキャンコマンドの本体である `perform_scan`
 //! （Tauri非依存の純粋関数。`AppHandle` は runtime ジェネリクスが `Wry` 固定で
 //! `tauri::test::mock_app()` の `MockRuntime` を受け付けないため、コマンドの薄い
 //! シェルではなく本体を直接呼ぶ）を通して以下の2点を検証する:

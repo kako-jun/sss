@@ -24,8 +24,9 @@ import {
 export interface StartupDeps {
   getSetting: (key: string) => Promise<string | null>;
   getLastDirectoryPath: () => Promise<string | null>;
-  restorePlaylist: (directoryPath: string) => Promise<boolean>;
-  scanDirectory: (directoryPath: string) => Promise<{ totalFiles: number }>;
+  /** #93: 復元・再スキャンの対象は DB 保存済みの前回フォルダ。パスは引数で渡さない。 */
+  restorePlaylist: () => Promise<boolean>;
+  rescanLastDirectory: () => Promise<{ totalFiles: number }>;
   /**
    * #65: `isPlaying` はApp側の派生値になったため、ここでは単に最初の画像を
    * 読み込むだけでよい（`autoPlay` 引数は廃止。再生開始の可否は呼び出し元の
@@ -63,16 +64,15 @@ export interface StartupDeps {
   onDirectoryError?: (err: unknown, directory: string) => void;
 }
 
-/** `scanDirectory` を進捗イベント購読つきで実行するヘルパー（前景/背景どちらでも使う）。 */
+/** `rescanLastDirectory` を進捗イベント購読つきで実行するヘルパー（前景/背景どちらでも使う）。 */
 async function runScanWithProgress(
-  directory: string,
-  deps: Pick<StartupDeps, 'scanDirectory' | 'listenScanProgress' | 'setRealtimeProgress'>,
+  deps: Pick<StartupDeps, 'rescanLastDirectory' | 'listenScanProgress' | 'setRealtimeProgress'>,
 ): Promise<{ totalFiles: number }> {
-  const { scanDirectory, listenScanProgress, setRealtimeProgress } = deps;
+  const { rescanLastDirectory, listenScanProgress, setRealtimeProgress } = deps;
   let unlisten: UnlistenFn | null = null;
   try {
     unlisten = await listenScanProgress((payload) => setRealtimeProgress(payload));
-    const progress = await scanDirectory(directory);
+    const progress = await rescanLastDirectory();
     setRealtimeProgress(null);
     return progress;
   } finally {
@@ -136,7 +136,7 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     setInitStatus(t('statusRestoringState'));
     let restored = false;
     try {
-      restored = await restorePlaylist(lastDirectory);
+      restored = await restorePlaylist();
     } catch (err) {
       console.error('Failed to restore playlist:', err);
     }
@@ -157,7 +157,7 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
       // 「スキャン実行中です。完了までお待ちください。」等も同経路で既に表示される）。
       // バックグラウンド失敗を鑑賞画面自体に通知する専用UIは、エラー表示の本格整理
       // （#65）でまとめて設計する。
-      void runScanWithProgress(lastDirectory, deps)
+      void runScanWithProgress(deps)
         .then(() => updatePlaylistInfo())
         .catch((err) => {
           console.error('Background scan failed:', err);
@@ -169,7 +169,7 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     // 復元できない場合は従来どおりスキャン完了を待つ。
     try {
       setInitStatus(t('statusScanningDirectory'));
-      const progress = await runScanWithProgress(lastDirectory, deps);
+      const progress = await runScanWithProgress(deps);
       setInitStatus(t('statusScanComplete', { count: progress.totalFiles.toLocaleString() }));
 
       setInitStatus(t('statusLoadingImages'));

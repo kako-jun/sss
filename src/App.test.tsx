@@ -16,7 +16,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 const getSetting = vi.fn();
 const getLastDirectoryPath = vi.fn();
 const restorePlaylist = vi.fn();
-const scanDirectory = vi.fn();
+const rescanLastDirectory = vi.fn();
 const getPlaylistInfo = vi.fn();
 const getNextImage = vi.fn();
 const getPreviousImage = vi.fn();
@@ -27,7 +27,7 @@ vi.mock('./lib/tauri', () => ({
   getSetting: (...a: unknown[]) => getSetting(...a),
   getLastDirectoryPath: (...a: unknown[]) => getLastDirectoryPath(...a),
   restorePlaylist: (...a: unknown[]) => restorePlaylist(...a),
-  scanDirectory: (...a: unknown[]) => scanDirectory(...a),
+  rescanLastDirectory: (...a: unknown[]) => rescanLastDirectory(...a),
   getPlaylistInfo: (...a: unknown[]) => getPlaylistInfo(...a),
   getNextImage: (...a: unknown[]) => getNextImage(...a),
   getPreviousImage: (...a: unknown[]) => getPreviousImage(...a),
@@ -85,7 +85,7 @@ beforeEach(() => {
   getSetting.mockReset().mockResolvedValue(null);
   getLastDirectoryPath.mockReset().mockResolvedValue(null);
   restorePlaylist.mockReset().mockResolvedValue(false);
-  scanDirectory.mockReset().mockResolvedValue({ totalFiles: 0 });
+  rescanLastDirectory.mockReset().mockResolvedValue({ totalFiles: 0 });
   getPlaylistInfo.mockReset().mockResolvedValue(null);
   getNextImage.mockReset().mockResolvedValue({ kind: 'emptyPlaylist' });
   getPreviousImage.mockReset().mockResolvedValue({ kind: 'noHistory' });
@@ -198,7 +198,7 @@ describe('App directoryError notice (#65レビュー: 起動時スキャン失�
     // directoryErrorのdiv自体がその内側にあるため描画されなかった（テスト担当が発見）。
     getLastDirectoryPath.mockResolvedValue('/photos');
     restorePlaylist.mockResolvedValue(false);
-    scanDirectory.mockRejectedValue(new Error('permission denied'));
+    rescanLastDirectory.mockRejectedValue(new Error('permission denied'));
     render(<App />);
 
     await waitFor(() => {
@@ -215,7 +215,7 @@ describe('App directoryError notice (#65レビュー: 起動時スキャン失�
 
   it('does not clear currentImage or show the full-screen notice when the background scan fails after a successful restore; shows a bottom toast instead', async () => {
     useRestoredStartupPath();
-    scanDirectory.mockRejectedValue(new Error('nas offline'));
+    rescanLastDirectory.mockRejectedValue(new Error('nas offline'));
     getNextImage.mockResolvedValue({
       kind: 'found',
       data: {
@@ -255,7 +255,7 @@ describe('App directoryError notice (#65レビュー: 起動時スキャン失�
     // 早送りできる（実時間6秒待つ低速テストにしないため）。
     vi.useFakeTimers({ shouldAdvanceTime: true });
     useRestoredStartupPath();
-    scanDirectory.mockRejectedValue(new Error('nas offline'));
+    rescanLastDirectory.mockRejectedValue(new Error('nas offline'));
     getNextImage.mockResolvedValue({
       kind: 'found',
       data: {
@@ -837,7 +837,7 @@ describe('App directoryError follows locale switches without mixing languages (#
   it('re-resolves the startup directory error message to the new language after switching locale mid-display', async () => {
     getLastDirectoryPath.mockResolvedValue('/photos');
     restorePlaylist.mockResolvedValue(false);
-    scanDirectory.mockRejectedValue('directoryNotFound');
+    rescanLastDirectory.mockRejectedValue('directoryNotFound');
     render(<App />);
 
     await waitFor(() => {

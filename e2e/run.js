@@ -279,6 +279,117 @@ const scenarios = [
     },
   },
   {
+    // #93: フォルダ選択ダイアログは Rust 側で開く。ようこそ（未設定）→設定の「選択」→
+    // select_and_scan（パスは渡さない）→スキャン完了で写真が表示される golden path。
+    name: 'welcome → Select (dialog opened by the backend, no path sent) → scan → photos shown (#93)',
+    hash: 'pickfirst',
+    async run(page) {
+      await page.waitForTimeout(500);
+      const welcomeBefore = await isVisible(page, 'ようこそ SSS へ');
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find(
+          (b) => b.textContent.trim() === '選択',
+        );
+        if (!btn) throw new Error('「選択」ボタンが見つからない');
+        btn.click();
+      });
+      await page.waitForTimeout(1200);
+      const selectCalls = await page.evaluate(() =>
+        window.__e2eLog.filter((l) => l[1] === 'select_and_scan').map((l) => l[2]),
+      );
+      const scanDirectoryCalls = await countCalls(page, 'scan_directory');
+      const nextImageCalls = await countCalls(page, 'get_next_image');
+      const photo = await findPhotoImgDisplay(page);
+      const dirShown = await page.evaluate(() =>
+        [...document.querySelectorAll('input')].some((i) => i.value === '/p'),
+      );
+      // 引数はダイアログタイトルのみ（パス文字列を渡す経路が無い）
+      const pass =
+        welcomeBefore &&
+        selectCalls.length === 1 &&
+        selectCalls[0] === JSON.stringify({ title: '写真フォルダを選択' }) &&
+        scanDirectoryCalls === 0 &&
+        nextImageCalls >= 1 &&
+        photo !== null &&
+        photo.display !== 'none' &&
+        dirShown;
+      return {
+        pass,
+        detail: `welcomeBefore=${welcomeBefore} selectCalls=${JSON.stringify(selectCalls)} scanDirectoryCalls=${scanDirectoryCalls} nextImageCalls=${nextImageCalls} photo=${JSON.stringify(photo)} dirShown=${dirShown}`,
+      };
+    },
+  },
+  {
+    // #93: ダイアログをキャンセル（select_and_scan が null）してもエラー扱いにせず、何も変わらない。
+    name: 'cancelling the backend dialog (select_and_scan → null) is not an error and changes nothing (#93)',
+    hash: 'pickcancel',
+    async run(page) {
+      await page.waitForTimeout(500);
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find(
+          (b) => b.textContent.trim() === '選択',
+        );
+        if (!btn) throw new Error('「選択」ボタンが見つからない');
+        btn.click();
+      });
+      await page.waitForTimeout(800);
+      const selectCalls = await countCalls(page, 'select_and_scan');
+      const nextImageCalls = await countCalls(page, 'get_next_image');
+      const errorShown = await page.evaluate(() => !!document.querySelector('.text-red-400\\/70'));
+      const resultShown = await isVisible(page, 'スキャン結果');
+      const selectEnabled = await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find(
+          (b) => b.textContent.trim() === '選択',
+        );
+        return !!btn && !btn.disabled;
+      });
+      const pass =
+        selectCalls === 1 && nextImageCalls === 0 && !errorShown && !resultShown && selectEnabled;
+      return {
+        pass,
+        detail: `selectCalls=${selectCalls} nextImageCalls=${nextImageCalls} errorShown=${errorShown} resultShown=${resultShown} selectEnabled=${selectEnabled}`,
+      };
+    },
+  },
+  {
+    // #93: 2回目以降の起動。復元・バックグラウンド再スキャン・設定画面の「スキャン」は
+    // すべて引数なし（DB保存済みの前回フォルダが対象）で、パスを渡す経路を通らない。
+    name: 'restart restores and rescans the saved last folder with argument-less commands (#93)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForTimeout(800);
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find(
+          (b) => b.textContent.trim() === 'スキャン',
+        );
+        if (!btn) throw new Error('「スキャン」ボタンが見つからない');
+        btn.click();
+      });
+      await page.waitForTimeout(600);
+      const argsOf = (cmd) =>
+        page.evaluate((c) => window.__e2eLog.filter((l) => l[1] === c).map((l) => l[2]), cmd);
+      const restoreArgs = await argsOf('restore_playlist');
+      const rescanArgs = await argsOf('rescan_last_directory');
+      const legacyScan = await countCalls(page, 'scan_directory');
+      const nextImageCalls = await countCalls(page, 'get_next_image');
+      // 起動時の背景スキャン1回 + 設定画面の「スキャン」1回
+      const pass =
+        restoreArgs.length === 1 &&
+        restoreArgs[0] === '{}' &&
+        rescanArgs.length === 2 &&
+        rescanArgs.every((a) => a === '{}') &&
+        legacyScan === 0 &&
+        nextImageCalls >= 1;
+      return {
+        pass,
+        detail: `restoreArgs=${JSON.stringify(restoreArgs)} rescanArgs=${JSON.stringify(rescanArgs)} legacyScan=${legacyScan} nextImageCalls=${nextImageCalls}`,
+      };
+    },
+  },
+  {
     name: 'dedicated empty-playlist notice shown (not welcome) when directory has 0 items',
     hash: 'empty',
     async run(page) {

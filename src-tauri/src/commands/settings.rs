@@ -1,65 +1,129 @@
 use crate::asset_scope::{resolve_and_sanitize_share_directory, resolve_share_directory};
+use crate::commands::dialog::{pick_directory_blocking, DirectoryPicker, PrePicked};
 use crate::commands::file_operations::home_pictures_dir;
 use crate::commands::types::AppState;
+use crate::database::Database;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
+
+/// `save_setting`（WebView から呼べる汎用の設定保存）で書き込める設定キー（#93）。
+///
+/// 許可リスト方式。スキャン対象・ピック先のような「管理下パス」の基準になる設定
+/// （`last_directory_path` / `share_directory_path`）や内部フラグ（`sssignore_migrated`）を
+/// WebView から直接書き換えられると、ダイアログを経ずに任意フォルダを管理下にできてしまう
+/// ため、これらは専用コマンド（`select_and_scan` / `select_share_directory`）経由でしか
+/// 書かれない。新しい UI 設定を足すときはここにキーを追加する。
+pub const WRITABLE_SETTING_KEYS: &[&str] = &[
+    "display_interval",
+    "language",
+    "apply_exif_rotation",
+    "video_audio_enabled",
+    "video_max_duration_sec",
+];
 
 /// 設定を保存
 ///
 /// #63: 以前は同期コマンドだったため、DBロック待ちの間メインスレッドをブロックし
 /// うる作りになっていた。他の全DBコマンド（`get_last_directory_path` 等）と揃えて
 /// 非同期にする。
+///
+/// #93: 書き込めるキーは [`WRITABLE_SETTING_KEYS`] のみ。それ以外は `settingKeyNotWritable`。
 #[tauri::command]
 pub async fn save_setting(
-    app: AppHandle,
     state: State<'_, AppState>,
     key: String,
     value: String,
 ) -> Result<(), String> {
-    // #87 M1: ピック先は get_thumbnail/pick_image の「管理下」判定の基準なので、相対パス・
-    // ルート・ホーム等の広いパスへの書き換えは保存前に拒否する（空文字は既定に戻す操作）。
-    if key == "share_directory_path"
-        && !value.is_empty()
-        && !crate::asset_scope::is_acceptable_share_directory(
-            std::path::Path::new(&value),
-            dirs::home_dir().as_deref(),
-        )
-    {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    perform_save_setting(&db, &key, &value)
+}
+
+/// `save_setting` の本体（Tauri 非依存、#93）。許可リスト外のキーは `settingKeyNotWritable`
+/// で拒否し、DB には一切触れない。
+pub fn perform_save_setting(db: &Database, key: &str, value: &str) -> Result<(), String> {
+    if !WRITABLE_SETTING_KEYS.contains(&key) {
+        return Err("settingKeyNotWritable".to_string());
+    }
+    db.save_setting(key, value)
+        .map_err(|e| format!("Failed to save setting: {e}"))
+}
+
+/// ピック先ディレクトリの選択 → 検証 → 保存の本体（Tauri 非依存、#93）。
+///
+/// ダイアログは `picker` 越しに開く。キャンセルは `Ok(None)`。選ばれたパスは
+/// #87/#91 の `is_acceptable_share_directory`（相対・ルート・ホーム・システム領域等を拒否）
+/// を通った場合だけ保存し、`Ok(Some(path))` を返す。拒否時は `shareDirectoryInvalid`。
+pub fn perform_select_share_directory<P: DirectoryPicker>(
+    picker: &P,
+    title: Option<&str>,
+    db_mutex: &Mutex<Database>,
+    home_dir: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
+    let Some(directory) = picker.pick_directory(title) else {
+        return Ok(None);
+    };
+    if !crate::asset_scope::is_acceptable_share_directory(&directory, home_dir) {
         return Err("shareDirectoryInvalid".to_string());
     }
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.save_setting(&key, &value)
+    let db = db_mutex.lock().map_err(|e| e.to_string())?;
+    db.save_setting("share_directory_path", &directory.to_string_lossy())
         .map_err(|e| format!("Failed to save setting: {e}"))?;
-    drop(db);
+    Ok(Some(directory))
+}
 
-    // ピック先ディレクトリが変更された場合、次回起動を待たずに asset scope へ許可する
-    // （「ピック済み」タブのサムネイル表示に必要）。resolve_and_sanitize_share_directory が
-    // 空文字設定をデフォルトへ正規化した上で、絶対パス・実在ディレクトリ・非保護ルートを
-    // 検証する（空文字列がそのまま scope に渡ると事故になる、レビュー #73 M1）。
-    // ただし、選択したディレクトリがまだ存在しない場合はここでは許可できない
-    // （pick_image が create_dir_all 直後に再許可する。レビュー #73 must）。
-    if key == "share_directory_path" {
-        if let Ok(pictures_dir) = home_pictures_dir() {
-            match resolve_and_sanitize_share_directory(&pictures_dir, Some(value.as_str())) {
-                Some(safe_dir) => {
-                    if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
-                        eprintln!(
-                            "Failed to allow asset scope for {}: {e}",
-                            safe_dir.display()
-                        );
-                    }
-                }
-                None => {
-                    let resolved = resolve_share_directory(&pictures_dir, Some(value.as_str()));
+/// ピック先ディレクトリをフォルダ選択ダイアログ（Rust 側）で選んで保存する（#93）。
+/// 戻り値は保存したパス（キャンセル時は `None`）。
+///
+/// 保存後、次回起動を待たずに asset scope へ許可する（「ピック済み」タブのサムネイル表示に
+/// 必要）。`resolve_and_sanitize_share_directory` が絶対パス・実在ディレクトリ・非保護ルートを
+/// 再検証する（空文字列がそのまま scope に渡ると事故になる、レビュー #73 M1）。
+/// 選択したディレクトリがまだ存在しない場合はここでは許可できない
+/// （pick_image が create_dir_all 直後に再許可する。レビュー #73 must）。
+#[tauri::command]
+pub async fn select_share_directory(
+    title: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let picked = {
+        let _dialog_guard = crate::commands::scan::acquire_dialog_guard(
+            &state.scan_in_progress,
+            &crate::commands::scan::DIALOG_IN_PROGRESS,
+            false,
+        )?;
+        pick_directory_blocking(app.clone(), title).await?
+    };
+    let Some(saved) = perform_select_share_directory(
+        &PrePicked(picked),
+        None,
+        &state.db,
+        dirs::home_dir().as_deref(),
+    )?
+    else {
+        return Ok(None);
+    };
+    let value = saved.to_string_lossy().to_string();
+    if let Ok(pictures_dir) = home_pictures_dir() {
+        match resolve_and_sanitize_share_directory(&pictures_dir, Some(value.as_str())) {
+            Some(safe_dir) => {
+                if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
                     eprintln!(
-                        "Refusing to allow unsafe asset scope directory: {}",
-                        resolved.display()
+                        "Failed to allow asset scope for {}: {e}",
+                        safe_dir.display()
                     );
                 }
             }
+            None => {
+                let resolved = resolve_share_directory(&pictures_dir, Some(value.as_str()));
+                eprintln!(
+                    "Refusing to allow unsafe asset scope directory: {}",
+                    resolved.display()
+                );
+            }
         }
     }
-
-    Ok(())
+    Ok(Some(value))
 }
 
 /// 設定を取得（#63: 非同期化。上の `save_setting` docコメント参照）

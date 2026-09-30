@@ -1,11 +1,6 @@
 import { FolderOpen } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import {
-  selectDirectory,
-  saveSetting,
-  getDefaultShareDirectory,
-  getShareDirectory,
-} from '../../lib/tauri';
+import { selectShareDirectory, getDefaultShareDirectory, getShareDirectory } from '../../lib/tauri';
 import { useT } from '../../lib/i18n';
 import { resolveShareDirectoryErrorMessage } from '../../lib/i18n/errors';
 
@@ -38,13 +33,11 @@ export function ShareDirectorySection() {
   }, []);
 
   const handleSelectDirectory = async () => {
-    let directory: string | null;
     try {
-      directory = await selectDirectory();
-      if (!directory) return;
-      // #87: バックエンドが不正なピック先（ルート・ホーム等）を拒否することがあるため、
-      // 保存に成功してから表示を更新する。
-      await saveSetting('share_directory_path', directory);
+      // #93: ダイアログは Rust 側で開き、選択・検証（#87: ルート・ホーム等は拒否）・保存まで
+      // 1コマンドで行う。キャンセル時は null（何もしない）。
+      const saved = await selectShareDirectory();
+      if (!saved) return;
     } catch (err) {
       console.error('Failed to select share directory:', err);
       setError(resolveShareDirectoryErrorMessage(String(err)));

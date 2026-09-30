@@ -1,17 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock the Tauri runtime modules. tauri.ts is a thin layer over `invoke` and the
-// dialog plugin; these tests are characterization tests that pin (a) the exact
+// Mock the Tauri runtime module. tauri.ts is a thin layer over `invoke`; these tests are characterization tests that pin (a) the exact
 // command string each wrapper sends, (b) the argument object shape / key casing,
 // and (c) how each wrapper passes the invoke return value straight through.
 const invoke = vi.fn();
-const open = vi.fn();
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => invoke(...args),
-}));
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  open: (...args: unknown[]) => open(...args),
 }));
 
 import * as tauri from './tauri';
@@ -27,7 +22,6 @@ import type {
 
 beforeEach(() => {
   invoke.mockReset();
-  open.mockReset();
 });
 
 describe('tauri command wrappers', () => {
@@ -44,7 +38,7 @@ describe('tauri command wrappers', () => {
     expect(result).toBe('/home/me/Pictures');
   });
 
-  it('scanDirectory passes directoryPath (camelCase) and returns ScanProgress', async () => {
+  it('selectAndScan sends only the localized dialog title (never a path) and returns ScanProgress (#93)', async () => {
     const progress: ScanProgress = {
       totalFiles: 10,
       newFiles: 3,
@@ -54,15 +48,47 @@ describe('tauri command wrappers', () => {
       errorExamples: [],
     };
     invoke.mockResolvedValue(progress);
-    const result = await tauri.scanDirectory('/photos');
-    expect(invoke).toHaveBeenCalledWith('scan_directory', { directoryPath: '/photos' });
+    const result = await tauri.selectAndScan();
+    // src/test/setup.ts が navigator.language を 'ja-JP' に固定しているため既定は ja
+    expect(invoke).toHaveBeenCalledWith('select_and_scan', { title: '写真フォルダを選択' });
     expect(result).toEqual(progress);
   });
 
-  it('restorePlaylist passes directoryPath (camelCase) and returns the boolean as-is', async () => {
+  it('selectAndScan uses the English dialog title once the language is "en" and returns null on cancel (#93)', async () => {
+    setLanguageSetting('en');
+    invoke.mockResolvedValue(null);
+    expect(await tauri.selectAndScan()).toBeNull();
+    expect(invoke).toHaveBeenCalledWith('select_and_scan', { title: 'Select Photo Folder' });
+  });
+
+  it('rescanLastDirectory invokes rescan_last_directory with no arguments (#93)', async () => {
+    const progress: ScanProgress = {
+      totalFiles: 1,
+      newFiles: 0,
+      deletedFiles: 0,
+      durationMs: 1,
+      errorCount: 0,
+      errorExamples: [],
+    };
+    invoke.mockResolvedValue(progress);
+    expect(await tauri.rescanLastDirectory()).toEqual(progress);
+    expect(invoke).toHaveBeenCalledWith('rescan_last_directory');
+  });
+
+  it('selectShareDirectory sends only the dialog title and returns the saved path or null (#93)', async () => {
+    invoke.mockResolvedValue('/mnt/ssd/picked');
+    expect(await tauri.selectShareDirectory()).toBe('/mnt/ssd/picked');
+    expect(invoke).toHaveBeenCalledWith('select_share_directory', {
+      title: 'ピック先フォルダを選択',
+    });
+    invoke.mockResolvedValue(null);
+    expect(await tauri.selectShareDirectory()).toBeNull();
+  });
+
+  it('restorePlaylist takes no path (the backend restores the saved last directory) and returns the boolean as-is (#93)', async () => {
     invoke.mockResolvedValue(true);
-    const result = await tauri.restorePlaylist('/photos');
-    expect(invoke).toHaveBeenCalledWith('restore_playlist', { directoryPath: '/photos' });
+    const result = await tauri.restorePlaylist();
+    expect(invoke).toHaveBeenCalledWith('restore_playlist');
     expect(result).toBe(true);
   });
 
@@ -249,41 +275,5 @@ describe('tauri command wrappers', () => {
   it('propagates rejections from invoke', async () => {
     invoke.mockRejectedValue(new Error('backend boom'));
     await expect(tauri.getNextImage()).rejects.toThrow('backend boom');
-  });
-});
-
-describe('selectDirectory (dialog plugin)', () => {
-  it('returns the selected path when a string is chosen, with a localized dialog title (#80)', async () => {
-    // src/test/setup.ts が navigator.language を 'ja-JP' に固定しているため、
-    // 既定ロケールは ja。ダイアログ title も言語設定に追従する。
-    open.mockResolvedValue('/chosen/dir');
-    const result = await tauri.selectDirectory();
-    expect(open).toHaveBeenCalledWith({
-      directory: true,
-      multiple: false,
-      title: '写真フォルダを選択',
-    });
-    expect(result).toBe('/chosen/dir');
-  });
-
-  it('uses the English dialog title once the language setting is switched to "en" (#80)', async () => {
-    setLanguageSetting('en');
-    open.mockResolvedValue('/chosen/dir');
-    await tauri.selectDirectory();
-    expect(open).toHaveBeenCalledWith({
-      directory: true,
-      multiple: false,
-      title: 'Select Photo Folder',
-    });
-  });
-
-  it('returns null when the dialog is cancelled (open resolves null)', async () => {
-    open.mockResolvedValue(null);
-    expect(await tauri.selectDirectory()).toBeNull();
-  });
-
-  it('returns null when open resolves a non-string (e.g. array)', async () => {
-    open.mockResolvedValue(['/a', '/b']);
-    expect(await tauri.selectDirectory()).toBeNull();
   });
 });

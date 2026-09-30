@@ -155,15 +155,31 @@
           }
           return null;
         case 'get_last_directory_path':
-          return sc === 'welcome' ? null : '/p';
+          // #93: 'pickfirst' は未設定から始まり、ダイアログ選択+スキャン後に前回フォルダが保存される。
+          if (sc === 'pickfirst') return window.__e2ePicked ? '/p' : null;
+          return sc === 'welcome' || sc === 'pickcancel' ? null : '/p';
         case 'restore_playlist':
-          // 'unreach' は復元失敗→前景scanDirectory待ちの経路を通したいのでfalse。
+          // 'unreach' は復元失敗→前景rescanLastDirectory待ちの経路を通したいのでfalse。
           return sc !== 'unreach';
-        case 'scan_directory':
+        case 'select_and_scan':
+          // #93: ダイアログはRust側で開く。キャンセル('pickcancel')は null（エラーではない）、
+          // 選択時は保存済みの前回フォルダが更新されたものとして ScanProgress を返す。
+          await new Promise((r) => setTimeout(r, 100));
+          if (sc === 'pickcancel') return null;
+          window.__e2ePicked = true;
+          return {
+            totalFiles: (seqs[sc] || seqs.slides).length,
+            newFiles: (seqs[sc] || seqs.slides).length,
+            deletedFiles: 0,
+            durationMs: 100,
+            errorCount: 0,
+            errorExamples: [],
+          };
+        case 'rescan_last_directory':
           if (sc === 'unreach') {
             await new Promise((r) => setTimeout(r, 100));
             // #80: 実際のバックエンドはユーザー向け文言でなくエラーコードで返す
-            // （`commands::scan::scan_directory`）。フロントは
+            // （`commands::scan`）。フロントは
             // `resolveScanErrorMessage` でロケールに応じた文言へ変換する。
             throw 'directoryNotFound';
           }

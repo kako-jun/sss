@@ -70,7 +70,7 @@ fn excluding_a_file_then_advancing_then_restarting_does_not_resurrect_it() {
     app.manage(AppState {
         db: Mutex::new(db),
         playlist: Mutex::new(playlist),
-        // scan_directory コマンド本体が行うのと同じく、スキャン対象を directory_path に
+        // スキャンコマンド本体が行うのと同じく、スキャン対象を directory_path に
         // 設定しておく（exclude_image の保存はこれを見て directory_path を決める）。
         directory_path: Mutex::new(Some(photos_dir.clone())),
         cache_dir: cache_dir.clone(),

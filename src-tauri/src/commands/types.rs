@@ -16,7 +16,7 @@ pub struct AppState {
     pub cache_worker: CacheWorker,
     /// スクリーンセーバー抑制ハンドル。初期化に失敗した環境（D-Bus 無し等）では `None`
     pub _keep_awake: Option<keepawake::KeepAwake>,
-    /// `scan_directory` の二重実行防止フラグ（#61レビュー nit）。
+    /// スキャン（`select_and_scan`/`rescan_last_directory`）の二重実行防止フラグ（#61レビュー nit）。
     /// `commands::scan::ScanGuard` が `compare_exchange` で操作する。
     pub scan_in_progress: AtomicBool,
     /// 直近に`increment_display_count`を実際に呼んだパス（#65レビューS1）。

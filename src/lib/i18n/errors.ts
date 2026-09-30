@@ -15,21 +15,28 @@ function splitBackendError(raw: string): { code: string; detail?: string } {
 }
 
 /**
- * `scan_directory`（および `ScanGuard` を共有する `reset_all_data`）が返す
+ * `select_and_scan` / `rescan_last_directory`（および `ScanGuard` を共有する `reset_all_data`）が返す
  * エラーコードを表示文言へ変換する。`path` は呼び出し元が渡した対象ディレクトリ
  * （バックエンドは文字列にパスを埋め込み直さないため、フロントが自分の知っている
  * 値を補う）。未知のコード（想定外の内部エラー等）はそのまま返す（ログ相当の
  * 英語文言でも実害は小さいためフォールバックとして許容する）。
  */
 export function resolveScanErrorMessage(raw: string, path: string): string {
-  const { code } = splitBackendError(raw);
+  const { code, detail } = splitBackendError(raw);
+  // #93: バックエンドは `directoryNotFound:{選んだパス}` のように実際に拒否したパスを
+  // detail で返す。あればそれを優先する（選択に失敗したとき画面に残っている旧フォルダを出さない）。
+  const shownPath = detail || path;
   switch (code) {
     case 'scanInProgress':
       return t('errorScanInProgress');
+    case 'dialogInProgress':
+      return t('errorDialogInProgress');
     case 'directoryNotFound':
-      return t('errorDirectoryNotFound', { path });
+      return t('errorDirectoryNotFound', { path: shownPath });
     case 'directoryUnsafe':
-      return t('errorDirectoryUnsafe', { path });
+      return t('errorDirectoryUnsafe', { path: shownPath });
+    case 'noLastDirectory':
+      return t('errorNoLastDirectory');
     default:
       return raw;
   }
@@ -96,12 +103,14 @@ export function resolveExcludeErrorMessage(raw: string): string {
   }
 }
 
-/** `save_setting`（`share_directory_path`）が返すエラーコードを表示文言へ変換する（#87）。 */
+/** `select_share_directory` が返すエラーコードを表示文言へ変換する（#87）。 */
 export function resolveShareDirectoryErrorMessage(raw: string): string {
   const { code } = splitBackendError(raw);
   switch (code) {
     case 'shareDirectoryInvalid':
       return t('errorShareDirectoryInvalid');
+    case 'dialogInProgress':
+      return t('errorDialogInProgress');
     default:
       return t('errorShareDirectorySaveFailed');
   }
@@ -129,14 +138,17 @@ export function resolveResetAllDataErrorMessage(raw: string): string {
  * 文脈が分からない断片）だけ `startupDirectoryRejected` で前置きを付ける。
  */
 export function resolveStartupDirectoryError(raw: string, directory: string): string {
-  const { code } = splitBackendError(raw);
+  const { code, detail } = splitBackendError(raw);
+  const shownPath = detail || directory;
   switch (code) {
     case 'scanInProgress':
       return t('errorScanInProgress');
     case 'directoryNotFound':
-      return t('errorDirectoryNotFound', { path: directory });
+      return t('errorDirectoryNotFound', { path: shownPath });
     case 'directoryUnsafe':
-      return t('errorDirectoryUnsafe', { path: directory });
+      return t('errorDirectoryUnsafe', { path: shownPath });
+    case 'noLastDirectory':
+      return t('errorNoLastDirectory');
     default:
       return t('startupDirectoryRejected', { reason: raw });
   }
