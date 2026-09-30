@@ -20,6 +20,7 @@
 - **画像処理**: image v0.25
 - **キャッシュ管理**: md5 v0.8 (ファイル名ハッシュ生成)
 - **ランダム生成**: rand v0.9
+- **ホーム/標準ディレクトリ解決**: dirs v7（ピック先の既定 `Pictures/sss-picked` やホーム判定）
 - **スクリーンセーバー抑制**: keepawake v0.6 (クロスプラットフォーム対応)
 - **OSロケール取得**: sys-locale v0.3（`get_os_locale`用。`tauri-plugin-os`は使わない）
 - **プラグイン**（`lib.rs` の `run()` で登録。`Cargo.toml` の下限は JS 側 `@tauri-apps/plugin-*` の minor に揃える）:
@@ -59,7 +60,7 @@
 - **表示モード**: 4K最適化 (3840x2160)
 - **ウィンドウ状態の記憶**（#78）: `tauri-plugin-window-state` を `lib.rs` の `run()` で登録する（`StateFlags::all() & !VISIBLE`＝全画面/最大化・位置・サイズ・装飾を保存/復元し、表示状態は対象外）。保存はアプリ終了時（`RunEvent::Exit`、`exit_app`/`exit(0)`/ウィンドウを閉じる）にアプリ設定ディレクトリの `.window-state.json` へ、復元はウィンドウ生成時（フロント起動前）。保存位置がどの実在ディスプレイにも交差しなければ位置は復元せずOS既定位置に出る（ディスプレイが外れた場合）。初回起動（状態ファイル無し）は `tauri.conf.json` の全画面のまま。`taskkill /F` 等の強制終了では保存されない（サイネージ用途の運用メモ）。全データ初期化（`reset_all_data`）はこのファイルを消さない（DBの設定ではないため）。フロントは `getCurrentWindow().isFullscreen()` で実態へ同期する既存の仕組みでそのまま追従する
 - **EXIF回転**: `img`要素に`crossOrigin`/`image-orientation`を明示指定せず、WebView既定の動作（`image-orientation: from-image`＝EXIFに従い自動回転）に任せる。`apply_exif_rotation=false`なのにEXIFが回転を要求している画像だけ例外で、バックエンドが「格納画素のまま・EXIF無し」のキャッシュに差し替える（原本を返すとWebViewが勝手に回転し設定と食い違うため）。crossOriginを付けてCSSで明示切替する設計は、wryのWebKitGTK実装がassetスキームをCORS有効登録しておらずLinux本番で画像が出なくなるリスクがあるため撤去した
-- **画像処理**: 4K超/WebView非対応形式(TIFF等)/`apply_exif_rotation=false`時の回転要求のいずれかに該当する画像だけをキャッシュ対象にし、自動リサイズ(Lanczos3フィルタ)でキャッシュフォルダに保存。出力フォーマットはデコード後の実データのアルファ有無で決定(透過ならPNG、無ければJPEG品質90%明示)。アニメGIF/WebPは静止フレーム化を避けるため常にキャッシュ対象外
+- **画像処理**: 4K超/WebView非対応形式(TIFF等)/`apply_exif_rotation=false`時の回転要求のいずれかに該当する画像だけをキャッシュ対象にし、自動リサイズ(Lanczos3フィルタ)でキャッシュフォルダに保存。出力フォーマットはデコード後の実データのアルファ有無で決定(透過ならPNG、無ければJPEG品質90%明示)。アニメGIF/WebPは静止フレーム化を避けるため常にキャッシュ対象外（**既知の制約**: そのためEXIF回転タグ付きのWebPは`apply_exif_rotation=false`でもWebViewが回転する。Linuxは`image-orientation`既定が`from-image`になるWebKitGTK 2.30以降を想定。設定画面のサムネイルは設定に関わらず常に向きを焼き込む）
 - **画像ロード**: Tauriの`convertFileSrc()`でプロトコル経由読み込み（クロスプラットフォーム対応）
 - **先読みキャッシュ**: 5枚先まで先読み。生成は単一ワーカースレッド+キューで直列処理（弱いCPU対応、連打してもスレッド数・メモリが有界）。原本を返すと表示が誤る画像（TIFF等/`apply_exif_rotation=false`時の回転要求）は変換完了を待ってからパスを返す（`tauri::async_runtime::spawn_blocking`で実行スレッドは塞がない）。キャッシュは合計サイズ上限(既定2GB)超で古いものから自動削除（直近提供分は除外）、書込は一時ファイル→renameでアトミック、失敗した画像は再要求を抑止。起動時/全データ初期化時はcache_dirを退避ディレクトリへrename→再作成してクリア（ワーカーの新規書込との競合を回避）
 - **動画処理**: ウィンドウにフィット表示（object-fit: contain）、再生終了で自動次送り
@@ -140,8 +141,8 @@
 #### キーボードショートカット
 
 - **ESC**: アプリを終了。**設定画面・後述のショートカット一覧・オーバーレイの「…」メニューを開いている間は
-  それを閉じるだけ**でアプリは終了しない（#66）。入力欄（input/textarea/
-  contentEditable）にフォーカスがある間はどちらも行わず、ブラウザの既定動作に任せる
+  それを閉じるだけ**でアプリは終了しない（#66）。入力欄（text系input/textarea/
+  contentEditable）にフォーカスがある間は、閉じる・終了のどちらも行わず、入力欄のフォーカスを外す（blur）だけ
 - **左矢印キー**: 前の画像/動画へ戻る
 - **右矢印キー**: 次の画像/動画へ進む
 - **Space**: 一時停止/再開を切り替える（#66。フォーカスがボタン等の操作可能な要素に
@@ -575,10 +576,10 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 ## セキュリティ設計
 
 - **capability**（`src-tauri/capabilities/main.json`）: `core:default`・`dialog:allow-open`・`opener:allow-open-url`（`https://*` のみ）・`process:allow-exit` だけ。ファイル読み書きはすべて自前の Tauri コマンド経由で `plugin-fs` は使わない
-- **CSP**（`tauri.conf.json`）: `default-src 'self'`。`img-src` は `asset:` / `https://asset.localhost` / OpenStreetMap タイル / `data:`、`media-src` は `asset:` / `https://asset.localhost`、`connect-src` は IPC のみ
-- **asset scope**: `tauri.conf.json` の静的 scope は空。キャッシュ・ピック先・スキャン履歴のフォルダ・スキャン対象を、起動時と `scan_directory`/`save_setting`/`pick_image` で `sanitize_allow_dir`（相対パス・存在しないパス・ルート等を拒否）を通してから動的に許可する
+- **CSP**（`tauri.conf.json`）: `default-src 'self'`。`img-src` は `'self' asset: https://asset.localhost https://tile.openstreetmap.org data:`、`media-src` は `'self' asset: https://asset.localhost`、`connect-src` は `'self' ipc: http://ipc.localhost https://ipc.localhost`
+- **asset scope**: `tauri.conf.json` の静的 scope は空。キャッシュ・ピック先・スキャン履歴のフォルダ・スキャン対象を、起動時と `scan_directory`/`restore_playlist`/`save_setting`/`pick_image` で `sanitize_allow_dir`（相対パス・存在しないパス・ルート等を拒否）を通してから動的に許可する
 - **管理下パス**（#87・#92）: `pick_image`・`get_thumbnail`（静止画）・`open_in_explorer`・`exclude_image`・`undo_exclude` は、DB登録済み（またはピックフォルダ内）のメディアファイルだけを対象にする。ピック先の設定値もルート・ホーム・システム領域などを拒否する
-- **脅威モデル**: 防ぐのは、WebView から素朴に任意パスを渡して任意ファイルを読む/コピーする/存在確認する操作。WebView が `scan_directory` や設定を正規の手順で操作して任意フォルダを管理下に入れるケースは防がない（フォルダ選択は JS 側ダイアログ前提の既存設計）。詳細は「Rustモジュール構成 > commands」の 11・12 と CHANGELOG の #87・#92
+- **脅威モデル**: 防ぐのは、WebView から素朴に任意パスを渡して任意ファイルを読む/コピーする/存在確認する操作。WebView が `scan_directory` や設定を正規の手順で操作して任意フォルダを管理下に入れるケースは防がない（フォルダ選択は JS 側ダイアログ前提の既存設計。`scan_directory` の再設計は #93 で別途検討中で、この残余リスクの追跡先）。詳細は「Rustモジュール構成 > commands」の 11・12 と CHANGELOG の #87・#92
 
 ## クロスプラットフォーム対応
 
