@@ -154,6 +154,19 @@ export async function excludeImage(
 }
 
 /**
+ * 直前の除外を取り消す（#78）。`excludeImage` の戻り値をそのまま渡す。
+ * ルール削除（新規追加だった場合のみ）と、即座に外した画像の未再生区間への復帰を行う。
+ */
+export async function undoExclude(outcome: ExcludeOutcome): Promise<void> {
+  await invoke('undo_exclude', {
+    pattern: outcome.pattern,
+    ruleType: outcome.ruleType,
+    removeRule: outcome.ruleAdded,
+    restorePaths: outcome.removedPaths,
+  });
+}
+
+/**
  * 表示回数の分布を取得（グラフ用、#67）。全件の一覧ではなく、バックエンドで
  * 集計した要約とヒストグラムだけが返る。
  */

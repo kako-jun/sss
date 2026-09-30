@@ -200,6 +200,21 @@
           return [idx + 1, (seqs[sc] || seqs.slides).length, idx > 0];
         case 'undo_display_count':
           return null;
+        // #78: 除外/ピックの取り消し。バックエンドの ExcludeOutcome と同じ形を返す
+        // （removedPaths は即時に外した画像。undo_exclude はそれをそのまま受け取る）。
+        case 'exclude_image':
+          return {
+            pattern: args.imagePath,
+            needsRescan: false,
+            ruleType: 'glob',
+            ruleAdded: true,
+            removedPaths: [args.imagePath],
+          };
+        case 'pick_image':
+          return '/tmp/sss-picked/a.png';
+        case 'undo_exclude':
+        case 'delete_picked_image':
+          return null;
         case 'plugin:event|listen':
           return ++cb;
         case 'plugin:window|is_fullscreen':

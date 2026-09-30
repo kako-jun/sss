@@ -74,6 +74,11 @@ export const en = {
   pickCopyDone: 'Copied to {path}',
   pickCopyFailed: "Couldn't copy the photo",
   excludeFailed: 'Error: exclude failed',
+  // #78: brief toast right after exclude/pick, with an Undo button for a few seconds
+  undoButton: 'Undo',
+  undoExcludeDone: 'Exclusion undone',
+  undoPickDone: 'Pick undone',
+  undoFailed: "Error: couldn't undo",
   excludeAddedFile: 'Exclude rule added: {pattern}',
   excludeAddedNeedsRescan: 'Exclude rule added: {pattern} (rescan to apply the change)',
 

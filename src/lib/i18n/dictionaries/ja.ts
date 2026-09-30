@@ -74,6 +74,11 @@ export const ja = {
   pickCopyDone: 'コピー完了: {path}',
   pickCopyFailed: 'エラー: コピー失敗',
   excludeFailed: 'エラー: 除外失敗',
+  // #78: 除外/ピック直後の控えめなトースト（数秒だけ「取り消す」を出す）
+  undoButton: '取り消す',
+  undoExcludeDone: '除外を取り消しました',
+  undoPickDone: 'ピックを取り消しました',
+  undoFailed: 'エラー: 取り消せませんでした',
   excludeAddedFile: '除外パターン追加: {pattern}',
   excludeAddedNeedsRescan: '除外パターン追加: {pattern} (変更を反映するには再スキャンしてください)',
 

@@ -1650,6 +1650,87 @@ const scenarios = [
       return { pass, detail: `opacity=${opacity}` };
     },
   },
+  {
+    // #78: 除外の取り消し。除外直後に「取り消す」が出て、マウスを動かさず idle に
+    // なっても（操作バーがフェードアウトしても）押せる状態のまま残り、押すと
+    // undo_exclude が除外の結果（removeRule/restorePaths）つきで呼ばれる。
+    name: 'exclude shows an undo toast that survives idle and calls undo_exclude (#78)',
+    hash: 'undo',
+    async run(page) {
+      await page.waitForTimeout(800);
+      await wakeFromIdle(page);
+      await page.click('button[title="メニュー"]');
+      await page.click('text=除外');
+      await page.click('text=ファイルを除外');
+      await page.waitForTimeout(300);
+      const shown = await isVisible(page, '取り消す');
+      // マウスを動かさず idle（3秒）を越えても残る。
+      await page.waitForTimeout(3600);
+      const barOpacity = await getOverlayBarWrapperOpacity(page);
+      const stillShown = await isVisible(page, '取り消す');
+      await page.click('button:has-text("取り消す")');
+      await page.waitForTimeout(300);
+      const undoCalls = await page.evaluate(() =>
+        window.__e2eLog.filter((l) => l[1] === 'undo_exclude').map((l) => l[2]),
+      );
+      const doneShown = await isVisible(page, '除外を取り消しました');
+      const buttonGone = !(await isVisible(page, '取り消す'));
+      const pass =
+        shown &&
+        stillShown &&
+        barOpacity === 0 &&
+        undoCalls.length === 1 &&
+        undoCalls[0].includes('"removeRule":true') &&
+        undoCalls[0].includes('"restorePaths":["/p/') &&
+        doneShown &&
+        buttonGone;
+      return {
+        pass,
+        detail: `shown=${shown} stillShown(idle)=${stillShown} barOpacity=${barOpacity} undoCalls=${JSON.stringify(undoCalls)} doneShown=${doneShown} buttonGone=${buttonGone}`,
+      };
+    },
+  },
+  {
+    // #78: ピックの取り消しはコピーしたファイルだけを delete_picked_image で消す。
+    // 取り消さずに放置すれば数秒でトーストは消える（確認ダイアログは出ない）。
+    name: 'pick undo deletes only the copied file; the toast expires by itself (#78)',
+    hash: 'undo',
+    async run(page) {
+      await page.waitForTimeout(800);
+      await wakeFromIdle(page);
+      await page.click('button[title="ピック（コピー）"]');
+      await page.waitForTimeout(300);
+      const shown = await isVisible(page, '取り消す');
+      await page.click('button:has-text("取り消す")');
+      await page.waitForTimeout(300);
+      const deleteCalls = await page.evaluate(() =>
+        window.__e2eLog.filter((l) => l[1] === 'delete_picked_image').map((l) => l[2]),
+      );
+      const doneShown = await isVisible(page, 'ピックを取り消しました');
+
+      // もう一度ピックして放置 → 6秒で消える。
+      await page.click('button[title="ピック（コピー）"]');
+      await page.waitForTimeout(300);
+      const shownAgain = await isVisible(page, '取り消す');
+      await page.waitForTimeout(6300);
+      const expired = !(await isVisible(page, '取り消す'));
+      const deleteCallsAfterExpiry = await page.evaluate(
+        () => window.__e2eLog.filter((l) => l[1] === 'delete_picked_image').length,
+      );
+      const pass =
+        shown &&
+        deleteCalls.length === 1 &&
+        deleteCalls[0].includes('/tmp/sss-picked/a.png') &&
+        doneShown &&
+        shownAgain &&
+        expired &&
+        deleteCallsAfterExpiry === 1;
+      return {
+        pass,
+        detail: `shown=${shown} deleteCalls=${JSON.stringify(deleteCalls)} doneShown=${doneShown} shownAgain=${shownAgain} expired=${expired}`,
+      };
+    },
+  },
 ];
 
 /**

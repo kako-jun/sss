@@ -163,6 +163,7 @@ pub fn run() {
             commands::settings::get_setting,
             commands::file_operations::pick_image,
             commands::file_operations::exclude_image,
+            commands::file_operations::undo_exclude,
             commands::stats::get_display_stats,
             commands::file_operations::get_default_share_directory,
             commands::file_operations::get_ignore_patterns,

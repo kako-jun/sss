@@ -278,6 +278,16 @@ function App() {
     })();
   };
 
+  // #78: 除外の取り消し後。画像がプレイリストへ戻ったので位置/総数を更新する。
+  // 除外で表示するものが無くなっていた（currentImageがnull）場合は表示を再開する。
+  const handleExcludeUndone = async () => {
+    if (!currentImage) {
+      await loadNextImage();
+    } else {
+      await updatePlaylistInfo();
+    }
+  };
+
   const handleToggleWindowMode = async () => {
     try {
       const win = getCurrentWindow();
@@ -794,6 +804,7 @@ function App() {
         onMouseLeave={handleOverlayMouseLeave}
         onTogglePause={handleTogglePause}
         onExcluded={handleExcluded}
+        onExcludeUndone={handleExcludeUndone}
       />
 
       {/* ショートカット一覧（#66 問題4） */}
