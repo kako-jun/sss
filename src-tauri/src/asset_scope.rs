@@ -76,11 +76,13 @@ pub fn is_acceptable_share_directory(path: &Path, home_dir: Option<&Path>) -> bo
 }
 
 /// ホーム配下の秘密情報ディレクトリ名（ピック先にできない）。
-const HOME_SECRET_DIRS: [&str; 4] = [".ssh", ".gnupg", ".aws", ".kube"];
+const HOME_SECRET_DIRS: [&str; 5] = [".ssh", ".gnupg", ".aws", ".kube", "Library/Keychains"];
 
 /// ピック先にできないシステム領域。`/var` と `/private` 全体は macOS の一時領域
 /// （`/private/var/folders`）や外付けのマウント先を含むので丸ごとは拒否せず、
-/// 設定ファイル置き場の `/private/etc` だけを対象にする。
+/// 設定ファイル置き場の `/private/etc` だけを対象にする。`/root`（root のホーム）は
+/// 拒否するが、`/opt` と `/run` は外付け・自動マウント（`/run/media`）や正当なアプリ置き場を
+/// 壊すので対象外。
 fn system_protected_dirs() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
@@ -104,6 +106,7 @@ fn system_protected_dirs() -> Vec<PathBuf> {
             "/System",
             "/Library",
             "/private/etc",
+            "/root",
         ]
         .iter()
         .map(PathBuf::from)
@@ -368,7 +371,7 @@ mod tests {
     #[test]
     fn share_directory_rejects_secret_dirs_under_home() {
         let (base, home) = fake_home("secret");
-        for name in [".ssh", ".gnupg", ".aws", ".kube"] {
+        for name in [".ssh", ".gnupg", ".aws", ".kube", "Library/Keychains"] {
             let dir = home.join(name);
             assert!(!is_acceptable_share_directory(&dir, Some(&home)), "{name}");
             assert!(
@@ -383,7 +386,15 @@ mod tests {
     #[test]
     fn share_directory_rejects_unix_system_dirs() {
         let (base, home) = fake_home("sys");
-        for bad in ["/etc", "/etc/ssh", "/usr/local/x", "/bin", "/private/etc/x"] {
+        for bad in [
+            "/etc",
+            "/etc/ssh",
+            "/usr/local/x",
+            "/bin",
+            "/private/etc/x",
+            "/root",
+            "/root/pics",
+        ] {
             assert!(
                 !is_acceptable_share_directory(Path::new(bad), Some(&home)),
                 "{bad}"
