@@ -49,6 +49,9 @@ tauri-plugin-single-instance = { version = "2.5" }
 tauri-plugin-dialog = "2.8"
 tauri-plugin-opener = "2.6"
 tauri-plugin-process = "2.4"
+# #78: 前回のウィンドウ状態（全画面/ウィンドウ・位置・サイズ・装飾）を記憶して復元する。
+# 保存先ディスプレイが外れていれば復元を諦める（プラグイン側で実在モニタとの交差を確認）。
+tauri-plugin-window-state = "2.4"
 
 # `test` フィーチャは resolver v2 (edition 2021) のため通常ビルドには混入しない。
 # get_next_image 等の #[tauri::command] を tauri::test::mock_app() 経由で
