@@ -34,7 +34,7 @@ const STAGE3_LOCK_WARNING_THRESHOLD_MS: u128 = 100;
 /// `pub(crate)`: `commands::system::reset_all_data`（#64）も同じ `AtomicBool` で
 /// 同じガードを取得し、スキャン中の初期化・初期化中のスキャン開始の両方を
 /// 一箇所のロジックで防ぐ。
-pub(crate) struct ScanGuard<'a> {
+pub struct ScanGuard<'a> {
     flag: &'a AtomicBool,
 }
 
@@ -43,12 +43,12 @@ impl<'a> ScanGuard<'a> {
     ///
     /// #80: ユーザー向け文言でなくエラーコード（`scanInProgress`）で返す。
     /// フロント辞書（`resolveScanErrorMessage`）が表示文言に変換する。
-    pub(crate) fn acquire(flag: &'a AtomicBool) -> Result<Self, String> {
+    pub fn acquire(flag: &'a AtomicBool) -> Result<Self, String> {
         Self::acquire_with_code(flag, "scanInProgress")
     }
 
     /// `acquire` のエラーコード指定版（ダイアログ表示中フラグ `dialogInProgress` 用、#93）。
-    pub(crate) fn acquire_with_code(flag: &'a AtomicBool, code: &str) -> Result<Self, String> {
+    pub fn acquire_with_code(flag: &'a AtomicBool, code: &str) -> Result<Self, String> {
         flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map(|_| ScanGuard { flag })
             .map_err(|_| code.to_string())
