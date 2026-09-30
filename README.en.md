@@ -14,6 +14,7 @@ A slideshow app that shows 100,000+ photos fairly.
 - **Display stats**: tracks and shows display count and last-shown time
 - **EXIF info display**: shows date taken and GPS coordinates
 - **Exclude rules**: manage exclude rules by date, file, or folder in Settings → Exclude Rules (a legacy `.sssignore` file is migrated to the database automatically on first scan)
+- **Video audio and max duration**: toggle video audio on/off (default: off) and cap playback time (unlimited / 30s / 1 min / 2 min / 5 min; default: unlimited) in Settings
 - **Screensaver suppression**: keeps the display always on
 - **Cross-platform**: Windows/Linux/macOS
 - **Japanese/English UI**: follows the OS locale automatically, with a manual switch in Settings → Options
