@@ -198,11 +198,6 @@
             return { files: 500, min: 0, max: 0, mean: 0, bins: [{ count: 0, files: 500 }] };
           }
           return { files: 0, min: 0, max: 0, mean: 0, bins: [] };
-        case 'get_stats':
-          if (sc === 'statszero') return { totalImages: 500, displayedImages: 0 };
-          if (sc === 'stats') return { totalImages: 12000, displayedImages: 12000 };
-          if (sc === 'statsspread') return { totalImages: 12000, displayedImages: 11100 };
-          return { totalImages: (seqs[sc] || seqs.slides).length, displayedImages: 0 };
         case 'get_default_share_directory':
           return '/tmp/sss-picked';
         // #66: 情報タブの表示バージョン（getVersion()、@tauri-apps/api/appが

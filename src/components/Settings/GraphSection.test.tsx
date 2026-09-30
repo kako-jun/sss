@@ -10,11 +10,9 @@ import { setLanguageSetting } from '../../lib/i18n/store';
 // "Not implemented" を出すが例外にはならず、legend等のDOM要素は生成される
 // （uPlotはlegendをcanvas描画でなくDOM要素で構築するため）。
 const getDisplayStats = vi.fn();
-const getStats = vi.fn();
 const resetAllDisplayCounts = vi.fn();
 vi.mock('../../lib/tauri', () => ({
   getDisplayStats: (...args: unknown[]) => getDisplayStats(...args),
-  getStats: (...args: unknown[]) => getStats(...args),
   resetAllDisplayCounts: (...args: unknown[]) => resetAllDisplayCounts(...args),
 }));
 
@@ -22,7 +20,6 @@ import { GraphSection } from './GraphSection';
 
 beforeEach(() => {
   getDisplayStats.mockReset();
-  getStats.mockReset();
   resetAllDisplayCounts.mockReset();
 });
 
@@ -38,7 +35,6 @@ describe('GraphSection i18n (#80)', () => {
         { count: 2, files: 1 },
       ],
     });
-    getStats.mockResolvedValue({ totalImages: 2, displayedImages: 2 });
 
     const { container } = render(<GraphSection />);
 
@@ -62,7 +58,6 @@ describe('GraphSection i18n (#80)', () => {
 
   it('shows the translated "no stats" message when there is no display data yet', async () => {
     getDisplayStats.mockResolvedValue({ files: 0, min: 0, max: 0, mean: 0, bins: [] });
-    getStats.mockResolvedValue({ totalImages: 0, displayedImages: 0 });
 
     render(<GraphSection />);
 
@@ -88,7 +83,6 @@ describe('GraphSection i18n (#80)', () => {
         { count: 2, files: 1 },
       ],
     });
-    getStats.mockResolvedValue({ totalImages: 2, displayedImages: 2 });
 
     const { container } = render(<GraphSection />);
     const plotRoot = () => container.querySelector('.u-over');
@@ -127,7 +121,6 @@ describe('GraphSection i18n (#80)', () => {
         { count: 5, files: 2 },
       ],
     });
-    getStats.mockResolvedValue({ totalImages: 10, displayedImages: 8 });
 
     const { container } = render(<GraphSection />);
 
@@ -159,7 +152,6 @@ describe('GraphSection fairness badge boundary (#67)', () => {
   });
   const load = (min: number, max: number) => {
     getDisplayStats.mockResolvedValue(stats(min, max));
-    getStats.mockResolvedValue({ totalImages: 4, displayedImages: 4 });
     render(<GraphSection />);
   };
 
@@ -201,18 +193,18 @@ describe('GraphSection fairness badge boundary (#67)', () => {
 });
 
 describe('GraphSection summary cards and table (#67)', () => {
-  it('shows viewed/total, the rounded mean and the min-max range', async () => {
+  it('derives viewed/total from the histogram (total = files, viewed = files minus the 0-count bin), plus the rounded mean and min-max range', async () => {
     getDisplayStats.mockResolvedValue({
-      files: 3,
-      min: 1,
+      files: 1234,
+      min: 0,
       max: 3,
-      mean: 1.66,
+      mean: 0.66,
       bins: [
+        { count: 0, files: 1231 },
         { count: 1, files: 2 },
         { count: 3, files: 1 },
       ],
     });
-    getStats.mockResolvedValue({ totalImages: 1234, displayedImages: 3 });
 
     const { container } = render(<GraphSection />);
 
@@ -221,8 +213,46 @@ describe('GraphSection summary cards and table (#67)', () => {
     });
     const text = container.textContent ?? '';
     expect(text).toContain('3 / 1,234');
-    expect(text).toContain('1.7');
-    expect(text).toContain('1–3');
+    expect(text).toContain('0.7');
+    expect(text).toContain('0–3');
+  });
+
+  it('shows 0 viewed when every file is in the 0-count bin, and full when there is no 0-count bin', async () => {
+    getDisplayStats.mockResolvedValueOnce({
+      files: 5,
+      min: 0,
+      max: 0,
+      mean: 0,
+      bins: [{ count: 0, files: 5 }],
+    });
+    const { container, unmount } = render(<GraphSection />);
+    await waitFor(() => expect(screen.getByText('表示済み')).toBeTruthy());
+    expect(container.textContent).toContain('0 / 5');
+    unmount();
+
+    getDisplayStats.mockResolvedValueOnce({
+      files: 5,
+      min: 2,
+      max: 2,
+      mean: 2,
+      bins: [{ count: 2, files: 5 }],
+    });
+    const second = render(<GraphSection />);
+    await waitFor(() => expect(screen.getByText('表示済み')).toBeTruthy());
+    expect(second.container.textContent).toContain('5 / 5');
+  });
+
+  it('does not call get_stats: the summary comes from get_display_stats alone', async () => {
+    getDisplayStats.mockResolvedValue({
+      files: 2,
+      min: 1,
+      max: 1,
+      mean: 1,
+      bins: [{ count: 1, files: 2 }],
+    });
+    render(<GraphSection />);
+    await waitFor(() => expect(screen.getByText('表示済み')).toBeTruthy());
+    expect(getDisplayStats).toHaveBeenCalledTimes(1);
   });
 
   it('shows a 100% row for a single-bin table', async () => {
@@ -233,7 +263,6 @@ describe('GraphSection summary cards and table (#67)', () => {
       mean: 2,
       bins: [{ count: 2, files: 5 }],
     });
-    getStats.mockResolvedValue({ totalImages: 5, displayedImages: 5 });
 
     const { container } = render(<GraphSection />);
 
@@ -243,9 +272,8 @@ describe('GraphSection summary cards and table (#67)', () => {
     expect(container.querySelector('tbody tr')!.textContent).toBe('25100.0%');
   });
 
-  it('shows the "no data" message and no chart when files is 0 even if getStats has totals', async () => {
+  it('shows the "no data" message and no chart when files is 0 (even if the playlist has members elsewhere)', async () => {
     getDisplayStats.mockResolvedValue({ files: 0, min: 0, max: 0, mean: 0, bins: [] });
-    getStats.mockResolvedValue({ totalImages: 10, displayedImages: 0 });
 
     const { container } = render(<GraphSection />);
 
@@ -259,7 +287,6 @@ describe('GraphSection summary cards and table (#67)', () => {
   it('falls back to the "no data" message and logs when loading fails', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     getDisplayStats.mockRejectedValue(new Error('db locked'));
-    getStats.mockResolvedValue({ totalImages: 1, displayedImages: 0 });
 
     render(<GraphSection />);
 
@@ -285,7 +312,6 @@ describe('GraphSection reset flow (#67)', () => {
 
   it('does not reset or reload when the confirmation is cancelled', async () => {
     getDisplayStats.mockResolvedValue(stats);
-    getStats.mockResolvedValue({ totalImages: 2, displayedImages: 2 });
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(<GraphSection />);
@@ -298,21 +324,30 @@ describe('GraphSection reset flow (#67)', () => {
     confirm.mockRestore();
   });
 
-  it('resets and then reloads the stats when confirmed, showing the empty state', async () => {
-    getDisplayStats
-      .mockResolvedValueOnce(stats)
-      .mockResolvedValueOnce({ files: 0, min: 0, max: 0, mean: 0, bins: [] });
-    getStats.mockResolvedValue({ totalImages: 2, displayedImages: 0 });
+  it('resets and then reloads the stats: the real backend still returns every playlist member, all in the 0-count bin', async () => {
+    getDisplayStats.mockResolvedValueOnce(stats).mockResolvedValueOnce({
+      files: 2,
+      min: 0,
+      max: 0,
+      mean: 0,
+      bins: [{ count: 0, files: 2 }],
+    });
     resetAllDisplayCounts.mockResolvedValue(undefined);
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    render(<GraphSection />);
+    const { container } = render(<GraphSection />);
     await waitFor(() => expect(screen.getByText('表示回数をリセット')).toBeTruthy());
     fireEvent.click(screen.getByText('表示回数をリセット'));
 
+    // 「データがありません」ではなく、0回の単一棒（全員 0 回 = 均等）が出る。
     await waitFor(() => {
-      expect(screen.getByText('データがありません。スキャンを実行してください。')).toBeTruthy();
+      expect(container.querySelector('tbody tr')!.textContent).toBe('02100.0%');
     });
+    expect(container.querySelectorAll('tbody tr').length).toBe(1);
+    expect(screen.getByTestId('fairness-badge').textContent).toBe('均等（差は1回以内）');
+    expect(container.textContent).toContain('0 / 2');
+    expect(container.querySelector('.u-over')).not.toBeNull();
+    expect(screen.queryByText('データがありません。スキャンを実行してください。')).toBeNull();
     expect(resetAllDisplayCounts).toHaveBeenCalledTimes(1);
     expect(getDisplayStats).toHaveBeenCalledTimes(2);
     confirm.mockRestore();

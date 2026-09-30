@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getDisplayStats, getStats, resetAllDisplayCounts } from '../../lib/tauri';
-import type { DisplayStats, Stats } from '../../types';
+import { getDisplayStats, resetAllDisplayCounts } from '../../lib/tauri';
+import type { DisplayStats } from '../../types';
 import { Check } from 'lucide-react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
@@ -15,7 +15,6 @@ export function GraphSection() {
   // `locale` 自体を依存配列に含める必要がある。
   const locale = useLocale();
   const [displayStats, setDisplayStats] = useState<DisplayStats | null>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isResetting, setIsResetting] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
@@ -24,9 +23,7 @@ export function GraphSection() {
   const loadStats = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [graphStats, summaryStats] = await Promise.all([getDisplayStats(), getStats()]);
-      setDisplayStats(graphStats);
-      setStats(summaryStats);
+      setDisplayStats(await getDisplayStats());
     } catch (err) {
       console.error('Failed to load display stats:', err);
     } finally {
@@ -103,30 +100,33 @@ export function GraphSection() {
 
   const spread = spreadOf(displayStats);
   const isEven = spread <= EVEN_SPREAD_MAX;
-  const viewedPercent = stats ? percentOf(stats.displayedImages, stats.totalImages) : 0;
+  // 「表示済み / 全体」もヒストグラムから導く（別コマンドの get_stats を呼ばない）。
+  // 全体 = 集計対象のファイル数、表示済み = 全体から「0回」の階級のファイル数を引いたもの。
+  const totalImages = displayStats.files;
+  const neverShown = displayStats.bins.find((bin) => bin.count === 0)?.files ?? 0;
+  const displayedImages = totalImages - neverShown;
+  const viewedPercent = percentOf(displayedImages, totalImages);
   const meanText = displayStats.mean.toLocaleString(locale, { maximumFractionDigits: 1 });
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-2">
-        {stats && (
-          <div className="bg-black/40 rounded-lg p-3">
-            <div className="text-xs text-white/50">{t('statViewedLabel')}</div>
-            <div className="mt-1 font-mono text-white/80">
-              <span className="text-2xl">{stats.displayedImages.toLocaleString(locale)}</span>
-              <span className="text-sm text-white/50">
-                {' / '}
-                {stats.totalImages.toLocaleString(locale)}
-              </span>
-            </div>
-            <div className="mt-2 h-0.5 rounded-full bg-white/10">
-              <div
-                className="h-full rounded-full bg-white/60"
-                style={{ width: `${Math.min(100, viewedPercent)}%` }}
-              />
-            </div>
+        <div className="bg-black/40 rounded-lg p-3">
+          <div className="text-xs text-white/50">{t('statViewedLabel')}</div>
+          <div className="mt-1 font-mono text-white/80">
+            <span className="text-2xl">{displayedImages.toLocaleString(locale)}</span>
+            <span className="text-sm text-white/50">
+              {' / '}
+              {totalImages.toLocaleString(locale)}
+            </span>
           </div>
-        )}
+          <div className="mt-2 h-0.5 rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-white/60"
+              style={{ width: `${Math.min(100, viewedPercent)}%` }}
+            />
+          </div>
+        </div>
         <div className="bg-black/40 rounded-lg p-3">
           <div className="text-xs text-white/50">{t('statAverageLabel')}</div>
           <div className="mt-1 font-mono text-2xl text-white/80">{meanText}</div>
