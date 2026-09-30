@@ -117,8 +117,8 @@ fn a_date_exclusion_of_an_unmanaged_file_never_reaches_the_exif_reader() {
     let managed_result = call(&app, &managed, "date");
     assert!(
         matches!(
-            managed_result.as_deref(),
-            Err("noExifDate") | Err("exifReadFailed")
+            managed_result.as_ref().err().map(String::as_str),
+            Some("noExifDate") | Some("exifReadFailed")
         ),
         "登録済みパスは EXIF 側の結果になる: {managed_result:?}"
     );
