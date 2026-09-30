@@ -23,7 +23,14 @@ import { exit } from '@tauri-apps/plugin-process';
 import { X, Settings as SettingsIcon, Minimize2, Maximize2, Keyboard } from 'lucide-react';
 import logoBg from './assets/logo-bg.webp';
 import { useT, useLocale, initLocale, resolveStartupDirectoryError } from './lib/i18n';
-import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL, idleFadeClassName } from './constants';
+import {
+  clampDisplayInterval,
+  DEFAULT_DISPLAY_INTERVAL,
+  DEFAULT_VIDEO_AUDIO_ENABLED,
+  DEFAULT_VIDEO_MAX_DURATION_SEC,
+  idleFadeClassName,
+  normalizeVideoMaxDuration,
+} from './constants';
 import {
   isTypingTarget,
   isFocusVisible,
@@ -52,6 +59,12 @@ function App() {
   // ローディング文言はinitLocale完了（localeReady=true）まで出さないことで防ぐ。
   const [localeReady, setLocaleReady] = useState(false);
   const [displayInterval, setDisplayInterval] = useState<number>(DEFAULT_DISPLAY_INTERVAL);
+  // #68: 動画の音声ON/OFFと最大再生時間（秒。0=無制限）。永続化は設定画面が担い、
+  // ここは起動時の復元値と設定画面からの変更通知を受けてSlideshowへ渡すだけ。
+  const [videoAudioEnabled, setVideoAudioEnabled] = useState<boolean>(DEFAULT_VIDEO_AUDIO_ENABLED);
+  const [videoMaxDurationSec, setVideoMaxDurationSec] = useState<number>(
+    DEFAULT_VIDEO_MAX_DURATION_SEC,
+  );
   const [initStatus, setInitStatus] = useState<string>(''); // 初期化状態メッセージ
   const [realtimeProgress, setRealtimeProgress] = useState<{
     current: number;
@@ -197,6 +210,8 @@ function App() {
           setRealtimeProgress,
           setIsInitialized,
           setDisplayInterval: (ms) => setDisplayInterval(clampDisplayInterval(ms)),
+          setVideoAudioEnabled,
+          setVideoMaxDurationSec: (sec) => setVideoMaxDurationSec(normalizeVideoMaxDuration(sec)),
           updatePlaylistInfo,
           setHasDirectory,
           onDirectoryError: (err, directory) => {
@@ -477,6 +492,10 @@ function App() {
     setDisplayInterval(clampDisplayInterval(newInterval));
   };
 
+  const handleVideoMaxDurationChange = (sec: number) => {
+    setVideoMaxDurationSec(normalizeVideoMaxDuration(sec));
+  };
+
   // #65: 「ようこそ」画面は本当に未設定（ディレクトリが一度も設定されていない）の
   // 時だけ出す。設定済みだが空/接続不可/読込失敗の場合は専用の案内にする
   // （問題1: 消えたファイル1枚でようこそ画面に落ちる、の根絶）。
@@ -610,6 +629,8 @@ function App() {
         image={currentImage}
         displayToken={displayToken}
         isPlaying={isPlaying}
+        videoAudioEnabled={videoAudioEnabled}
+        videoMaxDurationSec={videoMaxDurationSec}
         onMediaReady={handleMediaReady}
         onAdvance={loadNextImage}
         onMediaError={handleMediaError}
@@ -789,6 +810,8 @@ function App() {
         onClose={() => setIsSettingsOpen(false)}
         onScanComplete={handleScanComplete}
         onIntervalChange={handleIntervalChange}
+        onVideoAudioChange={setVideoAudioEnabled}
+        onVideoMaxDurationChange={handleVideoMaxDurationChange}
         initialTab={settingsInitialTab}
         openedViaMouse={settingsOpenedViaMouse}
       />
