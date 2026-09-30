@@ -178,6 +178,7 @@ pub fn run() {
             commands::file_operations::undo_exclude,
             commands::stats::get_display_stats,
             commands::file_operations::get_default_share_directory,
+            commands::file_operations::get_share_directory,
             commands::file_operations::get_ignore_patterns,
             commands::file_operations::remove_ignore_pattern,
             commands::file_operations::add_ignore_pattern,

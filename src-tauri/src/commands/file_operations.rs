@@ -46,6 +46,15 @@ pub async fn get_default_share_directory() -> Result<String, String> {
     Ok(share_directory.to_str().unwrap_or("").to_string())
 }
 
+/// 実際に使われるピック先（検証済み解決。不正な保存値は既定にフォールバック済み）を返す（#87）。
+/// 設定画面は保存値の生値でなく、これを表示する。
+#[tauri::command]
+pub async fn get_share_directory(state: State<'_, AppState>) -> Result<String, String> {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = get_picked_directory(&db)?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
 /// ファイラで画像を選択状態で開く（OS別）
 #[tauri::command]
 pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
