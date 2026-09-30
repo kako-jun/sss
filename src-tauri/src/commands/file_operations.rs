@@ -75,14 +75,9 @@ pub async fn open_in_explorer(
             }),
         )
     };
-    let managed_path =
-        crate::pick::ensure_managed_media_path(Path::new(&image_path), &share_directory, known)?;
-    let path = managed_path.as_path();
-
-    // 管理下と確認できた後でのみ存在を確認する（管理外は上で拒否済みで、存在有無は漏れない）。
-    if !path.exists() {
-        return Err("imageFileNotFound".to_string());
-    }
+    // 検証（管理下 → 実在 → verbatim 接頭辞の除去）は `pick::resolve_open_target` に集約。
+    let target = crate::pick::resolve_open_target(Path::new(&image_path), &share_directory, known)?;
+    let path = target.as_path();
 
     let image_path = path.to_str().ok_or("Invalid path")?.to_string();
 
@@ -477,7 +472,28 @@ pub async fn undo_exclude(
         .into_iter()
         .filter_map(|(path, date, _)| date.map(|d| (path, d)))
         .collect();
+    // #92: 復帰対象は DB 登録済み（`file_metadata`/`image_stats` に文字列完全一致）かつ
+    // メディア拡張子のパスだけ。`<root>/../x` のような未登録パスや非メディアは、
+    // `starts_with`（成分単位の比較で `..` を解決しない）を通ってもプレイリストへ入れない。
+    // 通常フローの `removedPaths` は `playlist.current_paths()` 由来＝スキャン登録済みなので影響しない。
+    let registered: std::collections::HashSet<String> = restore_paths
+        .iter()
+        .filter(|p| {
+            crate::scanner::is_media_path(Path::new(p.as_str()))
+                && db.is_known_media_path(p).unwrap_or_else(|e| {
+                    eprintln!(
+                        "undo_exclude: is_known_media_path failed (treated as unmanaged): {e}"
+                    );
+                    false
+                })
+        })
+        .cloned()
+        .collect();
     drop(db);
+    let restore_paths: Vec<String> = restore_paths
+        .into_iter()
+        .filter(|p| registered.contains(p))
+        .collect();
     let ignore_filter = IgnoreFilter::from_rules_with_captured_dates(&rules, captured_dates);
     let scan_root = state
         .directory_path

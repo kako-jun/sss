@@ -310,3 +310,47 @@ fn undo_does_not_restore_an_image_outside_the_current_scan_root() {
 
     let _ = std::fs::remove_dir_all(&f.dir);
 }
+
+/// #92: `restore_paths` は WebView から任意の値が渡りうるので、DB 登録済み（スキャン済み）かつ
+/// メディア拡張子のパスだけを復帰させる。`<root>/../x`（`starts_with` は `..` を解決しない）・
+/// 未登録の実在ファイル・登録済みでも非メディアは、プレイリストへ入らない。
+#[test]
+fn undo_does_not_restore_unregistered_or_non_media_paths() {
+    let f = setup("restore_unregistered");
+    let state = f.app.state::<AppState>();
+
+    let escape = f.photos_dir.join("..").join("outside.jpg");
+    std::fs::write(&escape, b"x").unwrap();
+    let unregistered = f.photos_dir.join("unregistered.jpg");
+    std::fs::write(&unregistered, b"x").unwrap();
+    let text = f.photos_dir.join("notes.txt");
+    std::fs::write(&text, b"x").unwrap();
+    state
+        .db
+        .lock()
+        .unwrap()
+        .upsert_file_metadata(&text.to_string_lossy(), 1, 1)
+        .unwrap();
+
+    let paths: Vec<String> = [&escape, &unregistered, &text]
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+    tauri::async_runtime::block_on(undo_exclude(
+        "no-such-rule".to_string(),
+        "glob".to_string(),
+        false,
+        paths.clone(),
+        state.clone(),
+    ))
+    .expect("undo_exclude");
+
+    let lock = state.playlist.lock().unwrap();
+    let pl = lock.as_ref().unwrap();
+    assert_eq!(pl.total_count(), TOTAL, "件数は変わらない");
+    for p in &paths {
+        assert!(!pl.current_paths().contains(p), "復帰してはいけない: {p}");
+    }
+    drop(lock);
+    let _ = std::fs::remove_dir_all(&f.dir);
+}
