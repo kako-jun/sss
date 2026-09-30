@@ -1,4 +1,4 @@
-import { useState, useEffect, useId } from 'react';
+import { useState, useEffect, useId, useRef } from 'react';
 import { getSetting, saveSetting } from '../../lib/tauri';
 import {
   DEFAULT_VIDEO_AUDIO_ENABLED,
@@ -35,16 +35,21 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
   const [audioEnabled, setAudioEnabled] = useState<boolean>(DEFAULT_VIDEO_AUDIO_ENABLED);
   const [maxDurationSec, setMaxDurationSec] = useState<number>(DEFAULT_VIDEO_MAX_DURATION_SEC);
 
+  // 読込が完了する前にユーザーが操作した場合、遅れて届いた保存値で上書きしない。
+  const audioTouchedRef = useRef(false);
+  const maxDurationTouchedRef = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
     getSetting(SETTING_VIDEO_AUDIO_ENABLED)
       .then((value) => {
-        if (!cancelled) setAudioEnabled(parseVideoAudioEnabled(value));
+        if (!cancelled && !audioTouchedRef.current) setAudioEnabled(parseVideoAudioEnabled(value));
       })
       .catch((err) => console.error('Failed to load video audio setting:', err));
     getSetting(SETTING_VIDEO_MAX_DURATION_SEC)
       .then((value) => {
-        if (!cancelled) setMaxDurationSec(parseVideoMaxDuration(value));
+        if (!cancelled && !maxDurationTouchedRef.current)
+          setMaxDurationSec(parseVideoMaxDuration(value));
       })
       .catch((err) => console.error('Failed to load video max duration setting:', err));
     return () => {
@@ -53,6 +58,7 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
   }, []);
 
   const handleAudioChange = async (checked: boolean) => {
+    audioTouchedRef.current = true;
     setAudioEnabled(checked);
     onAudioChange?.(checked);
     try {
@@ -63,6 +69,7 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
   };
 
   const handleMaxDurationChange = async (raw: string) => {
+    maxDurationTouchedRef.current = true;
     const sec = normalizeVideoMaxDuration(parseInt(raw, 10));
     setMaxDurationSec(sec);
     onMaxDurationChange?.(sec);
