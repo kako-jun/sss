@@ -80,12 +80,14 @@ pub fn ensure_thumbnail(source: &Path, cache_dir: &Path) -> Result<PathBuf, Stri
         .map_or(0, |d| d.as_secs());
     let dest = thumbnail_cache_path(cache_dir, source, mtime_secs, meta.len());
     if dest.exists() {
+        touch_modified(&dest);
         return Ok(dest);
     }
 
     let _guard = GENERATION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // 待っている間に別呼び出しが作り終えているかもしれない。
     if dest.exists() {
+        touch_modified(&dest);
         return Ok(dest);
     }
 
@@ -124,8 +126,19 @@ pub fn ensure_thumbnail(source: &Path, cache_dir: &Path) -> Result<PathBuf, Stri
     Ok(dest)
 }
 
+/// キャッシュヒットしたサムネイルの mtime を現在時刻へ更新する（失敗は無視）。
+/// 上限超過時の削除は mtime の古い順なので、生成時刻のままだと「よく見るのに古い」
+/// ものから消える FIFO になってしまう。ヒットのたびに更新して実質 LRU にする。
+/// 読み取り専用オープンだと Windows で `set_modified` に必要な権限が無く失敗しうるため、
+/// 内容を変えない `append(true)` で開く（`cache_worker::mark_served` と同じ方式）。
+fn touch_modified(path: &Path) {
+    if let Ok(file) = std::fs::OpenOptions::new().append(true).open(path) {
+        let _ = file.set_modified(std::time::SystemTime::now());
+    }
+}
+
 /// `counter` を1つ進め、`interval` 枚ごとに `thumbs_dir` の合計が `max_bytes` 以下に
-/// なるよう mtime の古いものから削除する。いま書いた `just_written` は消さない。
+/// なるよう mtime の古いものから削除する（ヒット時に mtime を更新するので実質 LRU）。いま書いた `just_written` は消さない。
 /// 失敗してもサムネイル生成自体は成功扱い（上限管理は付随処理）。
 fn maybe_enforce_thumbs_limit(
     thumbs_dir: &Path,
@@ -187,15 +200,55 @@ mod tests {
         assert_eq!(decoded.width(), THUMB_MAX_EDGE);
         assert_eq!(decoded.height(), THUMB_MAX_EDGE / 2);
 
-        // 2 回目は再生成せず同じファイルを返す（更新日時が変わらない）。
-        let first_mtime = std::fs::metadata(&thumb).unwrap().modified().unwrap();
+        // 2 回目は再生成せず同じファイルを返す（中身が変わらない）。
+        let first_bytes = std::fs::read(&thumb).unwrap();
         let again = ensure_thumbnail(&src, &cache).unwrap();
         assert_eq!(again, thumb);
-        assert_eq!(
-            std::fs::metadata(&again).unwrap().modified().unwrap(),
-            first_mtime
+        assert_eq!(std::fs::read(&again).unwrap(), first_bytes);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// キャッシュヒットでサムネイルの mtime が現在へ更新される（上限削除が LRU になる）。
+    #[test]
+    fn cache_hit_refreshes_thumbnail_mtime_so_trim_is_lru() {
+        let dir = workspace("lru");
+        let src = dir.join("a.png");
+        image::RgbImage::from_pixel(64, 64, image::Rgb([10, 20, 30]))
+            .save(&src)
+            .unwrap();
+        let cache = dir.join("cache");
+        let thumb = ensure_thumbnail(&src, &cache).unwrap();
+
+        let past = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        std::fs::File::options()
+            .write(true)
+            .open(&thumb)
+            .unwrap()
+            .set_modified(past)
+            .unwrap();
+        let bytes = std::fs::read(&thumb).unwrap();
+
+        let again = ensure_thumbnail(&src, &cache).unwrap();
+        assert_eq!(again, thumb);
+        assert_eq!(std::fs::read(&thumb).unwrap(), bytes, "再生成されない");
+        let refreshed = std::fs::metadata(&thumb).unwrap().modified().unwrap();
+        assert!(
+            refreshed > past + std::time::Duration::from_secs(3000),
+            "ヒットで mtime が現在へ更新される"
         );
 
+        // 上限超過の削除では、ヒットで更新された方が残り、更新されなかった古い方が先に消える。
+        let stale = write_aged(&cache.join("thumbs"), "stale.jpg", 1800);
+        maybe_enforce_thumbs_limit(
+            &cache.join("thumbs"),
+            &cache.join("thumbs").join("none.jpg"),
+            &AtomicU32::new(0),
+            1,
+            u64::try_from(bytes.len()).unwrap(),
+        );
+        assert!(thumb.exists(), "最近ヒットしたものは残る");
+        assert!(!stale.exists(), "ヒットしていない古いものが先に消える");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
