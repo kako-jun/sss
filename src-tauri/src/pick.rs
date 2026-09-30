@@ -182,6 +182,40 @@ pub fn ensure_managed_media_path(
     }
 }
 
+/// Windows の `canonicalize` が返す verbatim 接頭辞（`\\?\C:\...` / `\\?\UNC\srv\share\...`）を
+/// 通常の表記へ戻す（`dunce` 相当の最小実装）。`explorer /select,` は verbatim 表記を
+/// 解釈できないため、ファイラ起動にはこの表記を渡す。verbatim でなければそのまま返す
+/// （文字列だけを見る純関数なので、Unix でも動作する）。
+pub fn strip_verbatim_prefix(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        // `X:\...` のドライブ形式だけ戻す（`\\?\Volume{...}` 等は戻せないのでそのまま）。
+        let bytes = rest.as_bytes();
+        if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+            return PathBuf::from(rest);
+        }
+    }
+    path.to_path_buf()
+}
+
+/// `open_in_explorer` がファイラに渡すパスを決める（#92）。管理下パス検証
+/// （`ensure_managed_media_path`）→ 実在確認（管理下と確認できた後だけ）→ verbatim 接頭辞の除去。
+/// ファイラを起動しない純粋な検証部で、配線を単体テストできるよう切り出している。
+pub fn resolve_open_target(
+    path: &Path,
+    picked_dir: &Path,
+    known_in_db: bool,
+) -> Result<PathBuf, String> {
+    let managed = ensure_managed_media_path(path, picked_dir, known_in_db)?;
+    if !managed.exists() {
+        return Err("imageFileNotFound".to_string());
+    }
+    Ok(strip_verbatim_prefix(&managed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -660,6 +694,85 @@ mod tests {
         assert_eq!(
             ensure_managed_media_path(&link, &picked, true),
             Err("pathNotManaged".to_string())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn strip_verbatim_prefix_restores_drive_and_unc_forms_only() {
+        assert_eq!(
+            strip_verbatim_prefix(Path::new(r"\\?\C:\Users\a\b.jpg")),
+            PathBuf::from(r"C:\Users\a\b.jpg")
+        );
+        assert_eq!(
+            strip_verbatim_prefix(Path::new(r"\\?\UNC\srv\share\b.jpg")),
+            PathBuf::from(r"\\srv\share\b.jpg")
+        );
+        // 通常表記・Unix パス・戻せない verbatim（Volume GUID）はそのまま。
+        for keep in [r"C:\a\b.jpg", "/home/a/b.jpg", r"\\?\Volume{1234}\a.jpg"] {
+            assert_eq!(strip_verbatim_prefix(Path::new(keep)), PathBuf::from(keep));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn open_target_for_a_picked_folder_file_has_no_verbatim_prefix_on_windows() {
+        let dir = workspace("open_target_win");
+        let picked = dir.join("picked");
+        fs::create_dir_all(&picked).unwrap();
+        let file = picked.join("a.jpg");
+        fs::write(&file, b"x").unwrap();
+        // `canonicalize` は `\\?\C:\...` を返すが、ファイラへ渡すパスには接頭辞が付かない。
+        assert!(file
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(r"\\?\"));
+        let target = resolve_open_target(&file, &picked, false).unwrap();
+        assert!(!target.to_string_lossy().starts_with(r"\\?\"));
+        assert!(target.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_target_accepts_existing_picked_folder_and_registered_files() {
+        let dir = workspace("open_target_ok");
+        let picked = dir.join("picked");
+        fs::create_dir_all(&picked).unwrap();
+        let inside = picked.join("a.jpg");
+        fs::write(&inside, b"x").unwrap();
+        let target = resolve_open_target(&inside, &picked, false).expect("ピック先内は通る");
+        assert!(target.exists());
+        // DB 登録済みならピック先外でも登録値のまま通る。
+        let registered = dir.join("lib").join("b.jpg");
+        fs::create_dir_all(registered.parent().unwrap()).unwrap();
+        fs::write(&registered, b"x").unwrap();
+        assert_eq!(
+            resolve_open_target(&registered, &picked, true),
+            Ok(registered.clone())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_target_rejects_unmanaged_identically_and_reports_missing_only_when_managed() {
+        let dir = workspace("open_target_ng");
+        let picked = dir.join("picked");
+        fs::create_dir_all(&picked).unwrap();
+        let existing = dir.join("secret.jpg");
+        fs::write(&existing, b"x").unwrap();
+        let rejected = Err("pathNotManaged".to_string());
+        assert_eq!(resolve_open_target(&existing, &picked, false), rejected);
+        assert_eq!(
+            resolve_open_target(&dir.join("gone.jpg"), &picked, false),
+            rejected
+        );
+        assert_eq!(
+            resolve_open_target(&picked.join("..").join("secret.jpg"), &picked, false),
+            rejected
+        );
+        assert_eq!(
+            resolve_open_target(&dir.join("gone.jpg"), &picked, true),
+            Err("imageFileNotFound".to_string())
         );
         let _ = fs::remove_dir_all(&dir);
     }

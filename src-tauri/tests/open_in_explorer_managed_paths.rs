@@ -59,20 +59,20 @@ fn unmanaged_paths_get_the_same_rejection_whether_or_not_they_exist() {
     let rejected = Err("pathNotManaged".to_string());
     assert_eq!(call(&app, &existing.to_string_lossy()), rejected);
     assert_eq!(call(&app, &missing.to_string_lossy()), rejected);
-    // `~` 展開はもうしない（管理外として拒否）。相対パスも同様。
+    // `~` 展開は廃止した。展開されていれば（HOME 配下が存在する環境では）通りうる入力なので、
+    // 「相対パス扱いで管理外として拒否される」ことを確認する。
     assert_eq!(call(&app, "~"), rejected);
     assert_eq!(call(&app, "~/Documents"), rejected);
     assert_eq!(call(&app, "secret.jpg"), rejected);
-    assert_eq!(
-        call(
-            &app,
-            &dir.join("picked")
-                .join("..")
-                .join("secret.jpg")
-                .to_string_lossy()
-        ),
-        rejected
+    // ピック先を実在させたうえで `..` による脱出（ピック先の外の実在ファイル）を拒否する。
+    let picked = dir.join("picked");
+    std::fs::create_dir_all(&picked).unwrap();
+    let escape = picked.join("..").join("secret.jpg");
+    assert!(
+        escape.exists(),
+        "脱出先は実在している（canonicalize が成功する）"
     );
+    assert_eq!(call(&app, &escape.to_string_lossy()), rejected);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
