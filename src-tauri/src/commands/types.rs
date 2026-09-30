@@ -49,14 +49,6 @@ pub struct ScanProgress {
     pub error_examples: Vec<String>,
 }
 
-/// 統計情報
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Stats {
-    pub total_images: i32,
-    pub displayed_images: i32,
-}
-
 /// `exclude_image` の結果（#80）。以前は表示用に完成させた日本語文字列
 /// （`"除外パターン追加: {pattern}"`等）をそのまま返していたが、i18n対応のため
 /// 構造化データに変える。文言の組み立てはフロント辞書側（`needsRescan`で

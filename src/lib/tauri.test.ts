@@ -20,7 +20,6 @@ import type {
   ImageInfo,
   ImageNavigationResult,
   ScanProgress,
-  Stats,
   RecentImage,
   IgnoreRule,
   DisplayStats,
@@ -111,13 +110,6 @@ describe('tauri command wrappers', () => {
     invoke.mockResolvedValue(undefined);
     await tauri.openInExplorer('/a.jpg');
     expect(invoke).toHaveBeenCalledWith('open_in_explorer', { imagePath: '/a.jpg' });
-  });
-
-  it('getStats invokes get_stats and returns Stats', async () => {
-    const stats: Stats = { totalImages: 5, displayedImages: 2 };
-    invoke.mockResolvedValue(stats);
-    expect(await tauri.getStats()).toEqual(stats);
-    expect(invoke).toHaveBeenCalledWith('get_stats');
   });
 
   it('getPlaylistInfo returns the [position, total, canGoBack] tuple', async () => {

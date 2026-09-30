@@ -409,19 +409,18 @@ CREATE TABLE scan_history (
      同じ`ImageNavigationResult`（#65）で、履歴の先頭に達して戻れない場合は
      `noHistory`（エラーではなく単純な境界）
   5. `open_in_explorer`: ファイルマネージャーで開く（OS別対応）
-  6. `get_stats`: 統計情報取得
-  7. `get_playlist_info`: プレイリスト情報取得（位置、総数、戻れるか）
-  8. `get_last_directory_path`: 最後にスキャンしたフォルダパス取得
-  9. `exit_app`: アプリケーション終了
-  10. `save_setting`: 設定を保存
-  11. `get_setting`: 設定を取得
-  12. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67）
-  13. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。
+  6. `get_playlist_info`: プレイリスト情報取得（位置、総数、戻れるか）
+  7. `get_last_directory_path`: 最後にスキャンしたフォルダパス取得
+  8. `exit_app`: アプリケーション終了
+  9. `save_setting`: 設定を保存
+  10. `get_setting`: 設定を取得
+  11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67）
+  12. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。
       即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
-  14. `get_display_stats`: 統計データ取得（グラフ用の表示回数ヒストグラム。表示回数ごとのファイル数・最小/最大/平均のみ返し、全件の一覧は返さない）
-  15. `get_default_share_directory`: ピック先デフォルトパス取得
-  16. `reset_all_data`: 全データ初期化（#64）。中核ロジックは`commands::system::
+  13. `get_display_stats`: 統計データ取得（グラフ用の表示回数ヒストグラム。表示回数ごとのファイル数・最小/最大/平均のみ返し、全件の一覧は返さない）
+  14. `get_default_share_directory`: ピック先デフォルトパス取得
+  15. `reset_all_data`: 全データ初期化（#64）。中核ロジックは`commands::system::
 reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
       `tests/reset_all_data_e2e.rs`の両方から呼ぶ、#79レビューshould4）に切り出し。
       DBファイルは削除せず、開いた接続のまま`Database::reset_to_defaults`（対象は
@@ -444,14 +443,14 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
       挙動は未検証（`beforeDevCommand`ごとkillされ得る）で、実機確認は`tauri build`
       （`--debug`可）の成果物で行う。`scan_directory`と同じ`ScanGuard`で
       スキャンと排他する
-  17. `get_ignore_patterns`: 除外ルール一覧を取得
-  18. `remove_ignore_pattern`: 除外ルールを削除
-  19. `add_ignore_pattern`: 除外ルールを手動追加
-  20. `get_recent_images`: 最近表示した画像一覧（最新100件、除外済み除く）
-  21. `get_picked_images`: ピック済みメディア一覧（画像＋動画、スキャナと同じ拡張子定義。#67）
-  22. `delete_picked_image`: ピック済み画像を削除（ピックフォルダ内の通常のメディアファイルのみ。検証は`pick::validate_picked_delete_target`）
-  23. `reset_all_display_counts`: 全画像の表示回数をリセット
-  24. `get_thumbnail`: 設定画面用サムネイル（静止画は縮小済みJPEGのパス、動画は`{kind:'video'}`。#67）
+  16. `get_ignore_patterns`: 除外ルール一覧を取得
+  17. `remove_ignore_pattern`: 除外ルールを削除
+  18. `add_ignore_pattern`: 除外ルールを手動追加
+  19. `get_recent_images`: 最近表示した画像一覧（最新100件、除外済み除く）
+  20. `get_picked_images`: ピック済みメディア一覧（画像＋動画、スキャナと同じ拡張子定義。#67）
+  21. `delete_picked_image`: ピック済み画像を削除（ピックフォルダ内の通常のメディアファイルのみ。検証は`pick::validate_picked_delete_target`）
+  22. `reset_all_display_counts`: 全画像の表示回数をリセット
+  23. `get_thumbnail`: 設定画面用サムネイル（静止画は縮小済みJPEGのパス、動画は`{kind:'video'}`。#67）
 
 ## Reactコンポーネント構成
 

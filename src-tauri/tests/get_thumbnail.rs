@@ -1,6 +1,6 @@
 //! #67: `get_thumbnail` コマンドの分岐（動画はディスクに触らず Video、非画像は Err、
 //! 画像は縮小 JPEG のパス）。`tauri::test::mock_app()` で `State` を用意して直接呼ぶ
-//! （`tests/get_stats_membership.rs` と同じ手法）。
+//! （`tests/display_stats_membership.rs` と同じ手法）。
 
 use std::path::PathBuf;
 use std::sync::Mutex;

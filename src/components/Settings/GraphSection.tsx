@@ -100,7 +100,7 @@ export function GraphSection() {
 
   const spread = spreadOf(displayStats);
   const isEven = spread <= EVEN_SPREAD_MAX;
-  // 「表示済み / 全体」もヒストグラムから導く（別コマンドの get_stats を呼ばない）。
+  // 「表示済み / 全体」もヒストグラムから導く（表示済み数専用のコマンドは無い）。
   // 全体 = 集計対象のファイル数、表示済み = 全体から「0回」の階級のファイル数を引いたもの。
   const totalImages = displayStats.files;
   const neverShown = displayStats.bins.find((bin) => bin.count === 0)?.files ?? 0;

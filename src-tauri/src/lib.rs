@@ -155,7 +155,6 @@ pub fn run() {
             commands::image::get_previous_image,
             commands::image::undo_display_count,
             commands::file_operations::open_in_explorer,
-            commands::stats::get_stats,
             commands::stats::get_playlist_info,
             commands::settings::get_last_directory_path,
             commands::system::exit_app,

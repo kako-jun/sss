@@ -33,12 +33,6 @@ export interface ScanProgress {
   errorExamples: string[];
 }
 
-// 統計情報
-export interface Stats {
-  totalImages: number;
-  displayedImages: number;
-}
-
 // 表示回数ヒストグラムの1階級（`count` 回表示されたファイルが `files` 件、#67）
 export interface DisplayCountBin {
   count: number;

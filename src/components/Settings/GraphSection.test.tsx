@@ -242,7 +242,7 @@ describe('GraphSection summary cards and table (#67)', () => {
     expect(second.container.textContent).toContain('5 / 5');
   });
 
-  it('does not call get_stats: the summary comes from get_display_stats alone', async () => {
+  it('derives the displayed-of-total summary from the get_display_stats histogram alone', async () => {
     getDisplayStats.mockResolvedValue({
       files: 2,
       min: 1,

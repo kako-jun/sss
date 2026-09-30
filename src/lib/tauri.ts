@@ -8,7 +8,6 @@ import type {
   ImageNavigationResult,
   RecentImage,
   ScanProgress,
-  Stats,
 } from '../types';
 import { t } from './i18n';
 
@@ -89,13 +88,6 @@ export async function undoDisplayCount(imagePath: string): Promise<void> {
  */
 export async function openInExplorer(imagePath: string): Promise<void> {
   return await invoke<void>('open_in_explorer', { imagePath });
-}
-
-/**
- * 統計情報を取得
- */
-export async function getStats(): Promise<Stats> {
-  return await invoke<Stats>('get_stats');
 }
 
 /**
