@@ -200,11 +200,19 @@ mod tests {
         assert_eq!(decoded.width(), THUMB_MAX_EDGE);
         assert_eq!(decoded.height(), THUMB_MAX_EDGE / 2);
 
-        // 2 回目は再生成せず同じファイルを返す（中身が変わらない）。
-        let first_bytes = std::fs::read(&thumb).unwrap();
+        // 2 回目は再生成せず同じファイルを返す。同じ画像から作り直しても同じバイト列に
+        // なるため、単なるバイト比較では再生成を見分けられない。キャッシュ済みの中身を
+        // 別の目印バイト列に置き換えておき、ヒットでそれが上書きされない（＝再生成
+        // されていない）ことを確かめる。
+        let marker = b"cached-thumbnail-marker";
+        std::fs::write(&thumb, marker).unwrap();
         let again = ensure_thumbnail(&src, &cache).unwrap();
         assert_eq!(again, thumb);
-        assert_eq!(std::fs::read(&again).unwrap(), first_bytes);
+        assert_eq!(
+            std::fs::read(&again).unwrap(),
+            marker,
+            "キャッシュヒットで再生成されない"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -221,17 +229,39 @@ mod tests {
         let thumb = ensure_thumbnail(&src, &cache).unwrap();
 
         let past = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        // 再生成されたかを見分けるため、中身を目印のバイト列に置き換える（同じ画像から
+        // 作り直すとバイト列が同じになり、元の中身との比較では区別できない）。
+        let bytes = b"cached-thumbnail-marker".to_vec();
+        std::fs::write(&thumb, &bytes).unwrap();
         std::fs::File::options()
             .write(true)
             .open(&thumb)
             .unwrap()
             .set_modified(past)
             .unwrap();
-        let bytes = std::fs::read(&thumb).unwrap();
+        #[cfg(unix)]
+        let inode_before = {
+            use std::os::unix::fs::MetadataExt;
+            std::fs::metadata(&thumb).unwrap().ino()
+        };
 
         let again = ensure_thumbnail(&src, &cache).unwrap();
         assert_eq!(again, thumb);
-        assert_eq!(std::fs::read(&thumb).unwrap(), bytes, "再生成されない");
+        assert_eq!(
+            std::fs::read(&thumb).unwrap(),
+            bytes,
+            "ヒットでは再生成されない（目印の中身が残る）"
+        );
+        // 再生成は一時ファイル→rename で別 inode になるので、同じ inode のままであることでも担保する。
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(
+                std::fs::metadata(&thumb).unwrap().ino(),
+                inode_before,
+                "ヒットでは書き換え（rename）されない"
+            );
+        }
         let refreshed = std::fs::metadata(&thumb).unwrap().modified().unwrap();
         assert!(
             refreshed > past + std::time::Duration::from_secs(3000),
