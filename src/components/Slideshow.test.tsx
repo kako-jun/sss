@@ -388,6 +388,13 @@ function tick(video: HTMLVideoElement, seconds: number) {
   fireEvent.timeUpdate(video);
 }
 
+/** DOMException 相当（name で NotAllowedError を判別する実装のため Error+name で十分）。 */
+function playError(name: string): Error {
+  const e = new Error('blocked');
+  e.name = name;
+  return e;
+}
+
 const videoA = () => makeImage({ isVideo: true, path: '/videos/a.mp4' });
 
 describe('Slideshow video audio setting (#68)', () => {
@@ -453,7 +460,7 @@ describe('Slideshow video autoplay fallback (#68)', () => {
   function rejectWith(name: string) {
     return vi
       .spyOn(window.HTMLMediaElement.prototype, 'play')
-      .mockImplementation(() => Promise.reject(new DOMException('blocked', name)));
+      .mockImplementation(() => Promise.reject(playError(name)));
   }
 
   it('falls back to muted and keeps playing when play() is rejected with NotAllowedError', async () => {
@@ -504,7 +511,7 @@ describe('Slideshow video autoplay fallback (#68)', () => {
     );
 
     await act(async () => {
-      rejectPlay(new DOMException('blocked', 'NotAllowedError'));
+      rejectPlay(playError('NotAllowedError'));
     });
 
     expect(spy).toHaveBeenCalledTimes(1);
