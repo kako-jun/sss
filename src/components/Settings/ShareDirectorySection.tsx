@@ -2,9 +2,9 @@ import { FolderOpen } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import {
   selectDirectory,
-  getSetting,
   saveSetting,
   getDefaultShareDirectory,
+  getShareDirectory,
 } from '../../lib/tauri';
 import { useT } from '../../lib/i18n';
 import { resolveShareDirectoryErrorMessage } from '../../lib/i18n/errors';
@@ -22,9 +22,8 @@ export function ShareDirectorySection() {
         const defaultDirectory = await getDefaultShareDirectory();
         setDefaultPath(defaultDirectory);
 
-        // 設定から読み込む
-        const saved = await getSetting('share_directory_path');
-        setShareDirectoryPath(saved || defaultDirectory);
+        // 実際に使われる解決済みパスを表示する（保存値が不正なら既定にフォールバック済み）
+        setShareDirectoryPath(await getShareDirectory());
       } catch (err) {
         console.error('Failed to load share directory setting:', err);
       }
@@ -40,7 +39,7 @@ export function ShareDirectorySection() {
         // #87: バックエンドが不正なピック先（ルート・ホーム等）を拒否することがあるため、
         // 保存に成功してから表示を更新する。
         await saveSetting('share_directory_path', directory);
-        setShareDirectoryPath(directory);
+        setShareDirectoryPath(await getShareDirectory());
         setError(null);
       }
     } catch (err) {

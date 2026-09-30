@@ -19,6 +19,13 @@ export async function getDefaultShareDirectory(): Promise<string> {
 }
 
 /**
+ * 実際に使われるピック先ディレクトリ（検証済み解決。不正な保存値は既定へフォールバック）を取得
+ */
+export async function getShareDirectory(): Promise<string> {
+  return await invoke<string>('get_share_directory');
+}
+
+/**
  * ディレクトリ選択ダイアログを開く
  */
 export async function selectDirectory(): Promise<string | null> {
