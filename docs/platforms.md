@@ -2,11 +2,11 @@
 
 ## 対応OS
 
-| OS      | サポート状況                                                                          |
-| ------- | ------------------------------------------------------------------------------------- |
-| Windows | 対応（CI は windows-latest でビルド・テスト。配布物は NSIS の `setup.exe`）           |
+| OS      | サポート状況                                                                            |
+| ------- | --------------------------------------------------------------------------------------- |
+| Windows | 対応（CI は windows-latest でビルド・テスト。配布物は NSIS の `setup.exe`）             |
 | Linux   | 対応（CI は Ubuntu 22.04 でビルド・テスト。WebKitGTK 4.1 が必要。AppImage / deb / rpm） |
-| macOS   | 対応（CI は macos-latest でビルド・テスト。配布物は universal の `.dmg`）             |
+| macOS   | 対応（CI は macos-latest でビルド・テスト。配布物は universal の `.dmg`）               |
 
 Windows・Linux・macOSのすべてで同じ操作感を提供します。ファイルマネージャーとの連携もOS別に実装されています（Windows: エクスプローラー、macOS: Finder、Linux: nautilus / dolphin / xdg-open）。
 

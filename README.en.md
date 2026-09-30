@@ -26,11 +26,11 @@ A slideshow app that shows 100,000+ photos fairly.
 
 Download the file for your OS from [Releases](https://github.com/kako-jun/sss/releases) (the latest is currently v1.0.0).
 
-| OS      | File                                                              |
-| ------- | ----------------------------------------------------------------- |
-| Windows | `sss_*_x64-setup.exe` (NSIS installer) / `sss_*_x64_en-US.msi`    |
-| macOS   | `sss_*_universal.dmg` (Apple Silicon and Intel)                   |
-| Linux   | `sss_*_amd64.AppImage` / `sss_*_amd64.deb` / `sss-*.x86_64.rpm`   |
+| OS      | File                                                            |
+| ------- | --------------------------------------------------------------- |
+| Windows | `sss_*_x64-setup.exe` (NSIS installer) / `sss_*_x64_en-US.msi`  |
+| macOS   | `sss_*_universal.dmg` (Apple Silicon and Intel)                 |
+| Linux   | `sss_*_amd64.AppImage` / `sss_*_amd64.deb` / `sss-*.x86_64.rpm` |
 
 **v1.0.0 does not include later changes such as video slideshow playback, the Japanese/English UI, the reworked Stats tab and the keyboard shortcuts (see `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md)).** To use the latest `main`, build from source (below). The current release workflow builds only the NSIS installer (`setup.exe`) for Windows (the v1.0.0 `.msi` came from an earlier build).
 
@@ -125,15 +125,15 @@ A legacy `.sssignore` file (gitignore-style, in your home directory: Windows `%U
 
 Open it with the gear button at the top right (or the button on the welcome screen). It has seven tabs:
 
-| Tab           | Contents                                                                                                                              |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Folder        | Choose the photo folder and scan it (result: files, new, deleted, duration, read errors)                                              |
-| Options       | Display interval (5-60 s), follow EXIF rotation, video audio (default: off) and max playback time, pick folder, language              |
-| Exclude Rules | List, remove and manually add exclude rules                                                                                           |
-| Picks         | List and delete picked photos/videos                                                                                                  |
-| History       | Recently shown photos (latest 100) and excluding from there                                                                           |
-| Stats         | Display-count distribution (bar chart / table) and "Reset Display Counts"                                                             |
-| Info          | Version, GitHub link, "Reset All Data" (erases all data and restarts the app; picked files are kept)                                  |
+| Tab           | Contents                                                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Folder        | Choose the photo folder and scan it (result: files, new, deleted, duration, read errors)                                 |
+| Options       | Display interval (5-60 s), follow EXIF rotation, video audio (default: off) and max playback time, pick folder, language |
+| Exclude Rules | List, remove and manually add exclude rules                                                                              |
+| Picks         | List and delete picked photos/videos                                                                                     |
+| History       | Recently shown photos (latest 100) and excluding from there                                                              |
+| Stats         | Display-count distribution (bar chart / table) and "Reset Display Counts"                                                |
+| Info          | Version, GitHub link, "Reset All Data" (erases all data and restarts the app; picked files are kept)                     |
 
 A video advances after it plays to the end (or reaches the "Maximum video playback time"), not after the display interval. The language can be Auto (OS locale) / 日本語 / English.
 
