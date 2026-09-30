@@ -86,7 +86,7 @@ fn system_protected_dirs() -> Vec<PathBuf> {
     {
         ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)"]
             .iter()
-            .filter_map(|key| std::env::var_os(key))
+            .filter_map(std::env::var_os)
             .map(PathBuf::from)
             .collect()
     }
