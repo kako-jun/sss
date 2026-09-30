@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { clampDisplayInterval, DEFAULT_DISPLAY_INTERVAL, idleFadeClassName } from './constants';
+import {
+  clampDisplayInterval,
+  DEFAULT_DISPLAY_INTERVAL,
+  DEFAULT_VIDEO_MAX_DURATION_SEC,
+  VIDEO_MAX_DURATION_OPTIONS_SEC,
+  idleFadeClassName,
+  normalizeVideoMaxDuration,
+  parseVideoAudioEnabled,
+  parseVideoMaxDuration,
+} from './constants';
 
 // #65 問題7: clampDisplayInterval は保存済み設定の破損（NaN/0/範囲外）を丸める唯一の
 // 検証経路（IntervalSection・起動シーケンス・useSlideshow が全てこれを通す）。
@@ -80,5 +89,67 @@ describe('idleFadeClassName (#66 問題10, #66レビューmust2)', () => {
   it('does not use the old focus-within variant (residual mouse-click focus must not keep it visible)', () => {
     expect(idleFadeClassName(true)).not.toContain('focus-within');
     expect(idleFadeClassName(false)).not.toContain('focus-within');
+  });
+});
+
+// #68: 動画設定の検証関数。保存値の破損（NaN・負数・選択肢外・小数）で
+// 「1秒で次へ進み続ける」ような事故にならないよう、既定（無制限）へ丸める。
+describe('normalizeVideoMaxDuration (#68)', () => {
+  it('keeps every offered option unchanged (including 0 = unlimited)', () => {
+    for (const sec of VIDEO_MAX_DURATION_OPTIONS_SEC) {
+      expect(normalizeVideoMaxDuration(sec)).toBe(sec);
+    }
+  });
+
+  it('defaults to unlimited (0) and offers 30/60/120 among the options', () => {
+    expect(DEFAULT_VIDEO_MAX_DURATION_SEC).toBe(0);
+    expect(VIDEO_MAX_DURATION_OPTIONS_SEC).toEqual(expect.arrayContaining([0, 30, 60, 120]));
+  });
+
+  it('rounds values not in the option list to the default (boundaries around 30)', () => {
+    expect(normalizeVideoMaxDuration(29)).toBe(0);
+    expect(normalizeVideoMaxDuration(31)).toBe(0);
+    expect(normalizeVideoMaxDuration(1)).toBe(0);
+  });
+
+  it('rounds negative, fractional, NaN and Infinity to the default', () => {
+    expect(normalizeVideoMaxDuration(-30)).toBe(0);
+    expect(normalizeVideoMaxDuration(30.5)).toBe(0);
+    expect(normalizeVideoMaxDuration(NaN)).toBe(0);
+    expect(normalizeVideoMaxDuration(Infinity)).toBe(0);
+  });
+});
+
+describe('parseVideoMaxDuration (#68)', () => {
+  it('parses stored option values', () => {
+    expect(parseVideoMaxDuration('0')).toBe(0);
+    expect(parseVideoMaxDuration('30')).toBe(30);
+    expect(parseVideoMaxDuration('120')).toBe(120);
+  });
+
+  it('falls back to the default for missing or corrupt values', () => {
+    expect(parseVideoMaxDuration(null)).toBe(0);
+    expect(parseVideoMaxDuration(undefined)).toBe(0);
+    expect(parseVideoMaxDuration('')).toBe(0);
+    expect(parseVideoMaxDuration('abc')).toBe(0);
+    expect(parseVideoMaxDuration('-30')).toBe(0);
+    expect(parseVideoMaxDuration('30.5')).toBe(0);
+    expect(parseVideoMaxDuration('45')).toBe(0);
+    expect(parseVideoMaxDuration('NaN')).toBe(0);
+  });
+});
+
+describe('parseVideoAudioEnabled (#68)', () => {
+  it('restores "true"/"false" exactly', () => {
+    expect(parseVideoAudioEnabled('true')).toBe(true);
+    expect(parseVideoAudioEnabled('false')).toBe(false);
+  });
+
+  it('defaults to OFF for missing or corrupt values', () => {
+    expect(parseVideoAudioEnabled(null)).toBe(false);
+    expect(parseVideoAudioEnabled(undefined)).toBe(false);
+    expect(parseVideoAudioEnabled('')).toBe(false);
+    expect(parseVideoAudioEnabled('1')).toBe(false);
+    expect(parseVideoAudioEnabled('TRUE')).toBe(false);
   });
 });
