@@ -415,7 +415,7 @@ CREATE TABLE scan_history (
   8. `exit_app`: アプリケーション終了
   9. `save_setting`: 設定を保存
   10. `get_setting`: 設定を取得
-  11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67。**元パスは管理下＋メディア拡張子のみ**: DB（`file_metadata`/`image_stats`）に文字列一致で登録済み、またはピックフォルダ内の実体ファイル（`canonicalize`で`..`・フォルダ外symlinkを拒否）。管理外は`pathNotManaged`、非メディアは`notMediaFile`のエラーコードで拒否。検証は`pick::ensure_managed_media_path`、#87）
+  11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67。**元パスは管理下＋メディア拡張子のみ**: DB（`file_metadata`/`image_stats`）に文字列一致で登録済み、またはピックフォルダ内の実体ファイル（`canonicalize`で`..`・フォルダ外symlinkを拒否）。管理外は`pathNotManaged`、非メディアは`notMediaFile`のエラーコードで拒否。検証は`pick::ensure_managed_media_path`（canonicalパスを返し後続処理はそれを使う。DB登録パスでもsymlinkは拒否）。**基準のピック先も検証**: `get_picked_directory`は`resolve_validated_share_directory`で不正な保存値（相対・`..`・ルート・ホーム/その祖先）を既定へフォールバックし、`save_setting`は`share_directory_path`を保存前に`is_acceptable_share_directory`で検証（`shareDirectoryInvalid`）。**脅威モデル**: 防ぐのは素朴な任意パス指定。WebViewが`scan_directory`/設定を正規手順で操作するケースは防がない（フォルダ選択はJS側ダイアログ前提の既存設計、#87）
   12. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。
       即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
