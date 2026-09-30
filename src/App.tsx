@@ -38,6 +38,7 @@ import {
   createButtonFocusGuard,
 } from './lib/keyboardShortcuts';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
+import { createClickDebouncer, createWheelNavigator } from './lib/photoGestures';
 
 function App() {
   const t = useT();
@@ -88,7 +89,11 @@ function App() {
   );
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
   const overlayRef = useRef<OverlayUIHandle>(null);
-  const { isIdle, setIsHovering } = useMouseIdle(3000);
+  const { isIdle, setIsHovering, resetIdle } = useMouseIdle(3000);
+  // #78: 写真上のクリック（一時停止/再開）とホイール（前/次）の判定器。状態を持つので
+  // 再レンダーをまたいで同じインスタンスを使い続ける。
+  const acceptPhotoClick = useRef(createClickDebouncer()).current;
+  const navigateByWheel = useRef(createWheelNavigator()).current;
   // #66レビュー3巡目nit: 右上ピル内の各ボタンへ個別に付ける
   // onMouseDownガード（詳細はOverlayUI.tsxの同種のrefと同じ理由）。
   const pillContainerRef = useRef<HTMLDivElement>(null);
@@ -285,6 +290,28 @@ function App() {
       await loadNextImage();
     } else {
       await updatePlaylistInfo();
+    }
+  };
+
+  // #78: 写真上のマウス操作。写真領域（Slideshow）にだけ付けるため、オーバーレイ・
+  // 右上ピル・モーダル（写真の兄弟要素）の操作とは干渉しない。
+  const handlePhotoClick = (e: React.MouseEvent) => {
+    if (isSettingsOpen || isShortcutsOpen) return;
+    if (!acceptPhotoClick(e.timeStamp)) return;
+    // 操作の結果（⏸/▶）が見えるよう、オーバーレイを起こす。
+    resetIdle();
+    setIsPausedByUser((prev) => !prev);
+  };
+
+  const handlePhotoWheel = (e: React.WheelEvent) => {
+    if (isSettingsOpen || isShortcutsOpen) return;
+    // ピンチズーム（ctrl+wheel）等は対象外。
+    if (e.ctrlKey || e.metaKey) return;
+    const direction = navigateByWheel(e.deltaX, e.deltaY, e.deltaMode, e.timeStamp);
+    if (direction === 'next') {
+      void handleNext();
+    } else if (direction === 'previous' && canGoBack) {
+      void handlePrevious();
     }
   };
 
@@ -634,17 +661,20 @@ function App() {
         isIdle && !isSettingsOpen && !isShortcutsOpen ? ' cursor-none' : ''
       }`}
     >
-      {/* スライドショー */}
-      <Slideshow
-        image={currentImage}
-        displayToken={displayToken}
-        isPlaying={isPlaying}
-        videoAudioEnabled={videoAudioEnabled}
-        videoMaxDurationSec={videoMaxDurationSec}
-        onMediaReady={handleMediaReady}
-        onAdvance={loadNextImage}
-        onMediaError={handleMediaError}
-      />
+      {/* スライドショー。#78: 写真上のクリック=一時停止/再開、ホイール/横スワイプ=前/次。
+          `display: contents` のラッパーはレイアウトに影響せず、写真領域だけでイベントを拾う。 */}
+      <div className="contents" onClick={handlePhotoClick} onWheel={handlePhotoWheel}>
+        <Slideshow
+          image={currentImage}
+          displayToken={displayToken}
+          isPlaying={isPlaying}
+          videoAudioEnabled={videoAudioEnabled}
+          videoMaxDurationSec={videoMaxDurationSec}
+          onMediaReady={handleMediaReady}
+          onAdvance={loadNextImage}
+          onMediaError={handleMediaError}
+        />
+      </div>
 
       {/* 右上の常設ボタン（終了・ショートカット・ウィンドウモード・設定）。
           #66視覚刷新: 枠線付き四角ボタン4つの並びから、枠線なしアイコンを1つの

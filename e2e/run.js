@@ -1731,6 +1731,75 @@ const scenarios = [
       };
     },
   },
+  {
+    // #78: 写真上のマウス操作。クリック=一時停止/再開（連打は1回に畳む）、
+    // ホイール=前/次（連続イベントは1回に畳む）。オーバーレイのボタンは写真クリック扱いにならない。
+    name: 'photo click toggles pause and wheel navigates, without interfering with the overlay (#78)',
+    hash: 'gestures',
+    async run(page) {
+      await page.waitForTimeout(1000);
+      const pausedTitle = (p) => p.locator('button[title="再生"]').count();
+      const playingTitle = (p) => p.locator('button[title="一時停止"]').count();
+
+      // 写真上の実クリック → 一時停止
+      await page.mouse.move(640, 300);
+      await page.mouse.click(640, 300);
+      await page.waitForTimeout(150);
+      const pausedAfterClick = (await pausedTitle(page)) === 1;
+      // 少し空けてもう一度 → 再生に戻る
+      await page.waitForTimeout(450);
+      await page.mouse.click(640, 300);
+      await page.waitForTimeout(150);
+      const playingAfterSecond = (await playingTitle(page)) === 1;
+      // ダブルクリック（2発目は無視される）→ 1回分だけ切り替わって一時停止
+      await page.waitForTimeout(450);
+      await page.mouse.dblclick(640, 300);
+      await page.waitForTimeout(150);
+      const pausedAfterDouble = (await pausedTitle(page)) === 1;
+      await page.waitForTimeout(450);
+      await page.mouse.click(640, 300); // 再生へ戻す
+      await page.waitForTimeout(150);
+
+      // オーバーレイのボタン（次へ）は一時停止状態を変えない。
+      await wakeFromIdle(page);
+      const beforeOverlayClick = await countCalls(page, 'get_next_image');
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.waitForTimeout(200);
+      const overlayStillPlaying = (await playingTitle(page)) === 1;
+      const nextAfterOverlay = await countCalls(page, 'get_next_image');
+
+      // ホイール: 下=次へ。続けて届くイベントは1回に畳まれる。
+      await page.mouse.move(640, 300);
+      await page.waitForTimeout(400);
+      const nextBefore = await countCalls(page, 'get_next_image');
+      await page.mouse.wheel(0, 100);
+      await page.waitForTimeout(50);
+      await page.mouse.wheel(0, 100);
+      await page.mouse.wheel(0, 100);
+      await page.waitForTimeout(300);
+      const nextAfter = await countCalls(page, 'get_next_image');
+
+      // 上=前へ（戻れる状態）。一連の操作が落ち着いてから。
+      await page.waitForTimeout(400);
+      const prevBefore = await countCalls(page, 'get_previous_image');
+      await page.mouse.wheel(0, -100);
+      await page.waitForTimeout(300);
+      const prevAfter = await countCalls(page, 'get_previous_image');
+
+      const pass =
+        pausedAfterClick &&
+        playingAfterSecond &&
+        pausedAfterDouble &&
+        overlayStillPlaying &&
+        nextAfterOverlay - beforeOverlayClick === 1 &&
+        nextAfter - nextBefore === 1 &&
+        prevAfter - prevBefore === 1;
+      return {
+        pass,
+        detail: `pausedAfterClick=${pausedAfterClick} playingAfterSecond=${playingAfterSecond} pausedAfterDouble=${pausedAfterDouble} overlayStillPlaying=${overlayStillPlaying} overlayNext=${nextAfterOverlay - beforeOverlayClick} wheelNext=${nextAfter - nextBefore} wheelPrev=${prevAfter - prevBefore}`,
+      };
+    },
+  },
 ];
 
 /**

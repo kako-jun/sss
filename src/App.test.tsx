@@ -857,3 +857,69 @@ describe('App directoryError follows locale switches without mixing languages (#
     expect(screen.queryByText('指定したフォルダが見つかりません: /photos')).toBeNull();
   });
 });
+
+// #78: 写真上のマウス操作。写真クリック=一時停止/再開、ホイール=前/次。
+describe('App mouse gestures on the photo (#78)', () => {
+  async function setupPhoto() {
+    getLastDirectoryPath.mockResolvedValue('/photos');
+    restorePlaylist.mockResolvedValue(true);
+    getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));
+    getPlaylistInfo.mockResolvedValue([2, 5, true]); // 戻れる状態
+    render(<App />);
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+    return findPhotoImg() as HTMLElement;
+  }
+
+  it('toggles pause/resume when the photo is clicked, and folds a rapid double click into one toggle', async () => {
+    const photo = await setupPhoto();
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+
+    fireEvent.click(photo);
+    await waitFor(() => expect(screen.getByTitle('再生')).toBeTruthy());
+
+    // 直後の連打（ダブルクリックの2発目）は無視され、再生に戻ってしまわない。
+    fireEvent.click(photo);
+    expect(screen.getByTitle('再生')).toBeTruthy();
+  });
+
+  it('does not toggle pause when a control on the overlay is clicked', async () => {
+    await setupPhoto();
+    // 「次へ」ボタンのクリックはオーバーレイ操作であって写真クリックではない。
+    fireEvent.click(screen.getByTitle('次へ (→)'));
+    await Promise.resolve();
+    expect(screen.getByTitle('一時停止')).toBeTruthy();
+  });
+
+  it('goes to the next photo on wheel down / horizontal swipe left, and previous on wheel up', async () => {
+    const photo = await setupPhoto();
+    getNextImage.mockClear();
+    getPreviousImage.mockClear();
+
+    fireEvent.wheel(photo, { deltaY: 100, deltaMode: 0 });
+    await waitFor(() => expect(getNextImage).toHaveBeenCalledTimes(1));
+    expect(getPreviousImage).not.toHaveBeenCalled();
+
+    // 連続して届く慣性イベントでは、続けて進まない。
+    fireEvent.wheel(photo, { deltaY: 100, deltaMode: 0 });
+    fireEvent.wheel(photo, { deltaY: 100, deltaMode: 0 });
+    await Promise.resolve();
+    expect(getNextImage).toHaveBeenCalledTimes(1);
+  });
+
+  it('goes to the previous photo on wheel up once the gesture has settled', async () => {
+    const photo = await setupPhoto();
+    getPreviousImage.mockClear();
+    fireEvent.wheel(photo, { deltaY: -100, deltaMode: 0 });
+    await waitFor(() => expect(getPreviousImage).toHaveBeenCalledTimes(1));
+  });
+
+  it('ignores pinch-zoom (ctrl+wheel)', async () => {
+    const photo = await setupPhoto();
+    getNextImage.mockClear();
+    fireEvent.wheel(photo, { deltaY: 100, deltaMode: 0, ctrlKey: true });
+    await Promise.resolve();
+    expect(getNextImage).not.toHaveBeenCalled();
+  });
+});
