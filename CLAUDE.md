@@ -47,6 +47,7 @@
 ### 2. スライドショー
 
 - **表示間隔**: 5〜60秒でカスタマイズ可能（設定画面から変更）
+- **動画の音声・最大再生時間**（#68）: 設定画面オプションタブの「動画」セクション。`app_settings` の `video_audio_enabled`（`'true'|'false'`、既定オフ=無音）と `video_max_duration_sec`（秒、`0`=無制限が既定、選択肢は `0/30/60/120/300`）。既存の `save_setting`/`get_setting` に乗せ、Rust側の検証・コマンド追加は無い。破損値は `constants.ts` の `parseVideoAudioEnabled`/`parseVideoMaxDuration`/`normalizeVideoMaxDuration` が既定へ丸める（`clampDisplayInterval` と同じ「唯一の検証経路」）。`Slideshow.tsx` は音声オンなら `muted=false`、上限は壁時計タイマーでなく `timeupdate` の `currentTime` で判定し、`ended` と共通の `finishVideo`（`finishedKeyRef` で1本につき1回）から `onAdvance` する。詳細は `docs/architecture.md` §6-(h)
 - **対象ファイル**:
   - 画像: JPG, PNG, GIF, BMP, WEBP など
   - 動画: MP4, WebM, OGV, M4V（旧フォーマットはffmpeg同梱後に対応予定 #45）
@@ -464,6 +465,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 - 画像/動画表示コンポーネント
 - Framer Motionによるフェードアニメーション
+- 動画の音声（`muted={!videoAudioEnabled}`）・最大再生時間（`timeupdate`で判定）・自動再生拒否時のミュートへのフォールバック・退場中の古い動画のミュート/一時停止（#68）
 
 ### src/components/OverlayUI.tsx
 
