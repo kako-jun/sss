@@ -5,6 +5,8 @@ import {
   resolveScanErrorMessage,
   resolveAddPatternErrorMessage,
   resolveResetAllDataErrorMessage,
+  resolvePickErrorMessage,
+  resolveShareDirectoryErrorMessage,
 } from './errors';
 
 /**
@@ -47,6 +49,32 @@ describe('backend error code -> message resolution (#80)', () => {
       expect(resolveScanErrorMessage('directoryNotFound:unexpected', '/missing')).toBe(
         '指定したフォルダが見つかりません: /missing',
       );
+    });
+  });
+
+  describe('resolveShareDirectoryErrorMessage', () => {
+    it('translates shareDirectoryInvalid and falls back for unknown errors', () => {
+      expect(resolveShareDirectoryErrorMessage('shareDirectoryInvalid')).toContain(
+        'ピック先に指定できません',
+      );
+      expect(resolveShareDirectoryErrorMessage('Failed to save setting: x')).toBe(
+        'ピック先の保存に失敗しました',
+      );
+    });
+  });
+
+  describe('resolvePickErrorMessage', () => {
+    it('translates the #87 rejection codes', () => {
+      expect(resolvePickErrorMessage('pathNotManaged')).toBe(
+        'このファイルはスライドショーの管理外のためコピーできません',
+      );
+      expect(resolvePickErrorMessage('notMediaFile')).toBe(
+        '画像・動画ファイルではないためコピーできません',
+      );
+    });
+
+    it('falls back to the generic copy-failed message for unknown errors', () => {
+      expect(resolvePickErrorMessage('Failed to copy file: disk full')).toBe('エラー: コピー失敗');
     });
   });
 

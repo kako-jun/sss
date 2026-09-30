@@ -382,7 +382,7 @@ CREATE TABLE scan_history (
 
 ### src-tauri/src/commands/
 
-- Tauriコマンドハンドラ（24個）
+- Tauriコマンドハンドラ（27個。`lib.rs` の `invoke_handler` 登録数）
   1. `scan_directory`: フォルダスキャン（リアルタイム進捗イベント付き）。プレイリストの
      新規作成/差分更新に加え、メモリ上にプレイリストが無い場合（`restore_playlist` が
      復元できなかった、またはまだ呼ばれていない）はDB保存済みのプレイリスト状態を
@@ -422,7 +422,7 @@ CREATE TABLE scan_history (
   8. `exit_app`: アプリケーション終了
   9. `save_setting`: 設定を保存
   10. `get_setting`: 設定を取得
-  11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67）
+  11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67。**元パスは管理下＋メディア拡張子のみ**: DB（`file_metadata`/`image_stats`）に文字列一致で登録済み、またはピックフォルダ内の実体ファイル（`canonicalize`で`..`・フォルダ外symlinkを拒否）。管理外は`pathNotManaged`、非メディアは`notMediaFile`のエラーコードで拒否。検証は`pick::ensure_managed_media_path`（canonicalパスを返し後続処理はそれを使う。DB登録パスでもsymlinkは拒否）。**基準のピック先も検証**: `get_picked_directory`は`resolve_validated_share_directory`で不正な保存値（相対・`..`・ルート・ホーム/その祖先）を既定へフォールバックし、`save_setting`は`share_directory_path`を保存前に`is_acceptable_share_directory`で検証（`shareDirectoryInvalid`）。**拒否するのは**ルート（Windowsはホームと同一ドライブのみ。`D:\`・UNC共有ルートは可）・ホーム自身とその祖先・システム領域（`/etc` `/usr` `/System` `/Library` 等、Windowsは`SystemRoot`/`ProgramFiles`）・ホーム配下の`.ssh/.gnupg/.aws/.kube`・Linuxの`/root`・macOSの`~/Library/Keychains`・相対/`..`（`/opt`と`/run`は外付け/自動マウント`/run/media`を壊すため対象外）。**それ以外の任意ディレクトリは保存できる**（管理下扱いは画像・動画拡張子のファイルのみ。allowlistは外付け/NASを壊すため採らない）。比較は実パス化し、macOS/Windowsは大文字小文字無視。設定画面は`get_share_directory`（解決済みパス）を表示。**脅威モデル**: 防ぐのは素朴な任意パス指定。WebViewが`scan_directory`/設定を正規手順で操作するケースは防がない（フォルダ選択はJS側ダイアログ前提の既存設計、#87）
   12. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。
       即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
@@ -459,7 +459,10 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
   20. `get_picked_images`: ピック済みメディア一覧（画像＋動画、スキャナと同じ拡張子定義。#67）
   21. `delete_picked_image`: ピック済み画像を削除（ピックフォルダ内の通常のメディアファイルのみ。検証は`pick::validate_picked_delete_target`）
   22. `reset_all_display_counts`: 全画像の表示回数をリセット
-  23. `get_thumbnail`: 設定画面用サムネイル（静止画は縮小済みJPEGのパス、動画は`{kind:'video'}`。#67）
+  23. `get_thumbnail`: 設定画面用サムネイル（静止画は縮小済みJPEGのパス、動画は`{kind:'video'}`。#67。静止画は`pick_image`と同じ管理下パス検証`pick::ensure_managed_media_path`を通し、管理外は`pathNotManaged`で拒否。#87）
+  24. `get_share_directory`: 実際に使われるピック先（検証済み解決。不正な保存値は既定へフォールバック済み）を返す。設定画面はこれを表示する（#87）
+  25. `undo_display_count`: 表示回数の加算を取り消す（直前に加算したパスと一致する場合のみ。画像読み込み失敗時の`onError`用、#65）
+  26. `get_os_locale`: OSのロケール（例: `ja-JP`）を返す（言語`auto`の決定用、#82）
 
 ## Reactコンポーネント構成
 

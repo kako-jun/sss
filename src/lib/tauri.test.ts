@@ -31,6 +31,12 @@ beforeEach(() => {
 });
 
 describe('tauri command wrappers', () => {
+  it('getShareDirectory invokes get_share_directory and returns the resolved path', async () => {
+    invoke.mockResolvedValue('/mnt/ssd/picked');
+    expect(await tauri.getShareDirectory()).toBe('/mnt/ssd/picked');
+    expect(invoke).toHaveBeenCalledWith('get_share_directory');
+  });
+
   it('getDefaultShareDirectory invokes get_default_share_directory and returns the value', async () => {
     invoke.mockResolvedValue('/home/me/Pictures');
     const result = await tauri.getDefaultShareDirectory();

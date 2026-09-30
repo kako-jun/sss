@@ -75,6 +75,14 @@ export const en = {
   lastDisplayedTooltip: 'Last shown: {when}',
   pickCopyDone: 'Copied to {path}',
   pickCopyFailed: "Couldn't copy the photo",
+  errorPathNotManaged: "This file isn't managed by the slideshow, so it can't be copied",
+  errorShareDirectoryInvalid:
+    "This folder can't be used as the pick destination (not allowed: root, home folder, relative paths, etc.)",
+  errorShareDirectoryLoadFailed: "Couldn't load the pick destination",
+  errorShareDirectoryRefreshFailed:
+    'The pick destination was saved, but the display could not be refreshed',
+  errorShareDirectorySaveFailed: "Couldn't save the pick destination",
+  errorNotMediaFile: "This isn't an image or video file, so it can't be copied",
   excludeFailed: 'Error: exclude failed',
   // #78: brief toast right after exclude/pick, with an Undo button for a few seconds
   undoButton: 'Undo',

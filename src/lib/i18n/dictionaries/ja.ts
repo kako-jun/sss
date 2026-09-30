@@ -75,6 +75,13 @@ export const ja = {
   lastDisplayedTooltip: '最終表示: {when}',
   pickCopyDone: 'コピー完了: {path}',
   pickCopyFailed: 'エラー: コピー失敗',
+  errorPathNotManaged: 'このファイルはスライドショーの管理外のためコピーできません',
+  errorShareDirectoryInvalid:
+    'このフォルダはピック先に指定できません（ルート・ホームフォルダ・相対パスなどは不可）',
+  errorShareDirectoryLoadFailed: 'ピック先を読み込めませんでした',
+  errorShareDirectoryRefreshFailed: 'ピック先は保存しましたが、表示の更新に失敗しました',
+  errorShareDirectorySaveFailed: 'ピック先の保存に失敗しました',
+  errorNotMediaFile: '画像・動画ファイルではないためコピーできません',
   excludeFailed: 'エラー: 除外失敗',
   // #78: 除外/ピック直後の控えめなトースト（数秒だけ「取り消す」を出す）
   undoButton: '取り消す',

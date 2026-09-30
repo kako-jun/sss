@@ -940,6 +940,18 @@ impl Database {
         Ok(result)
     }
 
+    /// `path` がアプリの管理下（スキャン済みのプレイリスト構成員 `file_metadata`、
+    /// または表示履歴 `image_stats`）に登録されているかを文字列の完全一致で判定する（#87）。
+    /// `get_thumbnail`/`pick_image` が任意の絶対パスを受け付けないための照合に使う。
+    pub fn is_known_media_path(&self, path: &str) -> Result<bool> {
+        self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM file_metadata WHERE path = ?1)
+                 OR EXISTS(SELECT 1 FROM image_stats WHERE path = ?1)",
+            [path],
+            |row| row.get(0),
+        )
+    }
+
     /// 過去にスキャンした全ディレクトリパス（重複なし）を取得する。
     /// 起動時に asset scope へ動的許可するために使う（前回ディレクトリだけでなく、
     /// 履歴タブ〔`get_recent_images`〕に残る他ディレクトリの画像も表示できるようにする。

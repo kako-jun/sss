@@ -29,6 +29,7 @@ import {
 import { createPortal } from 'react-dom';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useT } from '../lib/i18n';
+import { resolvePickErrorMessage } from '../lib/i18n/errors';
 import { idleFadeClassName } from '../constants';
 import { createButtonFocusGuard } from '../lib/keyboardShortcuts';
 
@@ -296,7 +297,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
       });
     } catch (err) {
       console.error('Failed to share image:', err);
-      showStatusMessage(t('pickCopyFailed'));
+      showStatusMessage(resolvePickErrorMessage(String(err)));
     }
     setShowMoreMenu(false);
   };

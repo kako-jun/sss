@@ -27,6 +27,145 @@ pub fn resolve_share_directory(pictures_dir: &Path, saved_setting: Option<&str>)
     }
 }
 
+/// ピック先ディレクトリとして受け入れてよいパスか（#87 M1）。
+///
+/// ピック先は `get_thumbnail`/`pick_image` の「管理下」判定の基準になるため、WebView から
+/// `/` やホームディレクトリ等の広いパスに書き換えられると制限が無意味になる。ピック先は
+/// 未作成のことがあるので存在は要求しない。次を拒否する（**拒否リスト方式**。外付け
+/// ドライブ・NAS など正当な任意フォルダを許すため allowlist にはしない）:
+/// - 空・相対パス・`..` を含むパス
+/// - ファイルシステムルートのうち [`is_protected_root`] に該当するもの（Unix の `/`、
+///   Windows ではホームと同一ドライブのルート。`D:\` や UNC 共有ルートは `sanitize_allow_dir`
+///   と同様に許可する）
+/// - ホームディレクトリ自身およびその祖先（`/Users` 等）
+/// - システム領域（[`system_protected_dirs`]）と、ホーム配下の秘密情報ディレクトリ
+///   （`.ssh` `.gnupg` `.aws` `.kube`）とその配下
+///
+/// 比較は存在する最長の祖先を `canonicalize` した実パスで行い、macOS/Windows の
+/// 大文字小文字非区別 FS では大文字小文字を無視する（`/users` などの別表記で
+/// すり抜けさせない）。
+pub fn is_acceptable_share_directory(path: &Path, home_dir: Option<&Path>) -> bool {
+    use std::path::Component;
+    if path.as_os_str().is_empty() || !path.is_absolute() {
+        return false;
+    }
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return false;
+    }
+    let Some(home) = home_dir else {
+        // ホームが不明なら広いパスかどうか判定できない。安全側に倒して拒否。
+        return false;
+    };
+    let candidate = resolve_for_comparison(path);
+    let home = resolve_for_comparison(home);
+    if candidate.parent().is_none() {
+        return !is_protected_root(&candidate, Some(&home));
+    }
+    if path_starts_with(&home, &candidate) {
+        return false;
+    }
+    for dir in system_protected_dirs()
+        .into_iter()
+        .chain(HOME_SECRET_DIRS.iter().map(|name| home.join(name)))
+    {
+        if path_starts_with(&candidate, &resolve_for_comparison(&dir)) {
+            return false;
+        }
+    }
+    true
+}
+
+/// ホーム配下の秘密情報ディレクトリ名（ピック先にできない）。
+const HOME_SECRET_DIRS: [&str; 5] = [".ssh", ".gnupg", ".aws", ".kube", "Library/Keychains"];
+
+/// ピック先にできないシステム領域。`/var` と `/private` 全体は macOS の一時領域
+/// （`/private/var/folders`）や外付けのマウント先を含むので丸ごとは拒否せず、
+/// 設定ファイル置き場の `/private/etc` だけを対象にする。`/root`（root のホーム）は
+/// 拒否するが、`/opt` と `/run` は外付け・自動マウント（`/run/media`）や正当なアプリ置き場を
+/// 壊すので対象外。
+fn system_protected_dirs() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)"]
+            .iter()
+            .filter_map(std::env::var_os)
+            .map(PathBuf::from)
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        [
+            "/etc",
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/boot",
+            "/dev",
+            "/proc",
+            "/sys",
+            "/System",
+            "/Library",
+            "/private/etc",
+            "/root",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect()
+    }
+}
+
+/// 比較用に実パスへ解決する。存在する最長の祖先を `canonicalize` し、残りの
+/// （未作成の）要素をそのまま付ける。どの祖先も解決できなければ元のパス。
+fn resolve_for_comparison(path: &Path) -> PathBuf {
+    let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut current = path;
+    loop {
+        if let Ok(canonical) = current.canonicalize() {
+            return tail.iter().rev().fold(canonical, |acc, c| acc.join(c));
+        }
+        match (current.parent(), current.file_name()) {
+            (Some(parent), Some(name)) => {
+                tail.push(name);
+                current = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// `path` が `base` の配下（または同一）か。macOS/Windows の FS は既定で大文字小文字を
+/// 区別しないため、その2 OS では要素ごとに大文字小文字を無視して比較する。
+fn path_starts_with(path: &Path, base: &Path) -> bool {
+    #[cfg(any(target_os = "macos", windows))]
+    {
+        let fold = |p: &Path| -> Vec<String> {
+            p.components()
+                .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+                .collect()
+        };
+        let (path, base) = (fold(path), fold(base));
+        path.starts_with(&base)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        path.starts_with(base)
+    }
+}
+
+/// 検証済みのピック先を解決する（#87 M1）。保存値が不正（相対・ルート・ホーム等）なら
+/// 既定 `<pictures>/sss-picked` にフォールバックする。
+pub fn resolve_validated_share_directory(
+    pictures_dir: &Path,
+    saved_setting: Option<&str>,
+) -> PathBuf {
+    let resolved = resolve_share_directory(pictures_dir, saved_setting);
+    if is_acceptable_share_directory(&resolved, dirs::home_dir().as_deref()) {
+        resolved
+    } else {
+        default_share_directory(pictures_dir)
+    }
+}
+
 /// ピック先ディレクトリを解決し、そのまま asset scope に許可してよいか判定する。
 /// `resolve_share_directory` と `sanitize_allow_dir` を束ねた薄いラッパーで、
 /// `save_setting`（設定変更時）が使う。`pick_image` はピック先の解決を
@@ -184,6 +323,121 @@ fn normalize_unc_server_share(rest: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// 実在する一時ディレクトリを「ホーム」に見立てる（canonicalize の OS 差
+    /// （macOS の /var → /private/var 等）を踏まないよう、実パスで組む）。
+    fn fake_home(tag: &str) -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("sss_share_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let home = base.join("home").join("kako");
+        std::fs::create_dir_all(&home).unwrap();
+        (base, home)
+    }
+
+    #[test]
+    fn share_directory_rejects_relative_root_home_and_ancestors() {
+        let (base, home) = fake_home("rej");
+        let root = home.ancestors().last().unwrap().to_path_buf();
+        let escaping = home.join("..").join("x");
+        for bad in [
+            PathBuf::new(),
+            PathBuf::from("relative/picked"),
+            root,
+            base.join("home"),
+            home.clone(),
+            escaping,
+        ] {
+            assert!(
+                !is_acceptable_share_directory(&bad, Some(&home)),
+                "{bad:?} は拒否"
+            );
+        }
+        // ホーム不明は安全側で拒否。
+        assert!(!is_acceptable_share_directory(&base.join("mnt"), None));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn share_directory_accepts_nonexistent_paths_outside_the_home_chain() {
+        let (base, home) = fake_home("ok");
+        for ok in [
+            home.join("Pictures").join("sss-picked"),
+            base.join("mnt").join("picked"),
+        ] {
+            assert!(is_acceptable_share_directory(&ok, Some(&home)), "{ok:?}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn share_directory_rejects_secret_dirs_under_home() {
+        let (base, home) = fake_home("secret");
+        for name in [".ssh", ".gnupg", ".aws", ".kube", "Library/Keychains"] {
+            let dir = home.join(name);
+            assert!(!is_acceptable_share_directory(&dir, Some(&home)), "{name}");
+            assert!(
+                !is_acceptable_share_directory(&dir.join("sub").join("x"), Some(&home)),
+                "{name}/sub/x"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn share_directory_rejects_unix_system_dirs() {
+        let (base, home) = fake_home("sys");
+        for bad in [
+            "/etc",
+            "/etc/ssh",
+            "/usr/local/x",
+            "/bin",
+            "/private/etc/x",
+            "/root",
+            "/root/pics",
+        ] {
+            assert!(
+                !is_acceptable_share_directory(Path::new(bad), Some(&home)),
+                "{bad}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// macOS/Windows は大文字小文字非区別 FS。別表記（`HOME` / `.SSH`）でもすり抜けない。
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn share_directory_check_ignores_case_on_case_insensitive_filesystems() {
+        let (base, home) = fake_home("case");
+        let upper_ancestor = base.join("HOME");
+        assert!(!is_acceptable_share_directory(&upper_ancestor, Some(&home)));
+        assert!(!is_acceptable_share_directory(
+            &home.join(".SSH"),
+            Some(&home)
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// ホームと別ドライブ／UNC 共有のルートは許可し（`sanitize_allow_dir` と同じ扱い）、
+    /// ホームと同一ドライブのルートは拒否する。
+    #[cfg(windows)]
+    #[test]
+    fn share_directory_windows_drive_and_unc_roots_follow_protected_root_rule() {
+        let home = Path::new(r"C:\Users\kako");
+        assert!(is_acceptable_share_directory(Path::new(r"D:\"), Some(home)));
+        assert!(is_acceptable_share_directory(
+            Path::new(r"\\nas\photos\"),
+            Some(home)
+        ));
+        assert!(!is_acceptable_share_directory(
+            Path::new(r"C:\"),
+            Some(home)
+        ));
+        assert!(!is_acceptable_share_directory(
+            Path::new(r"C:\Users"),
+            Some(home)
+        ));
+    }
+
     use super::*;
 
     // --- resolve_share_directory ---

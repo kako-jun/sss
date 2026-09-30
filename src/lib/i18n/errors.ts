@@ -50,6 +50,33 @@ export function resolveAddPatternErrorMessage(raw: string): string {
   }
 }
 
+/**
+ * `pick_image` が返すエラーコードを表示文言へ変換する（#87）。既知コード以外
+ * （コピー失敗などの内部エラー）は従来どおり汎用の失敗文言にする。
+ */
+export function resolvePickErrorMessage(raw: string): string {
+  const { code } = splitBackendError(raw);
+  switch (code) {
+    case 'pathNotManaged':
+      return t('errorPathNotManaged');
+    case 'notMediaFile':
+      return t('errorNotMediaFile');
+    default:
+      return t('pickCopyFailed');
+  }
+}
+
+/** `save_setting`（`share_directory_path`）が返すエラーコードを表示文言へ変換する（#87）。 */
+export function resolveShareDirectoryErrorMessage(raw: string): string {
+  const { code } = splitBackendError(raw);
+  switch (code) {
+    case 'shareDirectoryInvalid':
+      return t('errorShareDirectoryInvalid');
+    default:
+      return t('errorShareDirectorySaveFailed');
+  }
+}
+
 /** `reset_all_data`（`reset_core`）が返すエラーコードを表示文言へ変換する。 */
 export function resolveResetAllDataErrorMessage(raw: string): string {
   const { code } = splitBackendError(raw);
