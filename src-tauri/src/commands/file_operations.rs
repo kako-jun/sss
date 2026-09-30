@@ -1,4 +1,6 @@
-use crate::asset_scope::{default_share_directory, resolve_share_directory, sanitize_allow_dir};
+use crate::asset_scope::{
+    default_share_directory, resolve_validated_share_directory, sanitize_allow_dir,
+};
 use crate::commands::playlist_persistence;
 use crate::commands::types::{AppState, ExcludeOutcome};
 use crate::ignore::{glob_check_pattern, IgnoreFilter, IgnoreRule, RuleType};
@@ -127,9 +129,13 @@ pub async fn pick_image<R: tauri::Runtime>(
     // コピー先ディレクトリ（設定から、なければデフォルト。解決は get_picked_directory に一本化）
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let share_directory = get_picked_directory(&db)?;
-    let known = db.is_known_media_path(&image_path).unwrap_or(false);
+    let known = db.is_known_media_path(&image_path).unwrap_or_else(|e| {
+        eprintln!("pick_image: is_known_media_path failed (treated as unmanaged): {e}");
+        false
+    });
     drop(db);
-    crate::pick::ensure_managed_media_path(source_path, &share_directory, known)?;
+    let source_path = crate::pick::ensure_managed_media_path(source_path, &share_directory, known)?;
+    let source_path = source_path.as_path();
 
     if !source_path.exists() {
         return Err("Image file does not exist".to_string());
@@ -470,10 +476,13 @@ pub async fn get_thumbnail(
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
         (
             get_picked_directory(&db)?,
-            db.is_known_media_path(&image_path).unwrap_or(false),
+            db.is_known_media_path(&image_path).unwrap_or_else(|e| {
+                eprintln!("get_thumbnail: is_known_media_path failed (treated as unmanaged): {e}");
+                false
+            }),
         )
     };
-    crate::pick::ensure_managed_media_path(&source, &share_directory, known)?;
+    let source = crate::pick::ensure_managed_media_path(&source, &share_directory, known)?;
     let cache_dir = state.cache_dir.clone();
     let thumb = tauri::async_runtime::spawn_blocking(move || {
         crate::thumbnail::ensure_thumbnail(&source, &cache_dir)
@@ -490,7 +499,8 @@ pub(crate) fn get_picked_directory(db: &crate::database::Database) -> Result<Pat
     let share_setting = db
         .get_setting("share_directory_path")
         .map_err(|e| e.to_string())?;
-    Ok(resolve_share_directory(
+    // #87 M1: 保存値が不正（相対・ルート・ホーム等）なら既定にフォールバックする。
+    Ok(resolve_validated_share_directory(
         &home_pictures_dir()?,
         share_setting.as_deref(),
     ))

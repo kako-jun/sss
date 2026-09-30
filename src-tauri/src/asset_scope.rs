@@ -27,6 +27,47 @@ pub fn resolve_share_directory(pictures_dir: &Path, saved_setting: Option<&str>)
     }
 }
 
+/// ピック先ディレクトリとして受け入れてよいパスか（#87 M1）。
+///
+/// ピック先は `get_thumbnail`/`pick_image` の「管理下」判定の基準になるため、WebView から
+/// `/` やホームディレクトリ等の広いパスに書き換えられると制限が無意味になる。ピック先は
+/// 未作成のことがあるので存在は要求しない。次を拒否する:
+/// - 空・相対パス・`..` を含むパス
+/// - ファイルシステムルート、ホームディレクトリ自身、およびその祖先（`/Users` 等）
+pub fn is_acceptable_share_directory(path: &Path, home_dir: Option<&Path>) -> bool {
+    use std::path::Component;
+    if path.as_os_str().is_empty() || !path.is_absolute() {
+        return false;
+    }
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return false;
+    }
+    if path.parent().is_none() {
+        return false;
+    }
+    let Some(home) = home_dir else {
+        // ホームが不明なら広いパスかどうか判定できない。安全側に倒して拒否。
+        return false;
+    };
+    let candidate = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    !home.starts_with(&candidate)
+}
+
+/// 検証済みのピック先を解決する（#87 M1）。保存値が不正（相対・ルート・ホーム等）なら
+/// 既定 `<pictures>/sss-picked` にフォールバックする。
+pub fn resolve_validated_share_directory(
+    pictures_dir: &Path,
+    saved_setting: Option<&str>,
+) -> PathBuf {
+    let resolved = resolve_share_directory(pictures_dir, saved_setting);
+    if is_acceptable_share_directory(&resolved, dirs::home_dir().as_deref()) {
+        resolved
+    } else {
+        default_share_directory(pictures_dir)
+    }
+}
+
 /// ピック先ディレクトリを解決し、そのまま asset scope に許可してよいか判定する。
 /// `resolve_share_directory` と `sanitize_allow_dir` を束ねた薄いラッパーで、
 /// `save_setting`（設定変更時）が使う。`pick_image` はピック先の解決を
@@ -184,6 +225,40 @@ fn normalize_unc_server_share(rest: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    // 判定は Unix 形式の絶対パス前提（Windows では `/home/..` が絶対パスにならない）。
+    #[cfg(unix)]
+    #[test]
+    fn share_directory_rejects_relative_root_home_and_ancestors() {
+        let home = Path::new("/home/kako");
+        for bad in [
+            "",
+            "relative/picked",
+            "/",
+            "/home",
+            "/home/kako",
+            "/home/kako/../x",
+        ] {
+            assert!(
+                !is_acceptable_share_directory(Path::new(bad), Some(home)),
+                "{bad:?} は拒否"
+            );
+        }
+        // ホーム不明は安全側で拒否。
+        assert!(!is_acceptable_share_directory(Path::new("/mnt/x"), None));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn share_directory_accepts_nonexistent_paths_outside_the_home_chain() {
+        let home = Path::new("/home/kako");
+        for ok in ["/home/kako/Pictures/sss-picked", "/mnt/ssd/picked"] {
+            assert!(
+                is_acceptable_share_directory(Path::new(ok), Some(home)),
+                "{ok}"
+            );
+        }
+    }
+
     use super::*;
 
     // --- resolve_share_directory ---

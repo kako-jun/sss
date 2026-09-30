@@ -64,6 +64,8 @@ fn playlist_member_is_copied_into_the_picked_folder() {
         .upsert_file_metadata(&src.to_string_lossy(), 1, 4)
         .unwrap();
 
+    // ピック先（dir/picked）は未作成の状態から始まり、pick_image が作成してコピーする。
+    assert!(!picked.exists());
     let dest = PathBuf::from(call(&app, &src).expect("管理下のパスはコピーできる"));
     assert!(dest.starts_with(&picked));
     assert_eq!(std::fs::read(dest).unwrap(), b"jpeg");
@@ -100,5 +102,41 @@ fn unmanaged_or_non_media_sources_are_rejected_and_nothing_is_copied() {
         !picked.exists() || std::fs::read_dir(&picked).unwrap().next().is_none(),
         "何もコピーされない"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #87 M1: WebView が保存値を広いパス（`/`）に書き換えても、検証付き解決が既定へ
+/// フォールバックするため、管理外ファイルは依然として拒否される。
+#[cfg(unix)]
+#[test]
+fn a_widened_share_directory_setting_does_not_widen_the_managed_area() {
+    let dir = workspace("widened");
+    let (app, _picked) = app_in(&dir);
+    let secret = dir.join("secret.jpg");
+    std::fs::write(&secret, b"x").unwrap();
+    app.state::<AppState>()
+        .db
+        .lock()
+        .unwrap()
+        .save_setting("share_directory_path", "/")
+        .unwrap();
+
+    assert_eq!(call(&app, &secret), Err("pathNotManaged".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// ピックフォルダ内にあるがフォルダ外を指すシンボリックリンクは拒否される。
+#[cfg(unix)]
+#[test]
+fn a_symlink_in_the_picked_folder_pointing_outside_is_rejected() {
+    let dir = workspace("symlink");
+    let (app, picked) = app_in(&dir);
+    std::fs::create_dir_all(&picked).unwrap();
+    let secret = dir.join("secret.jpg");
+    std::fs::write(&secret, b"x").unwrap();
+    let link = picked.join("link.jpg");
+    std::os::unix::fs::symlink(&secret, &link).unwrap();
+
+    assert_eq!(call(&app, &link), Err("pathNotManaged".to_string()));
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -15,6 +15,17 @@ pub async fn save_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
+    // #87 M1: ピック先は get_thumbnail/pick_image の「管理下」判定の基準なので、相対パス・
+    // ルート・ホーム等の広いパスへの書き換えは保存前に拒否する（空文字は既定に戻す操作）。
+    if key == "share_directory_path"
+        && !value.is_empty()
+        && !crate::asset_scope::is_acceptable_share_directory(
+            std::path::Path::new(&value),
+            dirs::home_dir().as_deref(),
+        )
+    {
+        return Err("shareDirectoryInvalid".to_string());
+    }
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.save_setting(&key, &value)
         .map_err(|e| format!("Failed to save setting: {e}"))?;

@@ -129,32 +129,45 @@ pub fn validate_picked_delete_target(
     Ok(image_path.to_path_buf())
 }
 
-/// `get_thumbnail`/`pick_image` が読んでよいパスかを検証する（#87）。
+/// `get_thumbnail`/`pick_image` が読んでよいパスかを検証し、**以降の処理に使うパス**を返す（#87）。
 ///
 /// 許可するのは次のどちらかだけ。
 /// - `known_in_db`: スキャン済みのプレイリスト構成員・表示履歴として DB に登録済みのパス
 ///   （呼び出し側が `Database::is_known_media_path` の結果を渡す。文字列の完全一致なので
-///   `..` を含む相対パス等は一致しない）
-/// - ピックフォルダの中にある実体ファイル（`canonicalize` で実体パスに解決してから
-///   包含を判定するため、`..` による脱出やフォルダ外を指すシンボリックリンクは拒否）
+///   `..` を含む相対パス等は一致しない）。スキャナは symlink ファイルを登録しない
+///   （`follow_links(false)` + `is_file()`）ので、登録後に symlink へ差し替えられたパスは
+///   拒否する。返すのは登録値そのまま。
+/// - ピックフォルダの中にある実体ファイル。`canonicalize` で実体パスに解決してから
+///   包含を判定する（`..` による脱出やフォルダ外を指すシンボリックリンクは拒否）。
+///   返すのは **canonical パス**なので、検証後のリンク差し替え（TOCTOU）の窓を狭める。
 ///
 /// どちらでもなければ `pathNotManaged`（#80 のエラーコード方式）。
 pub fn ensure_managed_media_path(
     path: &Path,
     picked_dir: &Path,
     known_in_db: bool,
-) -> Result<(), String> {
+) -> Result<PathBuf, String> {
+    let not_managed = || "pathNotManaged".to_string();
     if known_in_db {
-        return Ok(());
+        let is_symlink = fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+        return if is_symlink {
+            Err(not_managed())
+        } else {
+            Ok(path.to_path_buf())
+        };
     }
-    if let (Ok(canonical_path), Ok(canonical_dir)) =
-        (path.canonicalize(), picked_dir.canonicalize())
-    {
-        if canonical_path != canonical_dir && canonical_path.starts_with(&canonical_dir) {
-            return Ok(());
-        }
+    let canonical_path = path.canonicalize().map_err(|_| not_managed())?;
+    let canonical_dir = picked_dir.canonicalize().map_err(|_| not_managed())?;
+    // `starts_with` はフォルダ自体（`canonical_dir` と等しいパス）も真にするため、
+    // フォルダ自体を除くには等値の除外が必要（ファイルでないので後段の処理も失敗するが、
+    // ここで明示的に管理外として弾く）。
+    if canonical_path != canonical_dir && canonical_path.starts_with(&canonical_dir) {
+        Ok(canonical_path)
+    } else {
+        Err(not_managed())
     }
-    Err("pathNotManaged".to_string())
 }
 
 #[cfg(test)]
@@ -557,9 +570,15 @@ mod tests {
         let inside = picked.join("a.jpg");
         fs::write(&inside, b"x").unwrap();
 
-        assert!(ensure_managed_media_path(&inside, &picked, false).is_ok());
+        assert_eq!(
+            ensure_managed_media_path(&inside, &picked, false),
+            Ok(inside.canonicalize().unwrap())
+        );
         // DB 登録済みならピックフォルダ外・存在しなくても通す（存在確認は呼び出し側）。
-        assert!(ensure_managed_media_path(&dir.join("elsewhere.jpg"), &picked, true).is_ok());
+        assert_eq!(
+            ensure_managed_media_path(&dir.join("elsewhere.jpg"), &picked, true),
+            Ok(dir.join("elsewhere.jpg"))
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -610,6 +629,24 @@ mod tests {
 
         assert_eq!(
             ensure_managed_media_path(&link, &picked, false),
+            Err("pathNotManaged".to_string())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_path_rejects_a_db_known_path_swapped_for_a_symlink() {
+        let dir = workspace("managed_known_symlink");
+        let picked = dir.join("picked");
+        fs::create_dir_all(&picked).unwrap();
+        let outside = dir.join("secret.jpg");
+        fs::write(&outside, b"x").unwrap();
+        let link = dir.join("registered.jpg");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        assert_eq!(
+            ensure_managed_media_path(&link, &picked, true),
             Err("pathNotManaged".to_string())
         );
         let _ = fs::remove_dir_all(&dir);
