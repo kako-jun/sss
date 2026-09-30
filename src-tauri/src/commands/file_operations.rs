@@ -111,21 +111,29 @@ pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
 
 /// ピック機能：画像をPictures/sss-pickedフォルダにコピー
 #[tauri::command]
-pub async fn pick_image(
+pub async fn pick_image<R: tauri::Runtime>(
     image_path: String,
     state: State<'_, AppState>,
-    app: tauri::AppHandle,
+    app: tauri::AppHandle<R>,
 ) -> Result<String, String> {
     let source_path = Path::new(&image_path);
 
-    if !source_path.exists() {
-        return Err("Image file does not exist".to_string());
+    // #87: 任意の絶対パスをピックフォルダ（asset scope 内）へコピーさせない。
+    // メディア拡張子で、かつ管理下（プレイリスト構成員・履歴・ピックフォルダ内）のみ許可。
+    if !crate::scanner::is_media_path(source_path) {
+        return Err("notMediaFile".to_string());
     }
 
     // コピー先ディレクトリ（設定から、なければデフォルト。解決は get_picked_directory に一本化）
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let share_directory = get_picked_directory(&db)?;
+    let known = db.is_known_media_path(&image_path).unwrap_or(false);
     drop(db);
+    crate::pick::ensure_managed_media_path(source_path, &share_directory, known)?;
+
+    if !source_path.exists() {
+        return Err("Image file does not exist".to_string());
+    }
 
     // ディレクトリが存在しない場合は作成
     if !share_directory.exists() {
@@ -457,6 +465,15 @@ pub async fn get_thumbnail(
     if !crate::scanner::is_image_path(&source) {
         return Err("Not a supported image file".to_string());
     }
+    // #87: 任意の絶対パスをデコードさせない（プレイリスト構成員・履歴・ピックフォルダ内のみ）。
+    let (share_directory, known) = {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            get_picked_directory(&db)?,
+            db.is_known_media_path(&image_path).unwrap_or(false),
+        )
+    };
+    crate::pick::ensure_managed_media_path(&source, &share_directory, known)?;
     let cache_dir = state.cache_dir.clone();
     let thumb = tauri::async_runtime::spawn_blocking(move || {
         crate::thumbnail::ensure_thumbnail(&source, &cache_dir)
