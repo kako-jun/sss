@@ -35,11 +35,17 @@ pub async fn save_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
-    if !WRITABLE_SETTING_KEYS.contains(&key.as_str()) {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    perform_save_setting(&db, &key, &value)
+}
+
+/// `save_setting` の本体（Tauri 非依存、#93）。許可リスト外のキーは `settingKeyNotWritable`
+/// で拒否し、DB には一切触れない。
+pub fn perform_save_setting(db: &Database, key: &str, value: &str) -> Result<(), String> {
+    if !WRITABLE_SETTING_KEYS.contains(&key) {
         return Err("settingKeyNotWritable".to_string());
     }
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.save_setting(&key, &value)
+    db.save_setting(key, value)
         .map_err(|e| format!("Failed to save setting: {e}"))
 }
 
@@ -80,6 +86,11 @@ pub async fn select_share_directory(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
+    let _dialog_guard = crate::commands::scan::acquire_dialog_guard(
+        &state.scan_in_progress,
+        &crate::commands::scan::DIALOG_IN_PROGRESS,
+        false,
+    )?;
     let picked = pick_directory_blocking(app.clone(), title).await?;
     let Some(saved) = perform_select_share_directory(
         &PrePicked(picked),

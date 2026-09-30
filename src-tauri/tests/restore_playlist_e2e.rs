@@ -249,7 +249,7 @@ fn restore_playlist_returns_already_ready_without_changes_when_playlist_already_
 
     let db_mutex = Mutex::new(Database::new(dir.join("sss.db")).expect("db init"));
     // 意図的に、DBには何も保存していない状態で、メモリ上にだけ既にプレイリストがある
-    // 状況を作る(scan_directoryが先に完了していた等を模す)。directory_path_mutexも
+    // 状況を作る(スキャンが先に完了していた等を模す)。directory_path_mutexも
     // 今回リクエストするディレクトリと一致させておく(既にこのディレクトリの状態が
     // 復元済みという想定)。
     let existing_playlist = Playlist::new(vec!["/already/loaded.jpg".to_string()]);

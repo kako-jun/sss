@@ -15,9 +15,12 @@ use std::sync::Mutex;
 
 use sss_lib::commands::dialog::DirectoryPicker;
 use sss_lib::commands::scan::{
-    perform_rescan_last_directory, perform_select_and_scan, SelectScanOutcome, LAST_DIRECTORY_KEY,
+    acquire_dialog_guard, perform_rescan_last_directory, perform_select_and_scan,
+    SelectScanOutcome, LAST_DIRECTORY_KEY,
 };
-use sss_lib::commands::settings::{perform_select_share_directory, WRITABLE_SETTING_KEYS};
+use sss_lib::commands::settings::{
+    perform_save_setting, perform_select_share_directory, WRITABLE_SETTING_KEYS,
+};
 use sss_lib::database::Database;
 use sss_lib::playlist::Playlist;
 
@@ -160,13 +163,14 @@ fn switching_directory_updates_last_directory() {
 fn invalid_chosen_paths_are_rejected_with_error_codes_and_not_saved() {
     let env = env("invalid");
     let missing = env.root.join("missing");
-    let err = select(&env, &StubPicker(Some(missing))).unwrap_err();
-    assert_eq!(err, "directoryNotFound");
+    let err = select(&env, &StubPicker(Some(missing.clone()))).unwrap_err();
+    // 選んだパスがエラーコードの detail に載る（フロントは旧フォルダでなくこれを表示する）
+    assert_eq!(err, format!("directoryNotFound:{}", missing.display()));
     assert_eq!(last_directory(&env), None);
 
     // 相対パス（実在しても sanitize_allow_dir が拒否する）
     let err = select(&env, &StubPicker(Some(PathBuf::from(".")))).unwrap_err();
-    assert_eq!(err, "directoryUnsafe");
+    assert_eq!(err, "directoryUnsafe:.");
     assert_eq!(last_directory(&env), None);
 
     let _ = std::fs::remove_dir_all(&env.root);
@@ -235,34 +239,91 @@ fn rescan_last_directory_reports_missing_saved_directory() {
         |_, _| {},
     )
     .unwrap_err();
-    assert_eq!(err, "directoryNotFound");
+    assert_eq!(err, format!("directoryNotFound:{}", dir.display()));
     let _ = std::fs::remove_dir_all(&env.root);
 }
 
 /// WebView から呼べる汎用の `save_setting` では、管理下パスの基準になるキーを
-/// 書き換えられない（ダイアログを経ない経路を塞ぐ）。
+/// 書き換えられない（ダイアログを経ない経路を塞ぐ）。拒否時は DB 値が不変。
 #[test]
-fn save_setting_allowlist_excludes_managed_path_keys() {
-    for protected in [
-        LAST_DIRECTORY_KEY,
-        "share_directory_path",
-        "sssignore_migrated",
-    ] {
-        assert!(
-            !WRITABLE_SETTING_KEYS.contains(&protected),
-            "{protected} は save_setting で書けてはいけない"
+fn save_setting_rejects_protected_keys_and_leaves_db_untouched() {
+    let env = env("save_setting");
+    {
+        let db = env.db.lock().unwrap();
+        db.save_setting(LAST_DIRECTORY_KEY, "/original").unwrap();
+        db.save_setting("share_directory_path", "/orig-share")
+            .unwrap();
+        for protected in [
+            LAST_DIRECTORY_KEY,
+            "share_directory_path",
+            "sssignore_migrated",
+            "unknown_key",
+        ] {
+            let err = perform_save_setting(&db, protected, "/etc").unwrap_err();
+            assert_eq!(err, "settingKeyNotWritable", "{protected}");
+        }
+        assert_eq!(
+            db.get_setting(LAST_DIRECTORY_KEY).unwrap(),
+            Some("/original".to_string())
         );
+        assert_eq!(
+            db.get_setting("share_directory_path").unwrap(),
+            Some("/orig-share".to_string())
+        );
+        assert_eq!(db.get_setting("sssignore_migrated").unwrap(), None);
+        assert_eq!(db.get_setting("unknown_key").unwrap(), None);
     }
-    // UI が実際に保存する設定は書ける
-    for ui_key in [
-        "display_interval",
-        "language",
-        "apply_exif_rotation",
-        "video_audio_enabled",
-        "video_max_duration_sec",
-    ] {
-        assert!(WRITABLE_SETTING_KEYS.contains(&ui_key), "{ui_key}");
+    let _ = std::fs::remove_dir_all(&env.root);
+}
+
+#[test]
+fn save_setting_saves_every_allowed_key() {
+    let env = env("save_setting_ok");
+    {
+        let db = env.db.lock().unwrap();
+        for key in WRITABLE_SETTING_KEYS {
+            perform_save_setting(&db, key, "v").unwrap();
+            assert_eq!(db.get_setting(key).unwrap(), Some("v".to_string()), "{key}");
+        }
+        // UI が実際に保存する設定は書ける
+        for key in [
+            "display_interval",
+            "language",
+            "apply_exif_rotation",
+            "video_audio_enabled",
+            "video_max_duration_sec",
+        ] {
+            assert!(WRITABLE_SETTING_KEYS.contains(&key), "{key}");
+        }
     }
+    let _ = std::fs::remove_dir_all(&env.root);
+}
+
+/// ダイアログを出す前に、スキャン実行中なら `scanInProgress`、別のダイアログが表示中なら
+/// `dialogInProgress` で弾く。ガードを drop すれば再び取れる。
+#[test]
+fn dialog_guard_rejects_when_scanning_or_dialog_already_open() {
+    let scan = AtomicBool::new(false);
+    let dialog = AtomicBool::new(false);
+
+    let guard = acquire_dialog_guard(&scan, &dialog, true).unwrap();
+    assert_eq!(
+        acquire_dialog_guard(&scan, &dialog, true).err(),
+        Some("dialogInProgress".to_string())
+    );
+    drop(guard);
+    assert!(acquire_dialog_guard(&scan, &dialog, true).is_ok());
+
+    scan.store(true, std::sync::atomic::Ordering::SeqCst);
+    let dialog2 = AtomicBool::new(false);
+    assert_eq!(
+        acquire_dialog_guard(&scan, &dialog2, true).err(),
+        Some("scanInProgress".to_string())
+    );
+    // ダイアログは出ていない（フラグを取っていない）
+    assert!(!dialog2.load(std::sync::atomic::Ordering::SeqCst));
+    // ピック先の選択はスキャン中でも開ける
+    assert!(acquire_dialog_guard(&scan, &dialog2, false).is_ok());
 }
 
 #[test]

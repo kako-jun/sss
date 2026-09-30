@@ -44,9 +44,14 @@ impl<'a> ScanGuard<'a> {
     /// #80: ユーザー向け文言でなくエラーコード（`scanInProgress`）で返す。
     /// フロント辞書（`resolveScanErrorMessage`）が表示文言に変換する。
     pub(crate) fn acquire(flag: &'a AtomicBool) -> Result<Self, String> {
+        Self::acquire_with_code(flag, "scanInProgress")
+    }
+
+    /// `acquire` のエラーコード指定版（ダイアログ表示中フラグ `dialogInProgress` 用、#93）。
+    pub(crate) fn acquire_with_code(flag: &'a AtomicBool, code: &str) -> Result<Self, String> {
         flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map(|_| ScanGuard { flag })
-            .map_err(|_| "scanInProgress".to_string())
+            .map_err(|_| code.to_string())
     }
 }
 
@@ -239,7 +244,7 @@ fn migrate_sssignore_to_db(db: &crate::database::Database) {
 
 /// スキャン〜DB反映〜プレイリスト反映の本体（Tauri非依存）。
 ///
-/// `#[tauri::command] scan_directory` はこの関数を呼ぶだけの薄いシェルにする。
+/// `select_and_scan`/`rescan_last_directory` は共通の `scan_chosen_directory` 経由でこの関数を呼ぶだけの薄いシェルにする。
 /// `State`/`AppHandle` に依存しないため、`tauri::test::mock_app()` すら要らず
 /// 単体テストから直接呼べる（`AppHandle` は runtime ジェネリクスが `Wry` 固定で
 /// `MockRuntime` を受け付けないため、コマンド本体を直接テストするのが難しい）。
@@ -289,7 +294,7 @@ fn migrate_sssignore_to_db(db: &crate::database::Database) {
 ///
 /// #62レビュー2巡目 nit: `directory_path_mutex`（`AppState.directory_path` 相当）は
 /// Stage 4の中で、playlistロックを保持したまま設定する。以前は呼び出し元
-/// （`scan_directory` コマンド）が `perform_scan` の**戻り値を受け取った後**に
+/// （`scan_chosen_directory`）が `perform_scan` の**戻り値を受け取った後**に
 /// 別途設定していたため、「Stage 4完了〜directory_path更新」の間に小さな窓があり、
 /// その間に他コマンド（`get_next_image`/`exclude_image`）が `state.directory_path`
 /// を読んで軽量保存すると、まだ更新されていない古いディレクトリパスを
@@ -584,7 +589,7 @@ where
         }
 
         // #62レビュー2巡目 nit: playlistロックを保持したまま directory_path も更新する
-        // （上記の関数docコメント参照。呼び出し元の`scan_directory`が戻り値受領後に
+        // （上記の関数docコメント参照。呼び出し元の`scan_chosen_directory`が戻り値受領後に
         // 別途設定する旧方式だと、更新までの間に他コマンドが古い値で軽量保存しうる窓があった）。
         *directory_path_mutex
             .lock()
@@ -639,15 +644,18 @@ where
 
     // #80: ユーザー向け文言でなくエラーコードで返す。フロント辞書は
     // `resolveScanErrorMessage` で変換する。
+    // #93レビュー: 選んだパスをエラーコードの detail（`code:detail`）に載せる。フロントは
+    // 「今表示している前回フォルダ」でなくこのパスを文言に使う（選択に失敗したとき旧パスが出ない）。
     if !directory.is_dir() {
-        return Err("directoryNotFound".to_string());
+        return Err(format!("directoryNotFound:{}", directory.display()));
     }
 
     // sanitize_allow_dir() で is_dir・絶対パス・非保護ルートを再検証する
     // （空文字列/相対パスが紛れ込んで意図せず広い scope になる事故を防ぐ、レビュー #73 M1）。
     // 拒否された場合はスキャンしても画像が一切表示できないため、ここで Err を返して
     // UI にエラー理由を伝える。
-    let safe_dir = sanitize_allow_dir(directory).ok_or_else(|| "directoryUnsafe".to_string())?;
+    let safe_dir = sanitize_allow_dir(directory)
+        .ok_or_else(|| format!("directoryUnsafe:{}", directory.display()))?;
 
     // #61レビュー M-A: current_directory の読み取りだけ先に短時間ロックする。
     // `perform_scan` 自身が db/playlist のロックを段階ごとに細かく取るため、
@@ -674,6 +682,25 @@ where
     drop(db);
 
     Ok((progress, safe_dir))
+}
+
+/// ダイアログ表示中フラグ（プロセス全体で1つ）。WebView が `select_and_scan` /
+/// `select_share_directory` を連打してもダイアログが重ねて出ないようにする（#93レビュー）。
+pub static DIALOG_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+/// 選択ダイアログを開く前のガード（#93レビュー）。スキャンが実行中なら、ダイアログを出した後に
+/// `scanInProgress` になる無駄を避けるため先に弾く。別のダイアログが表示中なら `dialogInProgress`。
+/// 戻り値のガードはダイアログ表示〜スキャン完了まで保持する。
+/// `check_scan`: スキャンを伴う選択（`select_and_scan`）か。ピック先の選択は false。
+pub fn acquire_dialog_guard<'a>(
+    scan_in_progress: &AtomicBool,
+    dialog_flag: &'a AtomicBool,
+    check_scan: bool,
+) -> Result<ScanGuard<'a>, String> {
+    if check_scan && scan_in_progress.load(Ordering::SeqCst) {
+        return Err("scanInProgress".to_string());
+    }
+    ScanGuard::acquire_with_code(dialog_flag, "dialogInProgress")
 }
 
 /// `select_and_scan` の結果（#93）。
@@ -776,6 +803,7 @@ pub async fn select_and_scan(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Option<ScanProgress>, String> {
+    let _dialog_guard = acquire_dialog_guard(&state.scan_in_progress, &DIALOG_IN_PROGRESS, true)?;
     let picked = pick_directory_blocking(app.clone(), title).await?;
     match perform_select_and_scan(
         &PrePicked(picked),
@@ -834,7 +862,7 @@ pub enum RestoreOutcome {
 /// 起動時、DBに保存済みのプレイリスト状態を復元する本体（Tauri非依存、#62レビューS1）。
 /// `#[tauri::command] restore_playlist` はこの関数を呼ぶだけの薄いシェルにする。
 ///
-/// スキャン完了を待たずに最初の画像を表示できるようにするため、`scan_directory`
+/// スキャン完了を待たずに最初の画像を表示できるようにするため、スキャンコマンド
 /// とは独立したコマンドとして提供する。フロントは起動直後にまずこれを呼び、
 /// `true`（復元できた、または既に復元/初期化済みで使える状態）ならスキャン完了を
 /// 待たずに即座に `get_next_image` を呼んで表示を始め、スキャンはバックグラウンドで
@@ -843,7 +871,7 @@ pub enum RestoreOutcome {
 /// フローにフォールバックする。
 ///
 /// 復元に成功した場合、`directory_path_mutex`（`AppState.directory_path` 相当）も
-/// ここで設定する。直後にバックグラウンドで呼ばれる `scan_directory` の
+/// ここで設定する。直後にバックグラウンドで呼ばれる `rescan_last_directory` の
 /// `current_directory` がこの値と一致し、新規シャッフルではなく「差分更新」経路を
 /// 通るようにするため。
 ///
@@ -856,7 +884,7 @@ pub enum RestoreOutcome {
 ///   限らない（例: 別ディレクトリへの切替直後で、まだ古いディレクトリの
 ///   プレイリストが残っている）ため、`directory_path_mutex` の現在値と正規化キーで
 ///   突き合わせ、一致しない場合は「既存維持」を騙らず `NotRestored` を返す。
-/// - `scan_in_progress` が立っている（`scan_directory` 実行中）間は何もせず
+/// - `scan_in_progress` が立っている（スキャン実行中）間は何もせず
 ///   `NotRestored` を返す。スキャンの Stage 4 が `playlist_mutex`/`db_mutex` を
 ///   段階的に触っている最中にここから割り込むと、スキャン側の反映と競合しうるため
 ///   （両者とも `playlist_mutex` を取るので致命的な破損はしないが、意味のある
@@ -901,7 +929,7 @@ pub fn perform_restore(
             RestoreOutcome::AlreadyReady
         } else {
             // 既存のplaylistは今回リクエストされたディレクトリのものではない。
-            // 「既存維持」を騙らずNotRestoredを返し、呼び出し元(scan_directory)の
+            // 「既存維持」を騙らずNotRestoredを返し、呼び出し元(スキャンコマンド)の
             // 通常の新規/差分更新フローに委ねる。
             RestoreOutcome::NotRestored
         };

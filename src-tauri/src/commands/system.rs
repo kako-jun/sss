@@ -100,7 +100,7 @@ pub fn reset_core(
 /// 行うこと。**
 #[tauri::command]
 pub async fn reset_all_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    // スキャンとの排他（#64）。scan_directory と同じ `AtomicBool` を使う `ScanGuard` を
+    // スキャンとの排他（#64）。スキャンコマンドと同じ `AtomicBool` を使う `ScanGuard` を
     // 再利用することで、スキャン中の初期化・初期化中のスキャン開始の両方を防ぐ
     // （RAIIガードなので、この後のどの`?`早期returnでも確実に解除される）。
     let _scan_guard = ScanGuard::acquire(&state.scan_in_progress)?;

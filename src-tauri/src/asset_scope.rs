@@ -3,7 +3,7 @@
 //!
 //! `tauri::scope::fs::Scope::allow_directory` の呼び出し自体は実行中の Tauri アプリの
 //! 状態を書き換える副作用なので、「どのディレクトリを許可すべきか」を判断する部分だけを
-//! ここに切り出す。呼び出し側（`lib.rs` の起動処理・`commands::scan::scan_directory`・
+//! ここに切り出す。呼び出し側（`lib.rs` の起動処理・`commands::scan` のスキャンコマンド・
 //! `commands::settings::save_setting`・`commands::file_operations::pick_image`）が
 //! 実際の許可 API 呼び出しを行う。
 
@@ -219,7 +219,7 @@ pub fn startup_allow_dirs(
 ///   （システムドライブ相当。Unix では `/` の一択）だけを拒否する）
 ///
 /// `startup_allow_dirs` の出力・`save_setting`/`pick_image` で解決された共有先・
-/// `scan_directory` のスキャン対象など、`allow_directory` を呼ぶ直前のすべての候補に適用する。
+/// スキャンコマンドのスキャン対象など、`allow_directory` を呼ぶ直前のすべての候補に適用する。
 pub fn sanitize_allow_dir(path: &Path) -> Option<PathBuf> {
     sanitize_allow_dir_with_home(path, dirs::home_dir().as_deref())
 }

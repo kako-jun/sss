@@ -40,6 +40,7 @@ Dates use `YYYY-MM-DD`.
   - `save_setting` を書き込み許可リスト方式に変更。`last_directory_path`・`share_directory_path` など管理下パスの基準になるキーは WebView から書き換えられない
   - capability から `dialog:allow-open` を削除し、JS 側の `@tauri-apps/plugin-dialog` 依存も削除（ダイアログは Rust 側の API のみ）。ダイアログは `DirectoryPicker` trait で抽象化し、テスト・e2e で差し替える
   - UX: 設定画面の「選択」は選択とスキャンを一度に行い、「スキャン」は選択済みフォルダの再スキャンになる。ようこそ画面→選択→再生、2回目以降の自動復元、フォルダ切替は従来どおり
+  - 選択に失敗したとき、エラー文言に前回フォルダでなく拒否したパスを出す（`directoryNotFound:{path}`）。ダイアログ表示中・スキャン実行中の再度の「選択」はダイアログを出す前に弾く（`dialogInProgress`/`scanInProgress`）。ダイアログはメインウィンドウを親にしたモーダルで開く
   - **防げない範囲（残余リスク）**: WebView が IPC で `select_and_scan`/`select_share_directory` を呼ぶこと自体は止められない（ネイティブダイアログが開きユーザーが選んだフォルダだけが対象。ユーザーを騙して選ばせる社会工学は防げない）。選ばれたフォルダは、スキャン対象ならホームドライブのルート以外、ピック先ならルート・ホーム・システム領域等以外であれば許可する
 - `open_in_explorer` / `exclude_image` / `undo_exclude` の任意パス指定を塞いだ (#92)。管理下パス検証（#87）の適用先を広げる
   - `open_in_explorer`: DB 登録またはピックフォルダ内のみ。管理外は存在有無に関わらず同一の `pathNotManaged`（存在確認のオラクル遮断）、管理下で実在しなければ `imageFileNotFound`。`~` 展開は廃止。Windows ではファイラに verbatim 接頭辞（`\\?\`）付きのパスを渡さない

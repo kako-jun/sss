@@ -136,6 +136,7 @@ export const en = {
   errorDirectoryUnsafe: "This folder can't be used for security reasons: {path}",
   selectDirectoryDialogTitle: 'Select Photo Folder',
   selectShareDirectoryDialogTitle: 'Select Pick Destination Folder',
+  errorDialogInProgress: 'A folder dialog is already open',
   errorNoLastDirectory: 'No folder has been selected to scan yet',
 
   // === Settings: Options ===

@@ -361,7 +361,7 @@ fn scan_excludes_metachar_named_file_via_escaped_pattern() {
 /// DBに保存済みの撮影日（`exif_cache`、表示時にEXIFから取得・保存されたもの）があれば
 /// 正しく除外できることを golden e2e レベルで確認する（`IgnoreFilter` 単体のロジック）。
 /// スキャン時に実際にEXIFを読み直す経路（表示履歴が無い画像の初回スキャン除外）は
-/// `tests/date_and_exclusion_rescan_e2e.rs` で `scan_directory` コマンド経由で検証する
+/// `tests/date_and_exclusion_rescan_e2e.rs` で スキャンコマンドの本体（`perform_scan`）経由で検証する
 /// （#61レビュー M2: この2つは意味が異なるため両方残す）。
 #[test]
 fn scan_excludes_by_captured_date_even_without_date_in_filename() {

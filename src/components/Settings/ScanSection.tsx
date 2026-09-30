@@ -97,7 +97,12 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
     }
   };
 
-  const handleSelectDirectory = () => runScan(selectAndScan);
+  const handleSelectDirectory = async () => {
+    // 「スキャン」ボタンと対称に、前回の結果表示は新しい選択の開始時に消す
+    // （キャンセルされたら空表示になるが、前回結果を残したまま別フォルダの結果と誤読させない）。
+    setScanProgress(null);
+    await runScan(selectAndScan);
+  };
 
   const handleScan = async () => {
     if (!selectedDirectory) {

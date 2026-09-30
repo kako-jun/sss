@@ -234,6 +234,39 @@ describe('ScanSection select (dialog + scan in one command, #93)', () => {
     });
   });
 
+  it('shows the rejected NEW folder (not the previous one) when the chosen folder is rejected (#93)', async () => {
+    selectAndScan.mockRejectedValue('directoryUnsafe:/photos/new');
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText('選択'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('セキュリティ上の理由でこのフォルダは使用できません: /photos/new'),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText(/\/photos\/existing$/)).toBeNull();
+  });
+
+  it('shows the dialog-already-open message when another dialog is open (#93)', async () => {
+    selectAndScan.mockRejectedValue('dialogInProgress');
+    await renderLoaded();
+    fireEvent.click(screen.getByText('選択'));
+    await waitFor(() => {
+      expect(screen.getByText('フォルダ選択ダイアログが既に開いています')).toBeTruthy();
+    });
+  });
+
+  it('clears the previous scan result when starting a new selection (#93)', async () => {
+    rescanLastDirectory.mockResolvedValue(progress);
+    await renderLoaded();
+    fireEvent.click(screen.getByText('スキャン'));
+    await waitFor(() => expect(screen.getByText(/ファイル数/)).toBeTruthy());
+    selectAndScan.mockResolvedValue(null);
+    fireEvent.click(screen.getByText('選択'));
+    await waitFor(() => expect(screen.queryByText(/ファイル数/)).toBeNull());
+  });
+
   it('rescan shows the no-last-directory message when nothing was ever selected', async () => {
     rescanLastDirectory.mockRejectedValue('noLastDirectory');
     await renderLoaded();

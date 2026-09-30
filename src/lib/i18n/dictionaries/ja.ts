@@ -136,6 +136,7 @@ export const ja = {
   errorDirectoryUnsafe: 'セキュリティ上の理由でこのフォルダは使用できません: {path}',
   selectDirectoryDialogTitle: '写真フォルダを選択',
   selectShareDirectoryDialogTitle: 'ピック先フォルダを選択',
+  errorDialogInProgress: 'フォルダ選択ダイアログが既に開いています',
   errorNoLastDirectory: 'スキャンするフォルダがまだ選択されていません',
 
   // === 設定画面: オプション ===

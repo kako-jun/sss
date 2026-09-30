@@ -24,8 +24,13 @@ pub struct TauriDirectoryPicker {
 
 impl DirectoryPicker for TauriDirectoryPicker {
     fn pick_directory(&self, title: Option<&str>) -> Option<PathBuf> {
+        use tauri::Manager;
         use tauri_plugin_dialog::DialogExt;
         let mut builder = self.app.dialog().file();
+        // メインウィンドウを親にしてモーダルにする（Windows/Linux で背面に隠れない・親を操作できない）
+        if let Some(window) = self.app.get_webview_window("main") {
+            builder = builder.set_parent(&window);
+        }
         if let Some(title) = title {
             builder = builder.set_title(title);
         }

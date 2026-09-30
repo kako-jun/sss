@@ -45,11 +45,13 @@ describe('backend error code -> message resolution (#80)', () => {
       expect(resolveScanErrorMessage('someFutureCode', '/x')).toBe('someFutureCode');
     });
 
-    it('ignores an unexpected ":detail" suffix on a known code with no {detail} placeholder', () => {
-      // directoryNotFoundの文言に{detail}は無い。コード側にdetailが付いていても、
-      // pathパラメータの補間だけが行われ、detail自体は捨てられる。
-      expect(resolveScanErrorMessage('directoryNotFound:unexpected', '/missing')).toBe(
-        '指定したフォルダが見つかりません: /missing',
+    it('uses the ":detail" path (the rejected folder) in preference to the caller path (#93)', () => {
+      expect(resolveScanErrorMessage('directoryNotFound:/chosen/new', '/previous')).toBe(
+        '指定したフォルダが見つかりません: /chosen/new',
+      );
+      // detail が無ければ呼び出し元のパスにフォールバックする
+      expect(resolveScanErrorMessage('directoryNotFound', '/previous')).toBe(
+        '指定したフォルダが見つかりません: /previous',
       );
     });
   });
