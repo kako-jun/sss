@@ -16,6 +16,18 @@ interface SlideshowProps {
   displayToken?: number;
   /** 再生中かどうか（#65: `App.tsx` が導出する派生値）。動画の再生/一時停止に連動させる。 */
   isPlaying?: boolean;
+  /**
+   * 動画の音声を再生するか（#68）。false（既定）なら従来どおり無音（`muted`）。
+   * trueでもWebViewの自動再生ポリシーで`play()`が拒否された場合は、その動画だけ
+   * ミュートへ落として再生を続ける（止まったままにしない）。
+   */
+  videoAudioEnabled?: boolean;
+  /**
+   * 動画の最大再生時間（秒、#68）。0以下=無制限（動画の長さ分そのまま再生）。
+   * 再生位置（`currentTime`）がこの値に達したら次へ進む。動画の方が短ければ
+   * 従来どおり`onEnded`で進む。
+   */
+  videoMaxDurationSec?: number;
   /** 画像の実表示開始（`<img onLoad>`）を通知する。タイマー起点に使う（#65 問題6）。 */
   onMediaReady?: () => void;
   /** 動画の再生終了、または画像/動画の読込エラー時に「次へ」進む。 */
@@ -28,6 +40,8 @@ export function Slideshow({
   image,
   displayToken = 0,
   isPlaying = false,
+  videoAudioEnabled = false,
+  videoMaxDurationSec = 0,
   onMediaReady,
   onAdvance,
   onMediaError,
@@ -56,10 +70,50 @@ export function Slideshow({
   // 持ち越さない（一時停止中に手動でnext/prevして別のメディアに切り替えた場合、
   // 古い予約が新しいメディアの再開時に誤発火するのを防ぐ）。同じpathの連続表示
   // （displayTokenだけが変わる）でも同様にリセットする。
+  // #68: この動画（mediaKey）について「終了（ended/上限到達）」を既に処理済みかの印。
+  // ended と上限到達(timeupdate)の両方から同じ`finish`を通し、どちらが先に来ても
+  // 1本の動画につき「次へ」が1回しか発火しない（#65の二重進行を再導入しない）。
+  const finishedKeyRef = useRef<string | null>(null);
+  // 非同期のplay()拒否ハンドラから「今も再生中の指示か」を参照するための最新値。
+  const isPlayingRef = useRef(isPlaying);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
   useEffect(() => {
     currentMediaKeyRef.current = mediaKey;
     pendingEndedRef.current = false;
+    finishedKeyRef.current = null;
+
+    // #68: mediaKeyが変わった時点で、退場アニメーション(500ms)中の「古い動画」が
+    // まだDOMに残っている（videoRefが指している）。音声ONだとフェード中に前の
+    // 動画の音が次のメディアと重なるため、ここで必ずミュート+一時停止する。
+    // 新しい要素は`data-media-key`が最新と一致するので対象外。
+    const exiting = videoRef.current;
+    if (exiting && exiting.dataset.mediaKey !== mediaKey) {
+      exiting.muted = true;
+      exiting.pause();
+    }
   }, [mediaKey]);
+
+  // #68: 再生開始。音声ON(muted=false)で自動再生ポリシーに拒否された(NotAllowedError)
+  // 場合だけ、その要素をミュートにして再生し直す。AbortError（読込中のsrc差し替え等）
+  // のような別の理由の拒否でミュートへ落とすと、音声ONなのに無音になるだけなので
+  // 対象を限定する。play()はブラウザによってPromiseを返す/返さない（jsdomはundefined）
+  // ため、Promiseの時だけcatchする。
+  const startPlayback = (video: HTMLVideoElement) => {
+    const playResult = video.play();
+    if (!playResult || typeof playResult.catch !== 'function') return;
+    playResult.catch((err: unknown) => {
+      const isBlocked = (err as { name?: string } | null)?.name === 'NotAllowedError';
+      if (!isBlocked || video.muted) return;
+      // 拒否が返るまでに次のメディアへ移った/一時停止された場合は再生し直さない。
+      if (video.dataset.mediaKey !== currentMediaKeyRef.current || !isPlayingRef.current) return;
+      video.muted = true;
+      const retry = video.play();
+      if (retry && typeof retry.catch === 'function') retry.catch(() => {});
+    });
+  };
 
   // #65レビュー2巡目S8(must): 以前はmediaKeyの変化でもこのeffectが発火し、
   // AnimatePresence(mode="wait")の退場アニメーション中でまだDOM上に残っている
@@ -87,21 +141,35 @@ export function Slideshow({
       if (pendingEndedRef.current) {
         pendingEndedRef.current = false;
         onAdvance?.();
+      } else if (finishedKeyRef.current === video.dataset.mediaKey) {
+        // #68: 上限到達で一時停止した動画（またはendedで止まった動画）を再開しようと
+        // した場合。ここで素のplay()を呼ぶと上限を超えて再生が続く（finish済みなので
+        // 二度と次へ進まない）ため、再開の意図＝「次へ」として進める。
+        // useSlideshowの同時実行ガードがあるため、進行中の重複呼び出しは無視される。
+        onAdvance?.();
       } else {
-        // play() はブラウザによって Promise を返す/返さないが分かれる
-        // （jsdomのテスト環境ではundefinedを返す）ため、Promiseの時だけcatchする。
-        const playResult = video.play();
-        if (playResult && typeof playResult.catch === 'function') {
-          playResult.catch(() => {
-            // ユーザー操作外のplay()がブラウザ/WebViewにブロックされても無視してよい
-            // （muted指定済みなので通常は許可される）。
-          });
-        }
+        startPlayback(video);
       }
     } else {
       video.pause();
     }
   }, [isPlaying, onAdvance]);
+
+  // #68: 動画の終了処理（ended・上限到達の共通経路）。自分（この要素）のmediaKeyが
+  // 最新でなければ（退場中の古い要素）何もしない。処理済みなら二重に進めない。
+  // 上限到達時は一時停止して、フェード中に最終フレームで止め音声も残さない。
+  const finishVideo = (video: HTMLVideoElement) => {
+    if (mediaKey !== currentMediaKeyRef.current) return;
+    if (finishedKeyRef.current === mediaKey) return;
+    finishedKeyRef.current = mediaKey;
+    video.pause();
+    if (isPlaying) {
+      onAdvance?.();
+    } else {
+      // 一時停止中に終了/上限到達: 再開時にonAdvanceへ回す（上のeffect）。
+      pendingEndedRef.current = true;
+    }
+  };
 
   if (!image) {
     return <div className="w-screen h-screen bg-black" />;
@@ -143,7 +211,9 @@ export function Slideshow({
             style={{
               willChange: 'opacity',
             }}
-            muted
+            // #68: 音声はsetting次第（既定はOFF=無音）。ONでも自動再生を拒否された
+            // 場合は startPlayback が要素単位でミュートへ落とす。
+            muted={!videoAudioEnabled}
             // #65レビューM1: AnimatePresence mode="wait" は前の要素の退場アニメーション
             // (500ms)が終わるまで新しい<video>を実際にはマウントしない。isPlayingの
             // 変化を見る上のeffectは「pathが変わった瞬間」にも発火するが、その時点では
@@ -152,19 +222,31 @@ export function Slideshow({
             // autoPlayはブラウザ/WebViewが実際に要素をDOMへ挿入した瞬間に評価される
             // ため、このタイミング問題を回避できる。
             autoPlay={isPlaying}
-            onEnded={() => {
+            onEnded={(e) => {
               // #65レビュー2巡目S8(must): 自分(このクロージャが作られた時点)の
-              // mediaKeyが、今の最新mediaKeyと一致する時だけ進める。AnimatePresence
-              // の退場中要素（古いvideo）がこのonEndedを持ったまま残っている間に
-              // 実際に最後まで再生し終わってしまっても、既に次へ進んだ後なら
-              // 二重に進めない。
-              if (mediaKey !== currentMediaKeyRef.current) return;
-              if (isPlaying) {
-                onAdvance?.();
-              } else {
-                // 一時停止中に終了: 再開時にonAdvanceへ回す（上のeffect）。
-                pendingEndedRef.current = true;
+              // mediaKeyが、今の最新mediaKeyと一致する時だけ進める（finishVideo内で判定）。
+              // AnimatePresenceの退場中要素（古いvideo）が最後まで再生し終わっても、
+              // 既に次へ進んだ後なら二重に進めない。
+              finishVideo(e.currentTarget);
+            }}
+            onTimeUpdate={(e) => {
+              // #68: 最大再生時間。壁時計タイマーでなく再生位置(currentTime)で判定する
+              // ため、一時停止・バッファリング中は進まず、タイマーの張り忘れ/取り消し
+              // 漏れ（#65の永久停止・二重進行）が構造的に起きない。timeupdateは
+              // 約4Hzなので上限には最大250ms程度の誤差が出る（許容）。
+              if (videoMaxDurationSec <= 0) return;
+              if (e.currentTarget.currentTime >= videoMaxDurationSec) {
+                finishVideo(e.currentTarget);
               }
+            }}
+            onLoadedData={(e) => {
+              // #68: 音声ON時、autoPlay属性は拒否されても結果（Promise）を返さない
+              // ため、フォールバック判定用に明示的にplay()して拒否を観測する。
+              // 既に再生中/終了処理済み/退場中の要素には何もしない。
+              const video = e.currentTarget;
+              if (mediaKey !== currentMediaKeyRef.current) return;
+              if (!isPlaying || !video.paused || finishedKeyRef.current === mediaKey) return;
+              startPlayback(video);
             }}
             onError={() => {
               if (mediaKey !== currentMediaKeyRef.current) return;

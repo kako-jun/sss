@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { ScanSection } from './ScanSection';
 import { IntervalSection } from './IntervalSection';
 import { SettingsSection } from './SettingsSection';
+import { VideoSection } from './VideoSection';
 import { ShareDirectorySection } from './ShareDirectorySection';
 import { LanguageSection } from './LanguageSection';
 import { ExcludeRulesSection } from './ExcludeRulesSection';
@@ -21,6 +22,10 @@ interface SettingsProps {
   onClose: () => void;
   onScanComplete: () => void;
   onIntervalChange?: (interval: number) => void;
+  /** #68: 動画の音声ON/OFFが変わったときに、再生中のスライドショーへ即時反映するための通知。 */
+  onVideoAudioChange?: (enabled: boolean) => void;
+  /** #68: 動画の最大再生時間（秒、0=無制限）が変わったときの通知。 */
+  onVideoMaxDurationChange?: (sec: number) => void;
   initialTab?: TabType;
   /**
    * このモーダルを開いた操作がマウスクリックだったか（#66レビュー3巡目
@@ -48,6 +53,8 @@ export function Settings({
   onClose,
   onScanComplete,
   onIntervalChange,
+  onVideoAudioChange,
+  onVideoMaxDurationChange,
   initialTab,
   openedViaMouse = false,
 }: SettingsProps) {
@@ -210,6 +217,10 @@ export function Settings({
             >
               <IntervalSection onIntervalChange={onIntervalChange} />
               <SettingsSection />
+              <VideoSection
+                onAudioChange={onVideoAudioChange}
+                onMaxDurationChange={onVideoMaxDurationChange}
+              />
               <ShareDirectorySection />
               <LanguageSection />
             </div>

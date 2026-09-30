@@ -336,3 +336,75 @@ describe('runStartupSequence', () => {
     expect(calls).toEqual([]);
   });
 });
+
+// #68: 動画設定（音声ON/OFF・最大再生時間）の起動時復元。
+describe('runStartupSequence: video settings (#68)', () => {
+  function makeDeps(stored: Record<string, string | null>, overrides: Partial<StartupDeps> = {}) {
+    const audio: boolean[] = [];
+    const maxDuration: number[] = [];
+    const deps: StartupDeps = {
+      getSetting: async (key) => stored[key] ?? null,
+      getLastDirectoryPath: async () => null,
+      restorePlaylist: async () => false,
+      scanDirectory: async () => ({ totalFiles: 0 }),
+      initialize: async () => {},
+      listenScanProgress: async () => () => {},
+      setInitStatus: () => {},
+      setRealtimeProgress: () => {},
+      setIsInitialized: () => {},
+      setDisplayInterval: () => {},
+      updatePlaylistInfo: async () => {},
+      setVideoAudioEnabled: (v) => audio.push(v),
+      setVideoMaxDurationSec: (v) => maxDuration.push(v),
+      ...overrides,
+    };
+    return { deps, audio, maxDuration };
+  }
+
+  it('restores saved audio ON and a 60s cap', async () => {
+    const { deps, audio, maxDuration } = makeDeps({
+      video_audio_enabled: 'true',
+      video_max_duration_sec: '60',
+    });
+    await runStartupSequence(deps);
+    expect(audio).toEqual([true]);
+    expect(maxDuration).toEqual([60]);
+  });
+
+  it('uses defaults (audio OFF, unlimited) when nothing is saved', async () => {
+    const { deps, audio, maxDuration } = makeDeps({});
+    await runStartupSequence(deps);
+    expect(audio).toEqual([false]);
+    expect(maxDuration).toEqual([0]);
+  });
+
+  it('rounds corrupt saved values to the defaults', async () => {
+    const { deps, audio, maxDuration } = makeDeps({
+      video_audio_enabled: 'yes',
+      video_max_duration_sec: '-5',
+    });
+    await runStartupSequence(deps);
+    expect(audio).toEqual([false]);
+    expect(maxDuration).toEqual([0]);
+  });
+
+  it('does not abort startup when reading the video settings fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const initialized: boolean[] = [];
+    const { deps, audio, maxDuration } = makeDeps(
+      {},
+      {
+        getSetting: async (key) => {
+          if (key.startsWith('video_')) throw new Error('db down');
+          return null;
+        },
+        setIsInitialized: (v) => initialized.push(v),
+      },
+    );
+    await runStartupSequence(deps);
+    expect(audio).toEqual([]);
+    expect(maxDuration).toEqual([]);
+    expect(initialized).toEqual([true]);
+    expect(errorSpy).toHaveBeenCalled();
+  });
+});

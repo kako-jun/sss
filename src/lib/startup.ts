@@ -1,5 +1,11 @@
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { t } from './i18n';
+import {
+  SETTING_VIDEO_AUDIO_ENABLED,
+  SETTING_VIDEO_MAX_DURATION_SEC,
+  parseVideoAudioEnabled,
+  parseVideoMaxDuration,
+} from '../constants';
 
 /**
  * アプリ起動時の初期化シーケンス（#62レビューS1）。
@@ -33,6 +39,10 @@ export interface StartupDeps {
   setRealtimeProgress: (progress: { current: number; total: number } | null) => void;
   setIsInitialized: (value: boolean) => void;
   setDisplayInterval: (value: number) => void;
+  /** #68: 動画の音声ON/OFF（保存済みの値。未設定・破損時は既定のOFFで呼ぶ）。省略時は復元しない。 */
+  setVideoAudioEnabled?: (value: boolean) => void;
+  /** #68: 動画の最大再生時間（秒、0=無制限）。未設定・破損時は既定（0）で呼ぶ。省略時は復元しない。 */
+  setVideoMaxDurationSec?: (value: number) => void;
   updatePlaylistInfo: () => Promise<void>;
   /**
    * 前回ディレクトリが確認できた時点で呼ぶ（#65: 「本当に未設定」（ようこそ画面）と
@@ -81,6 +91,8 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     setInitStatus,
     setIsInitialized,
     setDisplayInterval,
+    setVideoAudioEnabled,
+    setVideoMaxDurationSec,
     updatePlaylistInfo,
     setHasDirectory,
     onDirectoryError,
@@ -91,6 +103,20 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     const intervalSetting = await getSetting('display_interval');
     if (intervalSetting) {
       setDisplayInterval(parseInt(intervalSetting, 10));
+    }
+
+    // #68: 動画設定。読込失敗でも起動全体は止めない（既定のまま続行）。
+    if (setVideoAudioEnabled || setVideoMaxDurationSec) {
+      try {
+        const [audioSetting, maxDurationSetting] = await Promise.all([
+          getSetting(SETTING_VIDEO_AUDIO_ENABLED),
+          getSetting(SETTING_VIDEO_MAX_DURATION_SEC),
+        ]);
+        setVideoAudioEnabled?.(parseVideoAudioEnabled(audioSetting));
+        setVideoMaxDurationSec?.(parseVideoMaxDuration(maxDurationSetting));
+      } catch (err) {
+        console.error('Failed to load video settings:', err);
+      }
     }
 
     setInitStatus(t('statusCheckingLastFolder'));

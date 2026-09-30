@@ -372,3 +372,393 @@ describe('Slideshow does not replay the exiting video on mediaKey change alone (
     expect(pauseSpy).not.toHaveBeenCalled();
   });
 });
+
+// #68: 動画の音声ON/OFF・最大再生時間・自動再生拒否のフォールバック。
+// jsdomのHTMLMediaElement.currentTimeは実際には進まないので、要素ごとに値を差し込む。
+function setCurrentTime(video: HTMLVideoElement, seconds: number) {
+  Object.defineProperty(video, 'currentTime', {
+    configurable: true,
+    value: seconds,
+    writable: true,
+  });
+}
+
+function tick(video: HTMLVideoElement, seconds: number) {
+  setCurrentTime(video, seconds);
+  fireEvent.timeUpdate(video);
+}
+
+/** DOMException 相当（name で NotAllowedError を判別する実装のため Error+name で十分）。 */
+function playError(name: string): Error {
+  const e = new Error('blocked');
+  e.name = name;
+  return e;
+}
+
+const videoA = () => makeImage({ isVideo: true, path: '/videos/a.mp4' });
+
+describe('Slideshow video audio setting (#68)', () => {
+  it('mutes the video by default (audio OFF)', () => {
+    const { container } = render(<Slideshow image={videoA()} isPlaying={true} />);
+    expect((container.querySelector('video') as HTMLVideoElement).muted).toBe(true);
+  });
+
+  it('unmutes the video when videoAudioEnabled is true', () => {
+    const { container } = render(
+      <Slideshow image={videoA()} isPlaying={true} videoAudioEnabled={true} />,
+    );
+    expect((container.querySelector('video') as HTMLVideoElement).muted).toBe(false);
+  });
+
+  it('reflects a live toggle of the setting on the current video', () => {
+    const { container, rerender } = render(
+      <Slideshow image={videoA()} isPlaying={true} videoAudioEnabled={false} />,
+    );
+    const video = container.querySelector('video') as HTMLVideoElement;
+    expect(video.muted).toBe(true);
+    rerender(<Slideshow image={videoA()} isPlaying={true} videoAudioEnabled={true} />);
+    expect(video.muted).toBe(false);
+    rerender(<Slideshow image={videoA()} isPlaying={true} videoAudioEnabled={false} />);
+    expect(video.muted).toBe(true);
+  });
+
+  it('mutes and pauses the exiting (old) video so its audio does not overlap the next media', () => {
+    const videoB = makeImage({ isVideo: true, path: '/videos/b.mp4' });
+    const { container, rerender } = render(
+      <Slideshow image={videoA()} displayToken={0} isPlaying={true} videoAudioEnabled={true} />,
+    );
+    const oldVideo = container.querySelector('video') as HTMLVideoElement;
+    expect(oldVideo.muted).toBe(false);
+    pauseSpy.mockClear();
+
+    rerender(
+      <Slideshow image={videoB} displayToken={1} isPlaying={true} videoAudioEnabled={true} />,
+    );
+
+    // 退場アニメーション中の古い要素がまだDOMにある間にミュート+一時停止される
+    expect(container.querySelector('video')).toBe(oldVideo);
+    expect(oldVideo.muted).toBe(true);
+    expect(pauseSpy).toHaveBeenCalled();
+  });
+
+  it('a newly mounted video after the exit animation is unmuted again when audio is ON', async () => {
+    const videoB = makeImage({ isVideo: true, path: '/videos/b.mp4' });
+    const { container, rerender } = render(
+      <Slideshow image={videoA()} displayToken={0} isPlaying={true} videoAudioEnabled={true} />,
+    );
+    rerender(
+      <Slideshow image={videoB} displayToken={1} isPlaying={true} videoAudioEnabled={true} />,
+    );
+    await waitForExitAnimation();
+    const newVideo = container.querySelector('video') as HTMLVideoElement;
+    expect(newVideo.dataset.mediaKey).toBe('/videos/b.mp4::1');
+    expect(newVideo.muted).toBe(false);
+  });
+});
+
+describe('Slideshow video autoplay fallback (#68)', () => {
+  function rejectWith(name: string) {
+    return vi
+      .spyOn(window.HTMLMediaElement.prototype, 'play')
+      .mockImplementation(() => Promise.reject(playError(name)));
+  }
+
+  it('falls back to muted and keeps playing when play() is rejected with NotAllowedError', async () => {
+    const spy = rejectWith('NotAllowedError');
+    const { container } = render(
+      <Slideshow image={videoA()} isPlaying={true} videoAudioEnabled={true} />,
+    );
+    const video = container.querySelector('video') as HTMLVideoElement;
+    expect(video.muted).toBe(false);
+
+    await act(async () => {
+      fireEvent.loadedData(video);
+    });
+
+    expect(video.muted).toBe(true);
+    // 最初の試行 + ミュートでの再試行
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not mute for other rejections such as AbortError', async () => {
+    const spy = rejectWith('AbortError');
+    const { container } = render(
+      <Slideshow image={videoA()} isPlaying={true} videoAudioEnabled={true} />,
+    );
+    const video = container.querySelector('video') as HTMLVideoElement;
+
+    await act(async () => {
+      fireEvent.loadedData(video);
+    });
+
+    expect(video.muted).toBe(false);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry (or replay) when the media already moved on before the rejection arrived', async () => {
+    let rejectPlay!: (err: unknown) => void;
+    const spy = vi
+      .spyOn(window.HTMLMediaElement.prototype, 'play')
+      .mockImplementation(() => new Promise<void>((_, reject) => (rejectPlay = reject)));
+    const videoB = makeImage({ isVideo: true, path: '/videos/b.mp4' });
+    const { container, rerender } = render(
+      <Slideshow image={videoA()} displayToken={0} isPlaying={true} videoAudioEnabled={true} />,
+    );
+    const oldVideo = container.querySelector('video') as HTMLVideoElement;
+    fireEvent.loadedData(oldVideo);
+    rerender(
+      <Slideshow image={videoB} displayToken={1} isPlaying={true} videoAudioEnabled={true} />,
+    );
+
+    await act(async () => {
+      rejectPlay(playError('NotAllowedError'));
+    });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to muted when resuming from pause is rejected', async () => {
+    const image = videoA();
+    const { container, rerender } = render(
+      <Slideshow image={image} isPlaying={false} videoAudioEnabled={true} />,
+    );
+    const video = container.querySelector('video') as HTMLVideoElement;
+    const spy = rejectWith('NotAllowedError');
+
+    await act(async () => {
+      rerender(<Slideshow image={image} isPlaying={true} videoAudioEnabled={true} />);
+    });
+
+    expect(video.muted).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('never touches play() on loadeddata while paused', () => {
+    const { container } = render(
+      <Slideshow image={videoA()} isPlaying={false} videoAudioEnabled={true} />,
+    );
+    playSpy.mockClear();
+    fireEvent.loadedData(container.querySelector('video')!);
+    expect(playSpy).not.toHaveBeenCalled();
+  });
+
+  it('never touches play() on loadeddata when the video is already playing (audio OFF or ON)', () => {
+    for (const audio of [false, true]) {
+      const { container, unmount } = render(
+        <Slideshow image={videoA()} isPlaying={true} videoAudioEnabled={audio} />,
+      );
+      const video = container.querySelector('video') as HTMLVideoElement;
+      // autoPlay 属性で既に再生が始まっている状態（paused=false）
+      Object.defineProperty(video, 'paused', { configurable: true, get: () => false });
+      playSpy.mockClear();
+      fireEvent.loadedData(video);
+      expect(playSpy).not.toHaveBeenCalled();
+      unmount();
+    }
+  });
+});
+
+describe('Slideshow video max duration (#68)', () => {
+  it('advances once when playback reaches the cap, pausing the video', () => {
+    const onAdvance = vi.fn();
+    const { container } = render(
+      <Slideshow
+        image={videoA()}
+        isPlaying={true}
+        videoMaxDurationSec={30}
+        onAdvance={onAdvance}
+      />,
+    );
+    const video = container.querySelector('video') as HTMLVideoElement;
+    pauseSpy.mockClear();
+
+    tick(video, 29.7);
+    expect(onAdvance).not.toHaveBeenCalled();
+
+    tick(video, 30.1);
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+    expect(pauseSpy).toHaveBeenCalled();
+  });
+
+  it('does not double-advance on repeated timeupdate / a late ended after the cap', () => {
+    const onAdvance = vi.fn();
+    const { container } = render(
+      <Slideshow
+        image={videoA()}
+        isPlaying={true}
+        videoMaxDurationSec={30}
+        onAdvance={onAdvance}
+      />,
+    );
+    const video = container.querySelector('video') as HTMLVideoElement;
+
+    tick(video, 30.1);
+    tick(video, 30.4);
+    tick(video, 30.7);
+    fireEvent.ended(video);
+
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+  });
+
+  it('a shorter video still advances exactly once via onEnded (cap never reached)', () => {
+    const onAdvance = vi.fn();
+    const { container } = render(
+      <Slideshow
+        image={videoA()}
+        isPlaying={true}
+        videoMaxDurationSec={60}
+        onAdvance={onAdvance}
+      />,
+    );
+    const video = container.querySelector('video') as HTMLVideoElement;
+
+    tick(video, 9.9);
+    expect(onAdvance).not.toHaveBeenCalled();
+    fireEvent.ended(video);
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+    // ended後に(念のため)上限判定が走っても二重に進まない
+    tick(video, 61);
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+  });
+
+  it('never advances by the cap when unlimited (0), only via onEnded', () => {
+    const onAdvance = vi.fn();
+    const { container } = render(
+      <Slideshow image={videoA()} isPlaying={true} videoMaxDurationSec={0} onAdvance={onAdvance} />,
+    );
+    const video = container.querySelector('video') as HTMLVideoElement;
+
+    tick(video, 99999);
+    expect(onAdvance).not.toHaveBeenCalled();
+    fireEvent.ended(video);
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not advance at the cap while paused; advances once on resume without replaying', () => {
+    const onAdvance = vi.fn();
+    const image = videoA();
+    const { container, rerender } = render(
+      <Slideshow image={image} isPlaying={false} videoMaxDurationSec={30} onAdvance={onAdvance} />,
+    );
+    const video = container.querySelector('video') as HTMLVideoElement;
+
+    tick(video, 31);
+    expect(onAdvance).not.toHaveBeenCalled();
+
+    playSpy.mockClear();
+    rerender(
+      <Slideshow image={image} isPlaying={true} videoMaxDurationSec={30} onAdvance={onAdvance} />,
+    );
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+    expect(playSpy).not.toHaveBeenCalled();
+  });
+
+  it('pause/resume after the cap was hit (advance still in flight) never resumes playback past the cap', () => {
+    const onAdvance = vi.fn();
+    const image = videoA();
+    const { container, rerender } = render(
+      <Slideshow image={image} isPlaying={true} videoMaxDurationSec={30} onAdvance={onAdvance} />,
+    );
+    const video = container.querySelector('video') as HTMLVideoElement;
+    tick(video, 30.2);
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+
+    playSpy.mockClear();
+    rerender(
+      <Slideshow image={image} isPlaying={false} videoMaxDurationSec={30} onAdvance={onAdvance} />,
+    );
+    rerender(
+      <Slideshow image={image} isPlaying={true} videoMaxDurationSec={30} onAdvance={onAdvance} />,
+    );
+    // 上限を超えて再生し直さない（再開の意図は「次へ」として扱う）
+    expect(playSpy).not.toHaveBeenCalled();
+    // 再開は「次へ」として onAdvance を再度呼ぶ（上限到達時の1回目 + 再開時の2回目）。
+    expect(onAdvance).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores the cap on a stale (exiting) video after the media already changed', () => {
+    const onAdvance = vi.fn();
+    const videoB = makeImage({ isVideo: true, path: '/videos/b.mp4' });
+    const { container, rerender } = render(
+      <Slideshow
+        image={videoA()}
+        displayToken={0}
+        isPlaying={true}
+        videoMaxDurationSec={30}
+        onAdvance={onAdvance}
+      />,
+    );
+    rerender(
+      <Slideshow
+        image={videoB}
+        displayToken={1}
+        isPlaying={true}
+        videoMaxDurationSec={30}
+        onAdvance={onAdvance}
+      />,
+    );
+    const exiting = container.querySelector('video') as HTMLVideoElement;
+    tick(exiting, 45);
+    expect(onAdvance).not.toHaveBeenCalled();
+  });
+
+  it('a fresh video after the cap advance starts with a clean state and can hit the cap again', async () => {
+    const onAdvance = vi.fn();
+    const videoB = makeImage({ isVideo: true, path: '/videos/b.mp4' });
+    const { container, rerender } = render(
+      <Slideshow
+        image={videoA()}
+        displayToken={0}
+        isPlaying={true}
+        videoMaxDurationSec={30}
+        onAdvance={onAdvance}
+      />,
+    );
+    tick(container.querySelector('video')!, 31);
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <Slideshow
+        image={videoB}
+        displayToken={1}
+        isPlaying={true}
+        videoMaxDurationSec={30}
+        onAdvance={onAdvance}
+      />,
+    );
+    await waitForExitAnimation();
+    tick(container.querySelector('video')!, 30.5);
+    expect(onAdvance).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not apply the cap to images: no advance from the component however long it is shown', () => {
+    vi.useFakeTimers();
+    try {
+      const onAdvance = vi.fn();
+      const onMediaReady = vi.fn();
+      const { container } = render(
+        <Slideshow
+          image={makeImage()}
+          isPlaying={true}
+          videoMaxDurationSec={30}
+          onAdvance={onAdvance}
+          onMediaReady={onMediaReady}
+        />,
+      );
+      const img = Array.from(container.querySelectorAll('img')).find(
+        (el) => el.getAttribute('alt') !== 'SSS Logo',
+      )!;
+      fireEvent.load(img);
+      // 上限(30秒)を大きく超えて経過させても、画像の次送りは表示間隔タイマー
+      // （呼び出し側）の責務であり、Slideshow 自身は onAdvance を呼ばない。
+      act(() => {
+        vi.advanceTimersByTime(10 * 60 * 1000);
+      });
+      expect(onMediaReady).toHaveBeenCalledTimes(1);
+      expect(onAdvance).not.toHaveBeenCalled();
+      expect(container.querySelector('video')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

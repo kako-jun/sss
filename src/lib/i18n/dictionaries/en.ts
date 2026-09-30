@@ -120,6 +120,14 @@ export const en = {
   displayIntervalTitle: 'Display Interval',
   displayIntervalDescription: 'Seconds before switching to the next photo or video (5–60s)',
   exifRotationLabel: 'Auto-rotate images based on EXIF orientation',
+  videoSectionTitle: 'Video',
+  videoAudioLabel: 'Play video audio',
+  videoAudioDescription: 'When off, videos play silently',
+  videoMaxDurationLabel: 'Maximum video playback time',
+  videoMaxDurationDescription: 'Longer videos move on to the next photo or video after this time',
+  videoMaxDurationUnlimited: 'Unlimited',
+  videoMaxDurationSeconds: '{count}s',
+  videoMaxDurationMinutes: '{count} min',
   pickDestinationTitle: 'Picks Folder',
 
   // === Settings: Exclude Rules ===

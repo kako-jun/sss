@@ -17,6 +17,41 @@ export function clampDisplayInterval(ms: number): number {
   return Math.round(clampedSeconds) * 1000;
 }
 
+// 動画設定（#68）
+export const SETTING_VIDEO_AUDIO_ENABLED = 'video_audio_enabled';
+export const SETTING_VIDEO_MAX_DURATION_SEC = 'video_max_duration_sec';
+/** 動画の音声は既定でOFF（無音のまま次々に流れる、これまでの挙動を維持する）。 */
+export const DEFAULT_VIDEO_AUDIO_ENABLED = false;
+/** 動画の最大再生時間の既定。0 = 無制限（動画の長さ分そのまま再生する）。 */
+export const DEFAULT_VIDEO_MAX_DURATION_SEC = 0;
+/** 設定UIに出す選択肢（秒）。0 = 無制限。 */
+export const VIDEO_MAX_DURATION_OPTIONS_SEC: readonly number[] = [0, 30, 60, 120, 300];
+
+/**
+ * 動画の最大再生時間（秒）を許容値へ丸める（#68）。
+ *
+ * 選択肢に無い値・NaN・負数・小数が保存値の破損等で入ってきても、意図しない
+ * 短い上限（例: 1秒で次へ進み続けて全件を一瞬で消化する）にならないよう、
+ * 選択肢に完全一致する場合以外は既定（無制限）に戻す。`clampDisplayInterval`
+ * （#65）と同じく、ここを唯一の検証経路にする。
+ */
+export function normalizeVideoMaxDuration(sec: number): number {
+  return VIDEO_MAX_DURATION_OPTIONS_SEC.includes(sec) ? sec : DEFAULT_VIDEO_MAX_DURATION_SEC;
+}
+
+/** 保存済みの文字列（`app_settings`）から動画音声ON/OFFを復元する。未設定・破損は既定。 */
+export function parseVideoAudioEnabled(value: string | null | undefined): boolean {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return DEFAULT_VIDEO_AUDIO_ENABLED;
+}
+
+/** 保存済みの文字列から動画の最大再生時間（秒）を復元する。未設定・破損は既定（無制限）。 */
+export function parseVideoMaxDuration(value: string | null | undefined): number {
+  if (value == null || !/^\d+$/.test(value.trim())) return DEFAULT_VIDEO_MAX_DURATION_SEC;
+  return normalizeVideoMaxDuration(parseInt(value, 10));
+}
+
 // アニメーション
 export const MODAL_ANIMATION_DURATION = 0.2; // 秒
 
