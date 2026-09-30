@@ -36,9 +36,14 @@ pub fn numbered_file_name(file_name: &OsStr, n: u32) -> OsString {
 /// 秒単位のタイムスタンプを付けていたため、同じ秒に同じ名前を2回ピックすると
 /// 上書きされていた。`create_new` で「存在しなければ作成」を原子的に行って名前を
 /// 予約するので、存在確認と作成の間に割り込まれても既存ファイルは決して上書きしない。
-/// 予約したパスへの実コピーは `fs::copy` に任せる（属性・macOS の clone/fcopyfile を
-/// 活かす）。修正日時はプラットフォームによって `fs::copy` が引き継がないため、
-/// コピー後に元ファイルの値を明示的に反映する（失敗しても無視）。
+/// 予約したパスへの実コピーは `fs::copy` に任せる（属性・パーミッションを保つ）。
+/// 予約済みで宛先が既に存在するため、macOS では `fclonefileat` が EEXIST になり clone
+/// は使われず `fcopyfile(COPYFILE_ALL)` に落ちる（属性・時刻はこちらで保たれる）。
+/// 修正日時はプラットフォームによって `fs::copy` が引き継がないため、コピー後に元
+/// ファイルの値を明示的に反映する（失敗しても無視）。既知の制約: Linux で読み取り専用
+/// の元ファイルは `fs::copy` がパーミッションもコピーするため、コピー後の書き込み
+/// オープンが EACCES で失敗し修正日時は保たれない。Windows では読み取り専用属性も
+/// 引き継がれ、コピーも読み取り専用になる。
 pub fn copy_with_unique_name(source: &Path, dest_dir: &Path) -> Result<PathBuf, String> {
     let file_name = source.file_name().ok_or("Failed to get file name")?;
 
