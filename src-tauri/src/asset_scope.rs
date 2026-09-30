@@ -29,10 +29,11 @@ pub fn resolve_share_directory(pictures_dir: &Path, saved_setting: Option<&str>)
 
 /// ピック先ディレクトリを解決し、そのまま asset scope に許可してよいか判定する。
 /// `resolve_share_directory` と `sanitize_allow_dir` を束ねた薄いラッパーで、
-/// `save_setting`（設定変更時）と `pick_image`（ディレクトリ作成直後の再許可。
-/// 起動時・設定変更時点ではディレクトリ未作成で許可に失敗していることがあるため、
-/// 実在が保証されたタイミングで改めて判定し直す。レビュー #73 must）の
-/// 両方から同じ判定ロジックを使う。
+/// `save_setting`（設定変更時）が使う。`pick_image` はピック先の解決を
+/// `get_picked_directory` に一本化しており、ディレクトリ作成直後の再許可
+/// （起動時・設定変更時点ではディレクトリ未作成で許可に失敗していることがあるため、
+/// 実在が保証されたタイミングで改めて判定し直す。レビュー #73 must）では
+/// 解決済みのパスに対して `sanitize_allow_dir` を直接呼ぶ。
 pub fn resolve_and_sanitize_share_directory(
     pictures_dir: &Path,
     saved_setting: Option<&str>,
