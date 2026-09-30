@@ -95,8 +95,9 @@ pub fn run() {
 
             // asset scope（convertFileSrc が読み込めるディレクトリ）を動的に許可する。
             // tauri.conf.json の静的 scope は空にしてあるため、表示に必要な全ディレクトリを
-            // ここと scan_directory コマンドの両方で明示的に許可する（起動直後の3経路: 手動スキャン・
-            // 起動時自動スキャンは scan_directory 側、DB保存済みディレクトリの即時許可はここ）。
+            // こことスキャン系コマンド（select_and_scan / rescan_last_directory）の両方で明示的に
+            // 許可する（起動直後の3経路: 手動スキャン・起動時自動スキャンはスキャン側、
+            // DB保存済みディレクトリの即時許可はここ）。
             //
             // sanitize_allow_dir() を必ず通す: 空文字列や相対パス・ホームドライブのルートを
             // そのまま allow_directory に渡すと、tauri の scope 実装が意図せず広いパターン
@@ -161,7 +162,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::scan::scan_directory,
+            commands::scan::select_and_scan,
+            commands::scan::rescan_last_directory,
             commands::scan::restore_playlist,
             commands::image::get_next_image,
             commands::image::get_previous_image,
@@ -172,6 +174,7 @@ pub fn run() {
             commands::system::exit_app,
             commands::system::reset_all_data,
             commands::settings::save_setting,
+            commands::settings::select_share_directory,
             commands::settings::get_setting,
             commands::file_operations::pick_image,
             commands::file_operations::exclude_image,

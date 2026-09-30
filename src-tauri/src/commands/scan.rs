@@ -1,4 +1,5 @@
 use crate::asset_scope::sanitize_allow_dir;
+use crate::commands::dialog::{pick_directory_blocking, DirectoryPicker, PrePicked};
 use crate::commands::playlist_persistence::{self, normalize_directory_key};
 use crate::commands::types::{AppState, ScanProgress};
 use crate::database::{Database, ExifCacheRow};
@@ -24,7 +25,7 @@ const SSSIGNORE_MIGRATED_KEY: &str = "sssignore_migrated";
 /// 閾値以下は毎回のログでノイズになるので出さない。
 const STAGE3_LOCK_WARNING_THRESHOLD_MS: u128 = 100;
 
-/// `scan_directory` の二重実行を防ぐRAIIガード（#61レビュー nit）。
+/// スキャン（`select_and_scan` / `rescan_last_directory`）の二重実行を防ぐRAIIガード（#61レビュー nit）。
 ///
 /// `AppState::scan_in_progress` を `compare_exchange` で `false → true` にできた
 /// 場合のみ生成でき、生成に成功すると必ず1つの `Drop` で `false` に戻す
@@ -609,74 +610,205 @@ where
     })
 }
 
-/// ディレクトリをスキャンしてプレイリストを初期化
-#[tauri::command]
-pub async fn scan_directory(
-    directory_path: String,
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> Result<ScanProgress, String> {
+/// `last_directory_path`（前回スキャンしたフォルダ）を保存する `app_settings` のキー。
+/// #93: このキーは `save_setting`（WebView から呼べる）では書き込めない。書き込むのは
+/// ダイアログ経由で選ばれたパスのスキャン成功後（[`scan_chosen_directory`]）だけ。
+pub const LAST_DIRECTORY_KEY: &str = "last_directory_path";
+
+/// 選ばれた（または DB 保存済みの）ディレクトリを検証してスキャンし、成功したら
+/// `last_directory_path` に保存する本体（Tauri 非依存、#93）。
+///
+/// `select_and_scan` / `rescan_last_directory` の共通部分。JS から受け取ったパス文字列を
+/// ここに渡す経路は存在しない（呼び出し元はダイアログの結果か DB 保存値だけを渡す）。
+/// 戻り値の `PathBuf` は `sanitize_allow_dir` を通った安全なパスで、呼び出し元
+/// （`AppHandle` を持つコマンドシェル）が asset scope へ許可する。
+pub fn scan_chosen_directory<F>(
+    db_mutex: &Mutex<Database>,
+    playlist_mutex: &Mutex<Option<Playlist>>,
+    directory_path_mutex: &Mutex<Option<PathBuf>>,
+    scan_in_progress: &AtomicBool,
+    directory: &Path,
+    progress_callback: F,
+) -> Result<(ScanProgress, PathBuf), String>
+where
+    F: FnMut(usize, usize) + Send + Sync,
+{
     // #61レビュー nit: 二重実行防止。2本目のスキャンは即座にエラーを返す
     // （RAIIガードなので、この後のどの`?`早期returnでも確実に解除される）。
-    let _scan_guard = ScanGuard::acquire(&state.scan_in_progress)?;
+    let _scan_guard = ScanGuard::acquire(scan_in_progress)?;
 
-    let directory = PathBuf::from(&directory_path);
-
-    // #80: ユーザー向け文言でなくエラーコードで返す（フロントは呼び出し時点で
-    // 自分が渡した directory_path を知っているため、パス自体をここで文字列に
-    // 埋め込み直す必要はない）。フロント辞書は `resolveScanErrorMessage` で変換する。
+    // #80: ユーザー向け文言でなくエラーコードで返す。フロント辞書は
+    // `resolveScanErrorMessage` で変換する。
     if !directory.is_dir() {
         return Err("directoryNotFound".to_string());
     }
 
-    // asset scope（convertFileSrc が読み込めるディレクトリ）にスキャン対象を動的に許可する。
-    // 手動スキャン・起動時自動スキャンはどちらもこのコマンドを通るため、ここ1箇所で両方をカバーする。
-    // sanitize_allow_dir() で is_dir・絶対パス・非保護ルートを再検証してから allow する
+    // sanitize_allow_dir() で is_dir・絶対パス・非保護ルートを再検証する
     // （空文字列/相対パスが紛れ込んで意図せず広い scope になる事故を防ぐ、レビュー #73 M1）。
     // 拒否された場合はスキャンしても画像が一切表示できないため、ここで Err を返して
-    // UI にエラー理由を伝える（黙って続行し原因不明のまま表示できない、を防ぐ。should1）。
-    let safe_dir = sanitize_allow_dir(&directory).ok_or_else(|| "directoryUnsafe".to_string())?;
-    if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
-        eprintln!(
-            "Failed to allow asset scope for {}: {e}",
-            safe_dir.display()
-        );
-    }
+    // UI にエラー理由を伝える。
+    let safe_dir = sanitize_allow_dir(directory).ok_or_else(|| "directoryUnsafe".to_string())?;
 
     // #61レビュー M-A: current_directory の読み取りだけ先に短時間ロックする。
-    // `perform_scan` 自身が db/playlist のロックを段階ごとに細かく取る（下記参照）ため、
+    // `perform_scan` 自身が db/playlist のロックを段階ごとに細かく取るため、
     // ここで db/playlist を事前ロックしたまま渡さない。
-    let current_directory = state
-        .directory_path
+    let current_directory = directory_path_mutex
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
 
     let progress = perform_scan(
+        db_mutex,
+        playlist_mutex,
+        directory_path_mutex,
+        current_directory.as_deref(),
+        directory,
+        progress_callback,
+    )?;
+    // `directory_path_mutex` は perform_scan の Stage 4 内（playlistロックを保持したまま）
+    // で既に設定済み（#62レビュー2巡目 nit）。ここで改めて設定しない。
+
+    // ディレクトリパスをデータベースに永続化（起動時の自動スキャン・復元の基準になる）
+    let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = db.save_setting(LAST_DIRECTORY_KEY, &directory.to_string_lossy());
+    drop(db);
+
+    Ok((progress, safe_dir))
+}
+
+/// `select_and_scan` の結果（#93）。
+#[derive(Debug)]
+pub enum SelectScanOutcome {
+    /// ユーザーがダイアログをキャンセルした（エラーではない）。何も変更していない。
+    Cancelled,
+    /// 選ばれたフォルダをスキャンした。`PathBuf` は asset scope へ許可すべき安全なパス。
+    Scanned(ScanProgress, PathBuf),
+}
+
+/// フォルダ選択ダイアログ → 選ばれたフォルダのスキャンの本体（Tauri 非依存、#93）。
+///
+/// ダイアログは `picker` 越しに開く（本番は Rust 側のネイティブダイアログ、テストはスタブ）。
+/// キャンセル時は `Cancelled`（エラーにしない）。ダイアログを先に閉じてから
+/// スキャンの二重実行ガードを取る（ダイアログ表示中に他のスキャンや初期化を塞がない）。
+pub fn perform_select_and_scan<P, F>(
+    picker: &P,
+    title: Option<&str>,
+    db_mutex: &Mutex<Database>,
+    playlist_mutex: &Mutex<Option<Playlist>>,
+    directory_path_mutex: &Mutex<Option<PathBuf>>,
+    scan_in_progress: &AtomicBool,
+    progress_callback: F,
+) -> Result<SelectScanOutcome, String>
+where
+    P: DirectoryPicker,
+    F: FnMut(usize, usize) + Send + Sync,
+{
+    let Some(directory) = picker.pick_directory(title) else {
+        return Ok(SelectScanOutcome::Cancelled);
+    };
+    let (progress, safe_dir) = scan_chosen_directory(
+        db_mutex,
+        playlist_mutex,
+        directory_path_mutex,
+        scan_in_progress,
+        &directory,
+        progress_callback,
+    )?;
+    Ok(SelectScanOutcome::Scanned(progress, safe_dir))
+}
+
+/// DB に保存済みの前回フォルダ（過去にダイアログで選ばれたパス）を再スキャンする本体
+/// （Tauri 非依存、#93）。保存が無ければ `noLastDirectory`。
+pub fn perform_rescan_last_directory<F>(
+    db_mutex: &Mutex<Database>,
+    playlist_mutex: &Mutex<Option<Playlist>>,
+    directory_path_mutex: &Mutex<Option<PathBuf>>,
+    scan_in_progress: &AtomicBool,
+    progress_callback: F,
+) -> Result<(ScanProgress, PathBuf), String>
+where
+    F: FnMut(usize, usize) + Send + Sync,
+{
+    let last = {
+        let db = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+        db.get_setting(LAST_DIRECTORY_KEY)
+            .map_err(|e| format!("Database error: {e}"))?
+    };
+    let Some(last) = last.filter(|p| !p.is_empty()) else {
+        return Err("noLastDirectory".to_string());
+    };
+    scan_chosen_directory(
+        db_mutex,
+        playlist_mutex,
+        directory_path_mutex,
+        scan_in_progress,
+        Path::new(&last),
+        progress_callback,
+    )
+}
+
+fn allow_asset_scope(app: &tauri::AppHandle, safe_dir: &Path) {
+    // asset scope（convertFileSrc が読み込めるディレクトリ）にスキャン対象を動的に許可する。
+    if let Err(e) = app.asset_protocol_scope().allow_directory(safe_dir, true) {
+        eprintln!(
+            "Failed to allow asset scope for {}: {e}",
+            safe_dir.display()
+        );
+    }
+}
+
+fn emit_scan_progress(app: &tauri::AppHandle) -> impl FnMut(usize, usize) + Send + Sync + '_ {
+    move |current, total| {
+        let _ = app.emit(
+            "scan-progress",
+            serde_json::json!({ "current": current, "total": total }),
+        );
+    }
+}
+
+/// フォルダ選択ダイアログを Rust 側で開き、選ばれたフォルダをスキャンする（#93）。
+///
+/// 戻り値は `Some(ScanProgress)`（スキャン完了）/ `None`（ダイアログをキャンセル）。
+/// `title` はダイアログの表示タイトルだけに使う（パスではない）。
+#[tauri::command]
+pub async fn select_and_scan(
+    title: Option<String>,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<Option<ScanProgress>, String> {
+    let picked = pick_directory_blocking(app.clone(), title).await?;
+    match perform_select_and_scan(
+        &PrePicked(picked),
+        None,
         &state.db,
         &state.playlist,
         &state.directory_path,
-        current_directory.as_deref(),
-        &directory,
-        |current, total| {
-            // 進捗イベントを発行
-            let _ = app.emit(
-                "scan-progress",
-                serde_json::json!({
-                    "current": current,
-                    "total": total
-                }),
-            );
-        },
+        &state.scan_in_progress,
+        emit_scan_progress(&app),
+    )? {
+        SelectScanOutcome::Cancelled => Ok(None),
+        SelectScanOutcome::Scanned(progress, safe_dir) => {
+            allow_asset_scope(&app, &safe_dir);
+            Ok(Some(progress))
+        }
+    }
+}
+
+/// DB 保存済みの前回フォルダを再スキャンする（#93。起動時の自動スキャン・設定画面の
+/// 再スキャン）。引数は取らない（WebView からパスを指定できない）。
+#[tauri::command]
+pub async fn rescan_last_directory(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<ScanProgress, String> {
+    let (progress, safe_dir) = perform_rescan_last_directory(
+        &state.db,
+        &state.playlist,
+        &state.directory_path,
+        &state.scan_in_progress,
+        emit_scan_progress(&app),
     )?;
-    // `state.directory_path` は perform_scan の Stage 4 内（playlistロックを保持したまま）
-    // で既に設定済み（#62レビュー2巡目 nit）。ここで改めて設定しない。
-
-    // ディレクトリパスをデータベースに永続化
-    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-    let _ = db.save_setting("last_directory_path", &directory_path);
-    drop(db);
-
+    allow_asset_scope(&app, &safe_dir);
     Ok(progress)
 }
 
@@ -816,11 +948,19 @@ pub fn perform_restore(
 /// （`AppHandle` が要る副作用）だけを行う薄いシェル。
 #[tauri::command]
 pub async fn restore_playlist(
-    directory_path: String,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<bool, String> {
-    let directory = PathBuf::from(&directory_path);
+    // #93: 復元対象は DB 保存済みの前回フォルダ。WebView からパスを受け取らない。
+    let last = {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.get_setting(LAST_DIRECTORY_KEY)
+            .map_err(|e| format!("Database error: {e}"))?
+    };
+    let Some(last) = last.filter(|p| !p.is_empty()) else {
+        return Ok(false);
+    };
+    let directory = PathBuf::from(&last);
 
     match perform_restore(
         &state.db,

@@ -1,4 +1,5 @@
 // サブモジュール宣言
+pub mod dialog;
 pub mod file_operations;
 pub mod image;
 pub mod playlist_persistence;
