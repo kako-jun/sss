@@ -73,6 +73,8 @@ export const ja = {
   lastDisplayedTooltip: '最終表示: {when}',
   pickCopyDone: 'コピー完了: {path}',
   pickCopyFailed: 'エラー: コピー失敗',
+  errorPathNotManaged: 'このファイルはスライドショーの管理外のためコピーできません',
+  errorNotMediaFile: '画像・動画ファイルではないためコピーできません',
   excludeFailed: 'エラー: 除外失敗',
   excludeAddedFile: '除外パターン追加: {pattern}',
   excludeAddedNeedsRescan: '除外パターン追加: {pattern} (変更を反映するには再スキャンしてください)',

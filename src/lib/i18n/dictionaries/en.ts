@@ -73,6 +73,8 @@ export const en = {
   lastDisplayedTooltip: 'Last shown: {when}',
   pickCopyDone: 'Copied to {path}',
   pickCopyFailed: "Couldn't copy the photo",
+  errorPathNotManaged: "This file isn't managed by the slideshow, so it can't be copied",
+  errorNotMediaFile: "This isn't an image or video file, so it can't be copied",
   excludeFailed: 'Error: exclude failed',
   excludeAddedFile: 'Exclude rule added: {pattern}',
   excludeAddedNeedsRescan: 'Exclude rule added: {pattern} (rescan to apply the change)',

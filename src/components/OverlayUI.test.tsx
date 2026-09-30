@@ -142,6 +142,18 @@ describe('OverlayUI pause/play icon reflects isPausedByUser, not the hover-deriv
   });
 });
 
+describe('OverlayUI pick rejection message (#87)', () => {
+  it('shows the localized message for a backend rejection code instead of a generic failure', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    pickImage.mockRejectedValue('pathNotManaged');
+    render(<OverlayUI image={makeImage()} {...requiredProps} />);
+    fireEvent.click(screen.getByTitle('ピック（コピー）'));
+    expect(
+      await screen.findByText('このファイルはスライドショーの管理外のためコピーできません'),
+    ).toBeTruthy();
+  });
+});
+
 describe('OverlayUI status message timers do not interfere with each other (#66 問題6)', () => {
   it('keeps a newly shown message visible for its own full duration even if triggered right after a previous one', async () => {
     // 完全に決定的な擬似タイマー（自動進行なし）で制御し、mockの解決に必要な
