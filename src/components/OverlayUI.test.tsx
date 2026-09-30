@@ -16,8 +16,12 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
 const openInExplorer = vi.fn();
 const pickImage = vi.fn();
 const excludeImage = vi.fn();
+const undoExclude = vi.fn();
+const deletePickedImage = vi.fn();
 
 vi.mock('../lib/tauri', () => ({
+  undoExclude: (...args: unknown[]) => undoExclude(...args),
+  deletePickedImage: (...args: unknown[]) => deletePickedImage(...args),
   openInExplorer: (...args: unknown[]) => openInExplorer(...args),
   pickImage: (...args: unknown[]) => pickImage(...args),
   excludeImage: (...args: unknown[]) => excludeImage(...args),
@@ -70,6 +74,8 @@ beforeEach(() => {
   openInExplorer.mockReset();
   pickImage.mockReset();
   excludeImage.mockReset();
+  undoExclude.mockReset();
+  deletePickedImage.mockReset();
 });
 
 describe('OverlayUI exclude status message (#61レビューnit, #80)', () => {
@@ -182,9 +188,10 @@ describe('OverlayUI status message timers do not interfere with each other (#66 
     });
     expect(screen.getByText('コピー完了: /picks/a.tmp')).toBeTruthy();
 
-    // 2回目のメッセージ自身の3秒が経過すれば消える。
+    // 2回目のメッセージ自身の表示時間が経過すれば消える。ピック/除外は #78 で
+    // 「取り消す」ボタン付きのトースト（6秒）になったため、残り5.8秒ぶん進める。
     act(() => {
-      vi.advanceTimersByTime(2900);
+      vi.advanceTimersByTime(5900);
     });
     expect(screen.queryByText('コピー完了: /picks/a.tmp')).toBeNull();
 
@@ -465,5 +472,192 @@ describe('OverlayUI map button (openUrl)', () => {
 
     expect(screen.queryByAltText('位置情報の地図')).toBeNull();
     expect(openUrl).not.toHaveBeenCalled();
+  });
+});
+
+// #78: 除外/ピック直後の取り消しトースト。確認ダイアログは増やさず、直後の数秒だけ
+// 「取り消す」を出す。
+describe('OverlayUI undo toast (#78)', () => {
+  const outcome = {
+    pattern: '/photos/a.jpg',
+    needsRescan: false,
+    ruleType: 'glob',
+    ruleAdded: true,
+    removedPaths: ['/photos/a.jpg'],
+  };
+
+  async function excludeFile() {
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    fireEvent.click(screen.getByText('ファイルを除外'));
+    await screen.findByText('取り消す');
+  }
+
+  it('undoes an exclusion with the backend result and notifies the caller', async () => {
+    excludeImage.mockResolvedValue(outcome);
+    undoExclude.mockResolvedValue(undefined);
+    const onExcludeUndone = vi.fn();
+    render(<OverlayUI image={makeImage()} {...requiredProps} onExcludeUndone={onExcludeUndone} />);
+
+    await excludeFile();
+    fireEvent.click(screen.getByText('取り消す'));
+
+    await screen.findByText('除外を取り消しました');
+    expect(undoExclude).toHaveBeenCalledWith(outcome);
+    expect(onExcludeUndone).toHaveBeenCalledTimes(1);
+    // 取り消し後はボタンは消える（二重に押せない）
+    expect(screen.queryByText('取り消す')).toBeNull();
+  });
+
+  it('undoes a pick by deleting only the copied file', async () => {
+    pickImage.mockResolvedValue('/picks/a.jpg');
+    deletePickedImage.mockResolvedValue(undefined);
+    render(<OverlayUI image={makeImage()} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('ピック（コピー）'));
+    await screen.findByText('コピー完了: /picks/a.jpg');
+    fireEvent.click(screen.getByText('取り消す'));
+
+    await screen.findByText('ピックを取り消しました');
+    expect(deletePickedImage).toHaveBeenCalledWith('/picks/a.jpg');
+  });
+
+  it('shows an error message when the undo fails', async () => {
+    excludeImage.mockResolvedValue(outcome);
+    undoExclude.mockRejectedValue(new Error('boom'));
+    const onExcludeUndone = vi.fn();
+    render(<OverlayUI image={makeImage()} {...requiredProps} onExcludeUndone={onExcludeUndone} />);
+
+    await excludeFile();
+    fireEvent.click(screen.getByText('取り消す'));
+
+    await screen.findByText('エラー: 取り消せませんでした');
+    expect(onExcludeUndone).not.toHaveBeenCalled();
+  });
+
+  it('is not offered when the exclusion itself failed', async () => {
+    excludeImage.mockRejectedValue(new Error('boom'));
+    render(<OverlayUI image={makeImage()} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    fireEvent.click(screen.getByText('ファイルを除外'));
+    await screen.findByText('エラー: 除外失敗');
+    expect(screen.queryByText('取り消す')).toBeNull();
+  });
+
+  it('disappears by itself after a few seconds', async () => {
+    vi.useFakeTimers();
+    excludeImage.mockResolvedValue(outcome);
+    render(<OverlayUI image={makeImage()} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('ファイルを除外'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('取り消す')).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(5900);
+    });
+    expect(screen.getByText('取り消す')).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.queryByText('取り消す')).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('says nothing was undone when the exclusion added no rule and removed nothing', async () => {
+    excludeImage.mockResolvedValue({ ...outcome, ruleAdded: false, removedPaths: [] });
+    const onExcludeUndone = vi.fn();
+    render(<OverlayUI image={makeImage()} {...requiredProps} onExcludeUndone={onExcludeUndone} />);
+
+    await excludeFile();
+    fireEvent.click(screen.getByText('取り消す'));
+
+    await screen.findByText('戻すものはありませんでした');
+    expect(screen.queryByText('除外を取り消しました')).toBeNull();
+    expect(undoExclude).not.toHaveBeenCalled();
+    expect(onExcludeUndone).not.toHaveBeenCalled();
+  });
+
+  async function showToastWithFakeTimers() {
+    vi.useFakeTimers();
+    excludeImage.mockResolvedValue(outcome);
+    render(<OverlayUI image={makeImage()} {...requiredProps} />);
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('ファイルを除外'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('取り消す')).toBeTruthy();
+  }
+
+  it('pauses the timer while hovered and resumes with the remaining time afterwards', async () => {
+    await showToastWithFakeTimers();
+    const toast = screen.getByRole('status');
+
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+    fireEvent.mouseEnter(toast);
+    act(() => {
+      vi.advanceTimersByTime(60000);
+    });
+    expect(screen.getByText('取り消す')).toBeTruthy();
+
+    fireEvent.mouseLeave(toast);
+    act(() => {
+      vi.advanceTimersByTime(1900);
+    });
+    expect(screen.getByText('取り消す')).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.queryByText('取り消す')).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('pauses the timer while the undo button has keyboard focus', async () => {
+    await showToastWithFakeTimers();
+    const button = screen.getByText('取り消す');
+
+    act(() => {
+      button.focus();
+      vi.advanceTimersByTime(60000);
+    });
+    expect(screen.getByText('取り消す')).toBeTruthy();
+
+    act(() => {
+      button.blur();
+      vi.advanceTimersByTime(6100);
+    });
+    expect(screen.queryByText('取り消す')).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('stays clickable even when the overlay has faded out (idle), and survives the photo becoming null', async () => {
+    excludeImage.mockResolvedValue(outcome);
+    const { rerender } = render(
+      <OverlayUI image={makeImage()} {...requiredProps} isIdle={false} />,
+    );
+    await excludeFile();
+
+    // マウスを動かさず idle になっても、最後の1枚を除外して画像が無くなっても消えない。
+    rerender(<OverlayUI image={null} {...requiredProps} isIdle={true} />);
+    const button = screen.getByText('取り消す');
+    let el: HTMLElement | null = button;
+    while (el) {
+      const style = window.getComputedStyle(el);
+      expect(style.pointerEvents).not.toBe('none');
+      expect(el.className).not.toMatch(/opacity-0/);
+      el = el.parentElement;
+    }
   });
 });

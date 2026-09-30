@@ -25,6 +25,8 @@ export const en = {
   shortcutFullscreen: 'Toggle fullscreen',
   shortcutEscape: 'Exit (closes Settings first if open)',
   shortcutHelp: 'Show this help',
+  shortcutPhotoClick: 'On the photo: pause / resume',
+  shortcutPhotoWheel: 'On the photo: previous / next (or swipe sideways)',
   // #66 visual refresh: caption next to the "?" badge on the welcome screen
   // (the badge itself is a fixed "?" glyph in the JSX; this is just the label).
   shortcutsHintWelcome: 'Show keyboard shortcuts',
@@ -74,6 +76,12 @@ export const en = {
   pickCopyDone: 'Copied to {path}',
   pickCopyFailed: "Couldn't copy the photo",
   excludeFailed: 'Error: exclude failed',
+  // #78: brief toast right after exclude/pick, with an Undo button for a few seconds
+  undoButton: 'Undo',
+  undoExcludeDone: 'Exclusion undone',
+  undoExcludeNothing: 'Nothing to undo',
+  undoPickDone: 'Pick undone',
+  undoFailed: "Error: couldn't undo",
   excludeAddedFile: 'Exclude rule added: {pattern}',
   excludeAddedNeedsRescan: 'Exclude rule added: {pattern} (rescan to apply the change)',
 

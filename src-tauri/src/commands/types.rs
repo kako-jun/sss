@@ -64,4 +64,13 @@ pub struct ExcludeOutcome {
     /// `true` を返す。実際に即時反映のみで再スキャン不要なのは "file" だけ）。
     /// false: `exclude_type` が "file"（即座にプレイリストから除去済み）。
     pub needs_rescan: bool,
+    /// 追加した除外ルールの種別（`"glob"` | `"date"`）。`undo_exclude` へそのまま渡す（#78）。
+    pub rule_type: String,
+    /// この除外で `ignore_rules` に**新規追加された**か（#78）。同じルールが元から
+    /// 登録済みだった場合は `false`。取り消しで元からあったルールまで消さないための印。
+    pub rule_added: bool,
+    /// この除外で**即座に**プレイリストから外した画像のパス（#78）。`undo_exclude` が
+    /// 未再生区間へ戻す対象。ディレクトリ除外や未取得の撮影日除外は再スキャンまで
+    /// プレイリストから外れないため空になりうる。
+    pub removed_paths: Vec<String>,
 }

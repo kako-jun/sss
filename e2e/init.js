@@ -36,6 +36,9 @@
     i2v_vv: ['/p/a.png', '/p/v.webm', '/p/v2.webm', '/p/a.png'],
     one: ['/p/a.png'],
     toast: ['/p/a.png'],
+    // #78: 写真上のクリック/ホイール。前へ（canGoBack）を確かめるため、進んでも
+    // 先頭に巻き戻らない長さにする。
+    gestures: ['/p/a.png', '/p/b.png', '/p/a.png', '/p/b.png', '/p/a.png'],
     unreach: ['/p/a.png'],
     pausevid: ['/p/a.png', '/p/v.webm', '/p/b.png'],
     broken: ['/p/broken.png', '/p/b.png', '/p/a.png'],
@@ -199,6 +202,21 @@
         case 'get_playlist_info':
           return [idx + 1, (seqs[sc] || seqs.slides).length, idx > 0];
         case 'undo_display_count':
+          return null;
+        // #78: 除外/ピックの取り消し。バックエンドの ExcludeOutcome と同じ形を返す
+        // （removedPaths は即時に外した画像。undo_exclude はそれをそのまま受け取る）。
+        case 'exclude_image':
+          return {
+            pattern: args.imagePath,
+            needsRescan: false,
+            ruleType: 'glob',
+            ruleAdded: true,
+            removedPaths: [args.imagePath],
+          };
+        case 'pick_image':
+          return '/tmp/sss-picked/a.png';
+        case 'undo_exclude':
+        case 'delete_picked_image':
           return null;
         case 'plugin:event|listen':
           return ++cb;

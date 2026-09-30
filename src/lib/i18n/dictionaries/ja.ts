@@ -25,6 +25,8 @@ export const ja = {
   shortcutFullscreen: 'フルスクリーン切り替え',
   shortcutEscape: '終了（設定中は閉じる）',
   shortcutHelp: 'このヘルプを表示',
+  shortcutPhotoClick: '写真上: 一時停止 / 再開',
+  shortcutPhotoWheel: '写真上: 前へ / 次へ（横スワイプも可）',
   // #66視覚刷新: ようこそ画面の下部に添える「?」バッジ隣の説明文（バッジ自体は
   // JSX側の固定"?"表示。文言はバッジに続く説明部分だけを持つ）。
   shortcutsHintWelcome: 'ショートカット一覧を表示',
@@ -74,6 +76,12 @@ export const ja = {
   pickCopyDone: 'コピー完了: {path}',
   pickCopyFailed: 'エラー: コピー失敗',
   excludeFailed: 'エラー: 除外失敗',
+  // #78: 除外/ピック直後の控えめなトースト（数秒だけ「取り消す」を出す）
+  undoButton: '取り消す',
+  undoExcludeDone: '除外を取り消しました',
+  undoExcludeNothing: '戻すものはありませんでした',
+  undoPickDone: 'ピックを取り消しました',
+  undoFailed: 'エラー: 取り消せませんでした',
   excludeAddedFile: '除外パターン追加: {pattern}',
   excludeAddedNeedsRescan: '除外パターン追加: {pattern} (変更を反映するには再スキャンしてください)',
 

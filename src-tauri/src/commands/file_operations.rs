@@ -291,6 +291,13 @@ pub async fn exclude_image(
 
     // DB に除外ルールを追加
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    // #78: 取り消しで「元からあったルール」まで消さないよう、追加前の存在を控える。
+    let rule_type_str = rule_type.as_str().to_string();
+    let rule_added = !db
+        .get_ignore_rules()
+        .unwrap_or_default()
+        .iter()
+        .any(|(p, t)| *p == pattern && *t == rule_type);
     db.add_ignore_rule(&pattern, rule_type).map_err(|e| {
         eprintln!("exclude_image: failed to add ignore rule: {e}");
         "addIgnoreRuleFailed".to_string()
@@ -302,8 +309,12 @@ pub async fn exclude_image(
         // #62レビューM2(must): update_images(メンバーシップ変更)は必ず保存とセットで
         // 行う。ここで保存し忘れると、再起動を跨いだときに除外したはずの画像が
         // 保存済みプレイリストから復活し、二重表示になる。
+        let mut removed_paths = Vec::new();
         let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(ref mut playlist) = *playlist_lock {
+            if playlist.current_paths().contains(&image_path) {
+                removed_paths.push(image_path.clone());
+            }
             playlist.update_images(vec![], vec![image_path.clone()]);
             persist_current_playlist(&state, playlist);
         }
@@ -311,6 +322,9 @@ pub async fn exclude_image(
         Ok(ExcludeOutcome {
             pattern,
             needs_rescan: false,
+            rule_type: rule_type_str,
+            rule_added,
+            removed_paths,
         })
     } else if exclude_type == "date" {
         // 撮影日除外: exif_cache で既に「その日付」と分かっている画像は、再スキャンを
@@ -337,10 +351,17 @@ pub async fn exclude_image(
             })
             .map(|(path, _)| path)
             .collect();
+        let mut removed_paths = Vec::new();
         if !matched.is_empty() {
             // #62レビューM2(must): こちらもupdate_images後は必ず保存する。
             let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(ref mut playlist) = *playlist_lock {
+                let current = playlist.current_paths();
+                removed_paths = matched
+                    .iter()
+                    .filter(|p| current.contains(*p))
+                    .cloned()
+                    .collect();
                 playlist.update_images(vec![], matched);
                 persist_current_playlist(&state, playlist);
             }
@@ -348,6 +369,9 @@ pub async fn exclude_image(
         Ok(ExcludeOutcome {
             pattern,
             needs_rescan: true,
+            rule_type: rule_type_str,
+            rule_added,
+            removed_paths,
         })
     } else {
         // ディレクトリ除外は再スキャンが必要
@@ -355,8 +379,95 @@ pub async fn exclude_image(
         Ok(ExcludeOutcome {
             pattern,
             needs_rescan: true,
+            rule_type: rule_type_str,
+            rule_added,
+            removed_paths: Vec::new(),
         })
     }
+}
+
+/// 直前の除外を取り消す（#78）。`exclude_image` の戻り値（`pattern`/`ruleType`/
+/// `ruleAdded`/`removedPaths`）をそのまま渡す。
+///
+/// - `remove_rule`（= `ruleAdded`）が真のときだけ除外ルールを削除する。元から登録済み
+///   だったルールは消さない。
+/// - `restore_paths` は除外で即座にプレイリストから外した画像。**未再生区間**へ
+///   `Playlist::update_images` の既存の挿入規則（未再生区間へランダムに散らす。
+///   表示済み区間・履歴は触らない）で戻す。実在しない画像、まだ別の除外ルールに
+///   該当する画像（ルール削除後の残りのルールで再判定）、既にプレイリストにある画像は
+///   戻さない。
+/// - 除外は「削除」ではないため（ファイル自体・表示履歴は元から無傷）、取り消しは
+///   ルールとプレイリスト所属を戻すだけで完結する。
+#[tauri::command]
+pub async fn undo_exclude(
+    pattern: String,
+    rule_type: String,
+    remove_rule: bool,
+    restore_paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    if remove_rule {
+        db.remove_ignore_rule(&pattern, RuleType::parse(&rule_type))
+            .map_err(|e| {
+                eprintln!("undo_exclude: failed to remove ignore rule: {e}");
+                "undoExcludeFailed".to_string()
+            })?;
+    }
+    if restore_paths.is_empty() {
+        return Ok(());
+    }
+    // ルール削除後に残っているルールで再判定するためのフィルタ（他のルールにも
+    // 該当する画像を、取り消しで復活させてしまわないため）。
+    let rules: Vec<IgnoreRule> = db
+        .get_ignore_rules()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(pattern, rule_type)| IgnoreRule { pattern, rule_type })
+        .collect();
+    let captured_dates: HashMap<String, String> = db
+        .get_all_exif_cache()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(path, date, _)| date.map(|d| (path, d)))
+        .collect();
+    drop(db);
+    let ignore_filter = IgnoreFilter::from_rules_with_captured_dates(&rules, captured_dates);
+    let scan_root = state
+        .directory_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+
+    let candidates: Vec<String> = restore_paths
+        .into_iter()
+        .filter(|p| {
+            let path = Path::new(p);
+            // 取り消し猶予中にフォルダを切り替えて再スキャンした場合、旧フォルダの画像を
+            // 新しいプレイリストへ混ぜない（現在のスキャンルート配下だけを復帰対象にする）。
+            path.exists()
+                && scan_root.as_ref().is_none_or(|root| path.starts_with(root))
+                && !match &scan_root {
+                    Some(root) => ignore_filter.is_ignored(path, root),
+                    None => ignore_filter.is_ignored_anywhere(path),
+                }
+        })
+        .collect();
+
+    let mut playlist_lock = state.playlist.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(ref mut playlist) = *playlist_lock {
+        let current = playlist.current_paths();
+        let to_restore: Vec<String> = candidates
+            .into_iter()
+            .filter(|p| !current.contains(p))
+            .collect();
+        if !to_restore.is_empty() {
+            // #62レビューM2: メンバーシップを変えたら必ず保存する。
+            playlist.update_images(to_restore, vec![]);
+            persist_current_playlist(&state, playlist);
+        }
+    }
+    Ok(())
 }
 
 /// 最近表示した画像一覧を取得（最新100件、除外済み除く）

@@ -73,6 +73,12 @@ export interface IgnoreRule {
 export interface ExcludeOutcome {
   pattern: string;
   needsRescan: boolean;
+  /** 追加したルールの種別（`'glob'` | `'date'`）。`undoExclude` へそのまま渡す（#78）。 */
+  ruleType: string;
+  /** この除外でルールが新規追加されたか（false=元から登録済み。取り消しでも消さない）。#78 */
+  ruleAdded: boolean;
+  /** この除外で即座にプレイリストから外した画像（取り消しで未再生区間へ戻す）。#78 */
+  removedPaths: string[];
 }
 
 /**

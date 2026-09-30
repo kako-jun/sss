@@ -34,6 +34,8 @@ export function ShortcutsOverlay({
   const shortcuts: Array<[string, string]> = [
     ['Space', t('shortcutSpace')],
     ['← / →', t('shortcutNavigate')],
+    ['Click', t('shortcutPhotoClick')],
+    ['Wheel', t('shortcutPhotoWheel')],
     ['F / F11', t('shortcutFullscreen')],
     ['Esc', t('shortcutEscape')],
     ['?', t('shortcutHelp')],
