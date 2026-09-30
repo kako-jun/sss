@@ -415,7 +415,7 @@ CREATE TABLE scan_history (
   8. `exit_app`: アプリケーション終了
   9. `save_setting`: 設定を保存
   10. `get_setting`: 設定を取得
-  11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67）
+  11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67。**元パスは管理下＋メディア拡張子のみ**: DB（`file_metadata`/`image_stats`）に文字列一致で登録済み、またはピックフォルダ内の実体ファイル（`canonicalize`で`..`・フォルダ外symlinkを拒否）。管理外は`pathNotManaged`、非メディアは`notMediaFile`のエラーコードで拒否。検証は`pick::ensure_managed_media_path`、#87）
   12. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。
       即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
@@ -451,7 +451,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
   20. `get_picked_images`: ピック済みメディア一覧（画像＋動画、スキャナと同じ拡張子定義。#67）
   21. `delete_picked_image`: ピック済み画像を削除（ピックフォルダ内の通常のメディアファイルのみ。検証は`pick::validate_picked_delete_target`）
   22. `reset_all_display_counts`: 全画像の表示回数をリセット
-  23. `get_thumbnail`: 設定画面用サムネイル（静止画は縮小済みJPEGのパス、動画は`{kind:'video'}`。#67）
+  23. `get_thumbnail`: 設定画面用サムネイル（静止画は縮小済みJPEGのパス、動画は`{kind:'video'}`。#67。静止画は`pick_image`と同じ管理下パス検証`pick::ensure_managed_media_path`を通し、管理外は`pathNotManaged`で拒否。#87）
 
 ## Reactコンポーネント構成
 
