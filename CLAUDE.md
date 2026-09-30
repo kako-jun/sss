@@ -21,11 +21,13 @@
 - **キャッシュ管理**: md5 v0.8 (ファイル名ハッシュ生成)
 - **ランダム生成**: rand v0.9
 - **スクリーンセーバー抑制**: keepawake v0.6 (クロスプラットフォーム対応)
-- **プラグイン**:
-  - tauri-plugin-dialog v2 (ダイアログ)
-  - tauri-plugin-opener v2 (URLを開く)
-  - tauri-plugin-single-instance v2 (単一インスタンス)
-  - tauri-plugin-window-state v2 (ウィンドウ状態の保存/復元、#78)
+- **OSロケール取得**: sys-locale v0.3（`get_os_locale`用。`tauri-plugin-os`は使わない）
+- **プラグイン**（`lib.rs` の `run()` で登録。`Cargo.toml` の下限は JS 側 `@tauri-apps/plugin-*` の minor に揃える）:
+  - tauri-plugin-dialog 2.8 (フォルダ選択ダイアログ)
+  - tauri-plugin-opener 2.6 (URLを開く。capability は `https://*` のみ許可)
+  - tauri-plugin-process 2.4 (フロントの `exit(0)`。capability は `process:allow-exit` のみ)
+  - tauri-plugin-single-instance 2.5 (単一インスタンス。JS側パッケージなし)
+  - tauri-plugin-window-state 2.4 (ウィンドウ状態の保存/復元、#78)
 
 ### フロントエンド
 
@@ -34,6 +36,8 @@
 - **アニメーション**: Framer Motion
 - **スタイリング**: TailwindCSS v3
 - **アイコン**: Lucide React
+- **グラフ**: uPlot（統計タブのヒストグラム）
+- **テスト**: vitest + Testing Library（jsdom）、実ブラウザ e2e は playwright-core（`e2e/`、ローカル専用）
 
 ## コア機能
 
@@ -50,8 +54,8 @@
 - **表示間隔**: 5〜60秒でカスタマイズ可能（設定画面から変更）
 - **動画の音声・最大再生時間**（#68）: 設定画面オプションタブの「動画」セクション。`app_settings` の `video_audio_enabled`（`'true'|'false'`、既定オフ=無音）と `video_max_duration_sec`（秒、`0`=無制限が既定、選択肢は `0/30/60/120/300`）。既存の `save_setting`/`get_setting` に乗せ、Rust側の検証・コマンド追加は無い。破損値は `constants.ts` の `parseVideoAudioEnabled`/`parseVideoMaxDuration`/`normalizeVideoMaxDuration` が既定へ丸める（`clampDisplayInterval` と同じ「唯一の検証経路」）。`Slideshow.tsx` は音声オンなら `muted=false`、上限は壁時計タイマーでなく `timeupdate` の `currentTime` で判定し、`ended` と共通の `finishVideo`（`finishedKeyRef` で1本につき1回）から `onAdvance` する。詳細は `docs/architecture.md` §6-(h)
 - **対象ファイル**:
-  - 画像: JPG, PNG, GIF, BMP, WEBP など
-  - 動画: MP4, WebM, OGV, M4V（旧フォーマットはffmpeg同梱後に対応予定 #45）
+  - 画像: JPG/JPEG, PNG, GIF, BMP, WEBP, TIFF/TIF（`scanner.rs` の `IMAGE_EXTENSIONS`）
+  - 動画: MP4, WebM, OGV, M4V（`VIDEO_EXTENSIONS`。旧フォーマットはffmpeg同梱後に対応予定 #45）
 - **表示モード**: 4K最適化 (3840x2160)
 - **ウィンドウ状態の記憶**（#78）: `tauri-plugin-window-state` を `lib.rs` の `run()` で登録する（`StateFlags::all() & !VISIBLE`＝全画面/最大化・位置・サイズ・装飾を保存/復元し、表示状態は対象外）。保存はアプリ終了時（`RunEvent::Exit`、`exit_app`/`exit(0)`/ウィンドウを閉じる）にアプリ設定ディレクトリの `.window-state.json` へ、復元はウィンドウ生成時（フロント起動前）。保存位置がどの実在ディスプレイにも交差しなければ位置は復元せずOS既定位置に出る（ディスプレイが外れた場合）。初回起動（状態ファイル無し）は `tauri.conf.json` の全画面のまま。`taskkill /F` 等の強制終了では保存されない（サイネージ用途の運用メモ）。全データ初期化（`reset_all_data`）はこのファイルを消さない（DBの設定ではないため）。フロントは `getCurrentWindow().isFullscreen()` で実態へ同期する既存の仕組みでそのまま追従する
 - **EXIF回転**: `img`要素に`crossOrigin`/`image-orientation`を明示指定せず、WebView既定の動作（`image-orientation: from-image`＝EXIFに従い自動回転）に任せる。`apply_exif_rotation=false`なのにEXIFが回転を要求している画像だけ例外で、バックエンドが「格納画素のまま・EXIF無し」のキャッシュに差し替える（原本を返すとWebViewが勝手に回転し設定と食い違うため）。crossOriginを付けてCSSで明示切替する設計は、wryのWebKitGTK実装がassetスキームをCORS有効登録しておらずLinux本番で画像が出なくなるリスクがあるため撤去した
@@ -79,7 +83,7 @@
 ### 5. 差分スキャン
 
 - 前回スキャン時のファイル情報をSQLiteに保存（比較対象は**今回スキャンするディレクトリ配下のみ**。複数フォルダを切り替えて使ってもA→B→Aで各フォルダの情報が確定削除されない、#63）
-- ファイルサイズと更新日時で変更を検出
+- **更新日時（mtime）の不一致だけ**で変更を検出する（`file_size` はDBに記録するが判定には使わない）。前回無かったパスは新規、mtime が変わったパスは変更として区別
 - 変更されたファイルのみDBへ反映（新規/変更分のみのupsert＋確定削除分の削除を1トランザクションで、#63）
 - **高速起動**: 10万枚規模でも数秒で起動可能
 - `walkdir`/ファイル単位のメタデータ取得エラー（1970年より前のmtime含む）は件数・代表例を結果に残し、該当パス配下は削除せず「不明」として扱う（#63）
@@ -94,10 +98,10 @@
 
 #### 通常表示
 
-- 最大化ウィンドウ（フルスクリーンではない）
+- 初回起動は全画面（`tauri.conf.json`: `fullscreen: true` / `decorations: false` / 背景 `#000000`）。F / F11 や右上のボタンでウィンドウモードへ切り替えられ、以後は前回の状態を復元する（#78）
 - 画像/動画を中央に表示（object-fit: contain）
 - 背景: 黒
-- UI非表示
+- UI非表示（マウスを動かすと表示）
 
 #### マウス移動時
 
@@ -105,7 +109,7 @@
 - 3秒間アイドル状態でUI非表示（オーバーレイ・右上の常設ボタン列（終了・ショートカット・
   ウィンドウモード・設定）・マウスカーソル自体（`cursor-none`）の3つが同時に消える。#66。
   設定モーダルを開いている間はUI操作中のためカーソルは隠さない）
-- **自動一時停止**: マウス移動時にスライドショーを一時停止
+- **一時停止の条件**: マウス移動そのものでは一時停止しない。`isPlaying = 初期化済み && !ユーザーの一時停止 && !オーバーレイ操作バーにホバー中 && !設定画面表示中`（`App.tsx`）。右上のボタン列にホバーしてもidleタイマーは止まるが再生は止まらない
 
 #### オーバーレイUI内容（#66視覚刷新: 画面下中央に浮かぶ角丸バー1本。左=情報・中央=主要操作・右=副次操作）
 
@@ -122,20 +126,20 @@
    - **次へ**: 次の画像/動画へ進む（即座に表示）
 
 3. **右: 副次操作**
-   - **ピック**: ファイルをピック先フォルダにコピー
+   - **ピック**（手のアイコン）: ファイルをピック先フォルダにコピー
 
 - **取り消し**（#78）: 除外/ピックの直後は約6秒だけ、状態メッセージの代わりに「取り消す」ボタン付きのトーストを出す（idleフェードの外に置くので、マウスを動かさなくても押せる。確認ダイアログは増やさない）。直近の1件のみ。トーストはホバー中・フォーカス中はタイマー停止（離れたら残りから再開）。戻るものが無い除外の取り消しは `undoExcludeNothing` を表示。`undo_exclude` は現在のスキャンルート配下の画像だけ復帰。再スキャン後の directory/date 除外の取り消しは画像が自動では戻らない（既知の挙動、自動再スキャンは重いため行わない）。除外の取り消し=`undo_exclude`、ピックの取り消し=既存の `delete_picked_image`（コピーしたファイルだけを削除）
-- **…メニュー**: 開く（ファイルマネージャー、Windows: explorer /select、Linux: nautilus/dolphin/xdg-open）・ピックを見る・除外（3粒度）
+- **…メニュー**: 開く（ファイルマネージャー、Windows: explorer /select、macOS: `open -R`、Linux: nautilus/dolphin/xdg-open）・ピックを見る（設定のピックタブを開く）・除外（撮影日付で除外／フォルダを除外／ファイルを除外の3粒度）
 
 4. **UI操作**
-   - マウス移動で表示、3秒アイドルで自動非表示（右上の常設ボタン・マウスカーソル自体も同時に非表示、#66）
-   - オーバーレイ外クリックで即座に非表示
-   - マウス操作中は自動的にスライドショーを一時停止、非表示で自動再開
+   - マウス移動で表示、3秒アイドルで自動非表示（右上の常設ボタン・マウスカーソル自体も同時に非表示、#66）。「外クリックで非表示」は実装していない
+   - オーバーレイの操作バーにマウスを乗せている間だけ一時停止し、離れると再開（`isOverlayHovered`）
    - 進捗はバーとは独立した、写真下端の画面幅いっぱいの極細ラインで表示（#66）
+   - 右上の常設ボタン列（左から）: ショートカット一覧・ウィンドウモード切替・設定・終了
 
 #### キーボードショートカット
 
-- **ESC**: アプリを終了。**設定画面（または後述のショートカット一覧）を開いている間は
+- **ESC**: アプリを終了。**設定画面・後述のショートカット一覧・オーバーレイの「…」メニューを開いている間は
   それを閉じるだけ**でアプリは終了しない（#66）。入力欄（input/textarea/
   contentEditable）にフォーカスがある間はどちらも行わず、ブラウザの既定動作に任せる
 - **左矢印キー**: 前の画像/動画へ戻る
@@ -149,7 +153,7 @@
 - 写真上の操作は `App.tsx` が `Slideshow` だけを包む `display: contents` のラッパーに付ける。オーバーレイ・右上ピル・モーダル・案内画面は兄弟要素なので干渉しない
 - **?**: キーボードショートカット一覧のオーバーレイを開閉する（右上のキーボード
   アイコンボタンからも同じものを開ける、#66）
-- 上記のSpace/F/F11/?は設定画面を開いている間は無効（矢印キーと同じ方針）
+- 設定画面を開いている間は ESC 以外のショートカット（Space/F/F11/?/矢印キー）はすべて無効。ショートカット一覧を開いている間は `?`（閉じる）・矢印キー・ESC のみ有効
 - キーリピート（押しっぱなし）による多重発火は無視する（`e.repeat`、#65）
 
 #### アクセシビリティ（#66）
@@ -188,10 +192,19 @@
 
 #### 設定画面
 
-- フォルダ選択ダイアログ
-- スキャン実行ボタン
-- スキャン結果表示（追加/更新/削除ファイル数、総ファイル数）
-- 統計情報表示
+`components/Settings/index.tsx` が7タブを持つ（`TabType`: `scan`/`options`/`exclude`/`pick`/`history`/`stats`/`info`）。開くとスライドショーは一時停止し、閉じると再開する。ようこそ画面のボタンは `scan` タブで開く。
+
+| タブ（ja / en）         | 内容（コンポーネント）                                                                                                                                                       |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| フォルダ / Folder       | フォルダ選択ダイアログ・スキャン実行・スキャン結果（ファイル数・新規・削除・処理時間・読み取りエラー）（`ScanSection`）。スキャン後も設定画面は閉じない                       |
+| オプション / Options    | 表示間隔5〜60秒（`IntervalSection`）・EXIF回転（`SettingsSection`、`apply_exif_rotation`）・動画の音声/最大再生時間（`VideoSection`）・ピック先（`ShareDirectorySection`）・言語（`LanguageSection`） |
+| 除外ルール / Exclude Rules | ルール一覧・解除・手動追加（`ExcludeRulesSection`）                                                                                                                        |
+| ピック / Picks          | ピック済みメディアのサムネイル一覧・削除（`PickSection`）                                                                                                                    |
+| 履歴 / History          | 最近表示した100件のサムネイル一覧・除外（`HistorySection`）                                                                                                                  |
+| 統計グラフ / Stats      | 表示回数ヒストグラム・表ビュー・表示回数リセット（`GraphSection`）                                                                                                           |
+| 情報 / Info             | バージョン・GitHubリンク・全データ初期化（`InfoSection`）                                                                                                                    |
+
+保存キー（`app_settings`）: `last_directory_path` / `display_interval`（ms） / `apply_exif_rotation` / `share_directory_path` / `language` / `video_audio_enabled` / `video_max_duration_sec` / `sssignore_migrated`。
 
 ### 8. 国際化（i18n、#80）
 
@@ -206,17 +219,21 @@
 
 ## データベーススキーマ
 
+`src-tauri/src/database.rs` の `CREATE TABLE IF NOT EXISTS` が正本（8テーブル: `file_metadata` / `image_stats` / `playlist_list` / `playlist_position` / `ignore_rules` / `exif_cache` / `scan_history` / `app_settings`。`reset_to_defaults` の `USER_TABLES` と一致する）。ファイルは `<app_data_dir>/sss.db`。
+
 ### file_metadata テーブル
 
 ```sql
 CREATE TABLE file_metadata (
     path TEXT PRIMARY KEY,
-    size INTEGER NOT NULL,
-    modified_time INTEGER NOT NULL  -- Unix timestamp
+    modified_time INTEGER NOT NULL,  -- Unix timestamp（秒）
+    file_size INTEGER NOT NULL,
+    added_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+-- インデックス: idx_modified_time(modified_time)
 ```
 
-- **用途**: 差分スキャン用のファイルキャッシュ
+- **用途**: 差分スキャン用のファイルキャッシュ（判定に使うのは `modified_time` のみ）
 
 ### image_stats テーブル
 
@@ -224,8 +241,10 @@ CREATE TABLE file_metadata (
 CREATE TABLE image_stats (
     path TEXT PRIMARY KEY,
     display_count INTEGER DEFAULT 0,
-    last_displayed TEXT  -- ISO 8601 timestamp
+    last_displayed DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+-- インデックス: idx_display_count(display_count), idx_last_displayed(last_displayed)
 ```
 
 - **用途**: 表示履歴管理
@@ -289,6 +308,7 @@ CREATE TABLE ignore_rules (
 ```
 
 - **用途**: 除外ルール（旧 `.sssignore` の移行先）。`rule_type` で通常globと撮影日ルールを区別する
+- **既定ルール**（新規DB作成時と `reset_all_data` 後に `INSERT OR IGNORE`）: `**/.thumbnails/` `**/Thumbs.db` `**/.DS_Store` `**/@eaDir/` `**/desktop.ini` `**/.**/`
 - **マイグレーション**: `PRAGMA user_version` を使った汎用マイグレーション機構（`database.rs::run_migrations`）で列追加・主キーの作り直しを1トランザクションで行う。既存の `pattern` 文字列自体は変更不要（判定ロジック側の修正のみで新しい挙動が効くため）
 
 ### exif_cache テーブル
@@ -308,16 +328,28 @@ CREATE TABLE exif_cache (
 ```sql
 CREATE TABLE scan_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    scan_time TEXT DEFAULT CURRENT_TIMESTAMP,
-    folder_path TEXT NOT NULL,
-    total_files INTEGER DEFAULT 0,
-    added_files INTEGER DEFAULT 0,
-    updated_files INTEGER DEFAULT 0,
-    deleted_files INTEGER DEFAULT 0
+    directory_path TEXT,
+    total_files INTEGER,
+    new_files INTEGER,
+    deleted_files INTEGER,
+    scan_duration_ms INTEGER,
+    scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-- **用途**: スキャン履歴の記録
+- **用途**: スキャン履歴の記録。`get_distinct_scan_directories` が起動時の asset scope 許可と履歴タブのルート解決に使う
+
+### app_settings テーブル
+
+```sql
+CREATE TABLE app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+- **用途**: 設定のキー/値ストア（キー一覧は「設定画面」節）。`save_setting`/`get_setting` 経由。`reset_all_data` で空になる
 
 ## Rustモジュール構成
 
@@ -329,6 +361,14 @@ CREATE TABLE scan_history (
 
 - ライブラリ本体（`sss_lib`）。`run()` が Tauri アプリを初期化（プラグイン登録・Tauriコマンド登録・スクリーンセーバー抑制・キャッシュ管理・`AppState` 構築）
 - 芯モジュール（scanner/playlist/ignore/image_processor/database/commands）を `pub` 公開し、結合テスト `tests/golden_e2e.rs`（フォルダ→scan→ignore→playlist の golden e2e）から直接叩けるようにする lib+bin 分割
+
+### src-tauri/src/asset_scope.rs
+
+- asset protocol scope（`convertFileSrc` の許可範囲）の動的許可に使う純関数群と検証ゲート（`sanitize_allow_dir`・`startup_allow_dirs` ほか）。`tauri.conf.json` の静的 scope は空
+
+### src-tauri/src/pick.rs
+
+- ピックのファイルシステム処理と「管理下パス」検証（`ensure_managed_media_path`・`ensure_registered_media_path`・`resolve_open_target`・`validate_picked_delete_target`・同名連番コピー）。状態を持たない関数群
 
 ### src-tauri/src/database.rs
 
@@ -382,7 +422,7 @@ CREATE TABLE scan_history (
 
 ### src-tauri/src/commands/
 
-- Tauriコマンドハンドラ（27個。`lib.rs` の `invoke_handler` 登録数）
+- Tauriコマンドハンドラ（27個。`lib.rs` の `invoke_handler` 登録数と下の番号が一致する）
   1. `scan_directory`: フォルダスキャン（リアルタイム進捗イベント付き）。プレイリストの
      新規作成/差分更新に加え、メモリ上にプレイリストが無い場合（`restore_playlist` が
      復元できなかった、またはまだ呼ばれていない）はDB保存済みのプレイリスト状態を
@@ -426,10 +466,10 @@ CREATE TABLE scan_history (
   12. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。**対象はDB登録パス（`file_metadata`/`image_stats`）のみ**（#92）: `pick::ensure_registered_media_path`で管理外（登録済みでも symlink に差し替えられたパスを含む）を、存在確認・EXIF撮影日の読み取り・ルール追加より前に`pathNotManaged`で拒否する（任意ファイルの存在有無・撮影日が漏れず、`image_stats`行も作られない）。登録済みで実在しない場合のみ`imageFileNotFound`。フロントは`resolveExcludeErrorMessage`でja/en表示。**`open_in_explorer`とは非対称**（`open_in_explorer`はピックフォルダ内の実在ファイルも許可、`exclude_image`は除外ルール・`image_stats`行を作るため登録済みパスのみ）。同類の`undo_display_count`は直前に加算したパスとの一致を要求するため問題なし
       即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
-      12b. `undo_exclude`: 直前の除外を取り消す（#78）。**復帰対象（`restore_paths`）はDB登録済み（`is_known_media_path`）かつメディア拡張子のパスのみ**（#92。`starts_with`は`..`を解決しないため`<root>/../x`が通りうるのを塞ぐ。通常フローの`removedPaths`はスキャン登録済み由来なので影響なし。スキャンルートが`None`のままプレイリストが`Some`になる経路は本番に無く〔`perform_scan`/`restore_playlist`は両者を同じロック内で同時に設定、`reset_all_data`は両方を`None`に戻す〕、`None`分岐は主にテスト用）。`exclude_image` の戻り値（`ExcludeOutcome`）をそのまま受け取り、`ruleAdded` が真の時だけルールを削除し（元からあったルールは消さない）、即時にプレイリストから外していた画像（`removedPaths`）を、除外ルール削除後の残りルールで再判定した上で `Playlist::update_images` の既存規則で**未再生区間**へ戻し、フル保存する。バックエンドは取り消し用の状態を持たない（`AppState` 不変）
-  13. `get_display_stats`: 統計データ取得（グラフ用の表示回数ヒストグラム。表示回数ごとのファイル数・最小/最大/平均のみ返し、全件の一覧は返さない）
-  14. `get_default_share_directory`: ピック先デフォルトパス取得
-  15. `reset_all_data`: 全データ初期化（#64）。中核ロジックは`commands::system::
+  13. `undo_exclude`: 直前の除外を取り消す（#78）。**復帰対象（`restore_paths`）はDB登録済み（`is_known_media_path`）かつメディア拡張子のパスのみ**（#92。`starts_with`は`..`を解決しないため`<root>/../x`が通りうるのを塞ぐ。通常フローの`removedPaths`はスキャン登録済み由来なので影響なし。スキャンルートが`None`のままプレイリストが`Some`になる経路は本番に無く〔`perform_scan`/`restore_playlist`は両者を同じロック内で同時に設定、`reset_all_data`は両方を`None`に戻す〕、`None`分岐は主にテスト用）。`exclude_image` の戻り値（`ExcludeOutcome`）をそのまま受け取り、`ruleAdded` が真の時だけルールを削除し（元からあったルールは消さない）、即時にプレイリストから外していた画像（`removedPaths`）を、除外ルール削除後の残りルールで再判定した上で `Playlist::update_images` の既存規則で**未再生区間**へ戻し、フル保存する。バックエンドは取り消し用の状態を持たない（`AppState` 不変）
+  14. `get_display_stats`: 統計データ取得（グラフ用の表示回数ヒストグラム。表示回数ごとのファイル数・最小/最大/平均のみ返し、全件の一覧は返さない）
+  15. `get_default_share_directory`: ピック先デフォルトパス取得
+  16. `reset_all_data`: 全データ初期化（#64）。中核ロジックは`commands::system::
 reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
       `tests/reset_all_data_e2e.rs`の両方から呼ぶ、#79レビューshould4）に切り出し。
       DBファイルは削除せず、開いた接続のまま`Database::reset_to_defaults`（対象は
@@ -452,25 +492,25 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
       挙動は未検証（`beforeDevCommand`ごとkillされ得る）で、実機確認は`tauri build`
       （`--debug`可）の成果物で行う。`scan_directory`と同じ`ScanGuard`で
       スキャンと排他する
-  16. `get_ignore_patterns`: 除外ルール一覧を取得
-  17. `remove_ignore_pattern`: 除外ルールを削除
-  18. `add_ignore_pattern`: 除外ルールを手動追加
-  19. `get_recent_images`: 最近表示した画像一覧（最新100件、除外済み除く）
-  20. `get_picked_images`: ピック済みメディア一覧（画像＋動画、スキャナと同じ拡張子定義。#67）
-  21. `delete_picked_image`: ピック済み画像を削除（ピックフォルダ内の通常のメディアファイルのみ。検証は`pick::validate_picked_delete_target`）
-  22. `reset_all_display_counts`: 全画像の表示回数をリセット
-  23. `get_thumbnail`: 設定画面用サムネイル（静止画は縮小済みJPEGのパス、動画は`{kind:'video'}`。#67。静止画は`pick_image`と同じ管理下パス検証`pick::ensure_managed_media_path`を通し、管理外は`pathNotManaged`で拒否。#87）
-  24. `get_share_directory`: 実際に使われるピック先（検証済み解決。不正な保存値は既定へフォールバック済み）を返す。設定画面はこれを表示する（#87）
-  25. `undo_display_count`: 表示回数の加算を取り消す（直前に加算したパスと一致する場合のみ。画像読み込み失敗時の`onError`用、#65）
-  26. `get_os_locale`: OSのロケール（例: `ja-JP`）を返す（言語`auto`の決定用、#82）
+  17. `get_ignore_patterns`: 除外ルール一覧を取得
+  18. `remove_ignore_pattern`: 除外ルールを削除
+  19. `add_ignore_pattern`: 除外ルールを手動追加
+  20. `get_recent_images`: 最近表示した画像一覧（最新100件、除外済み除く）
+  21. `get_picked_images`: ピック済みメディア一覧（画像＋動画、スキャナと同じ拡張子定義。#67）
+  22. `delete_picked_image`: ピック済み画像を削除（ピックフォルダ内の通常のメディアファイルのみ。検証は`pick::validate_picked_delete_target`）
+  23. `reset_all_display_counts`: 全画像の表示回数をリセット
+  24. `get_thumbnail`: 設定画面用サムネイル（静止画は縮小済みJPEGのパス、動画は`{kind:'video'}`。#67。静止画は`pick_image`と同じ管理下パス検証`pick::ensure_managed_media_path`を通し、管理外は`pathNotManaged`で拒否。#87）
+  25. `get_share_directory`: 実際に使われるピック先（検証済み解決。不正な保存値は既定へフォールバック済み）を返す。設定画面はこれを表示する（#87）
+  26. `undo_display_count`: 表示回数の加算を取り消す（直前に加算したパスと一致する場合のみ。画像読み込み失敗時の`onError`用、#65）
+  27. `get_os_locale`: OSのロケール（例: `ja-JP`）を返す（言語`auto`の決定用、#82）
 
 ## Reactコンポーネント構成
 
 ### src/App.tsx
 
-- メインアプリケーションコンポーネント
-- スライドショー制御ロジック
-- マウスアイドル検出
+- メインアプリケーションコンポーネント（起動シーケンスは `lib/startup.ts`）
+- 再生可否（`isPlaying`）の導出・キーボードショートカット・写真上のクリック/ホイール・ウィンドウモード切替
+- マウスアイドル検出（`useMouseIdle`）・右上の常設ボタン列・ようこそ/空/接続不可などの案内画面
 
 ### src/components/Slideshow.tsx
 
@@ -480,27 +520,40 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 ### src/components/OverlayUI.tsx
 
-- グラスモーフィズムUI
+- グラスモーフィズムUI（下中央の浮遊バー・進捗ライン・「取り消す」トースト）
 - ファイル情報表示
-- 操作ボタン
+- 操作ボタン（前へ・⏸/▶・次へ・ピック・「…」メニュー）
 
-### src/components/Settings.tsx
+### src/components/ShortcutsOverlay.tsx
 
-- 設定モーダル
-- フォルダ選択
-- スキャン実行
-- 結果表示
+- キーボードショートカット一覧モーダル（`?` または右上のボタン）
+
+### src/components/Settings/
+
+- 設定モーダル（`index.tsx` がタブ管理、各タブは `*Section.tsx`。「設定画面」節の表を参照）
 
 ### src/hooks/useSlideshow.ts
 
-- スライドショーロジック
-- 10秒タイマー管理
-- 再生/一時停止制御
+- スライドショーロジック（現在画像・通知・進捗）
+- 表示間隔タイマー管理（`setTimeout` + 残り時間の保持。間隔は設定値5〜60秒、既定10秒。動画はタイマーでなく `Slideshow.tsx` の `ended`/最大再生時間で進む）
+- 再生/一時停止制御（`isPlaying` は `App.tsx` が導出して渡す）
 
 ### src/hooks/useMouseIdle.ts
 
 - マウスアイドル検出
 - 3秒タイムアウト
+
+### src/hooks/useFocusTrap.ts
+
+- モーダル（設定・ショートカット一覧）のフォーカストラップ
+
+### src/lib/
+
+- `tauri.ts`: Tauriコマンドのラッパー関数
+- `startup.ts`: 起動シーケンス（設定読込→`restore_playlist`→バックグラウンドスキャン）
+- `keyboardShortcuts.ts`・`photoGestures.ts`: ショートカット判定・写真上のクリック/ホイール判定（純関数）
+- `displayCountChart.ts`: 統計グラフの目盛り・範囲の純関数
+- `i18n/`: 辞書（ja/en）・`t()`・ロケール状態・バックエンドエラーコードの解決
 
 ### src/lib/tauri.ts
 
@@ -512,10 +565,20 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 ## パフォーマンス目標
 
+以下は**目標値**であり、フルアプリでの通し計測はしていない。実測できているのはバックエンド単体のベンチ（`src-tauri/tests/scan_reflection_throughput.rs`・`db_reflection_throughput.rs`・`exif_resolve_throughput.rs`、いずれも `#[ignore]`。値は `docs/architecture.md` §6(b)(c)）のみ。
+
 - **起動時間**: <5秒（10万ファイル、差分スキャン時）
 - **画像切り替え**: <100ms
 - **メモリ使用量**: <500MB（通常動作時）
 - **並列スキャン**: CPUコア数に応じた最適化
+
+## セキュリティ設計
+
+- **capability**（`src-tauri/capabilities/main.json`）: `core:default`・`dialog:allow-open`・`opener:allow-open-url`（`https://*` のみ）・`process:allow-exit` だけ。ファイル読み書きはすべて自前の Tauri コマンド経由で `plugin-fs` は使わない
+- **CSP**（`tauri.conf.json`）: `default-src 'self'`。`img-src` は `asset:` / `https://asset.localhost` / OpenStreetMap タイル / `data:`、`media-src` は `asset:` / `https://asset.localhost`、`connect-src` は IPC のみ
+- **asset scope**: `tauri.conf.json` の静的 scope は空。キャッシュ・ピック先・スキャン履歴のフォルダ・スキャン対象を、起動時と `scan_directory`/`save_setting`/`pick_image` で `sanitize_allow_dir`（相対パス・存在しないパス・ルート等を拒否）を通してから動的に許可する
+- **管理下パス**（#87・#92）: `pick_image`・`get_thumbnail`（静止画）・`open_in_explorer`・`exclude_image`・`undo_exclude` は、DB登録済み（またはピックフォルダ内）のメディアファイルだけを対象にする。ピック先の設定値もルート・ホーム・システム領域などを拒否する
+- **脅威モデル**: 防ぐのは、WebView から素朴に任意パスを渡して任意ファイルを読む/コピーする/存在確認する操作。WebView が `scan_directory` や設定を正規の手順で操作して任意フォルダを管理下に入れるケースは防がない（フォルダ選択は JS 側ダイアログ前提の既存設計）。詳細は「Rustモジュール構成 > commands」の 11・12 と CHANGELOG の #87・#92
 
 ## クロスプラットフォーム対応
 
@@ -569,117 +632,90 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
   - 両ジョブとも `env.CARGO_BUILD_JOBS: 4` でリポルート `.cargo/config.toml` の `jobs=1`（ローカルのメモリ制約回避用）を上書きし、CIランナーでは既定に近い並列度でビルドする（#69レビュー）。ローカル開発時の `jobs=1` はそのまま維持
 - **Audit**: `.github/workflows/audit.yml`（ci.yml とは別ファイル）— `rustsec/audit-check` で `src-tauri` の Rust 依存関係を検査。`src-tauri/Cargo.toml`/`Cargo.lock` を変更する push/PR と、毎週月曜03:00 UTC の schedule（新規登録された既知脆弱性の検出用）でのみ実行し、無関係な変更で毎回は回さない
   - **ignore 方針**: 直せない/直す価値のない advisory（例: 上流未対応の unmaintained warning）が出た場合は、`rustsec/audit-check` の `ignore` 入力に advisory ID を追加し、なぜ ignore するか・いつ見直すかを同じ行にコメントで残す。安易な ignore 追加はせず、まず `cargo update` での解消を優先する
-- **Release**: `.github/workflows/release.yml` — 手動 dispatch。`validate` ジョブで (1) dispatch 元ブランチが `main` であること (2) `version` 入力が `vX.Y.Z`（プレリリース識別子任意）の形式であること (3) 同名タグが未使用であること (4) 入力 version と `tauri.conf.json`/`Cargo.toml`/`package.json` の version 一致 (5) CHANGELOG.md に対応する `[version]` 節が存在すること (6) `npm test`/`cargo test` の通過、を順にチェックし、いずれか失敗で fail。通過後に3-OS matrix（macOS/Linux/Windows）で `tauri-action` がビルドし、release note は CHANGELOG.md の該当節へのリンク。**成果物は署名なし**（macOS Gatekeeper/Windows SmartScreen の回避手順は README に追記予定、#71）
+- **Release**: `.github/workflows/release.yml` — 手動 dispatch。`validate` ジョブで (1) dispatch 元ブランチが `main` であること (2) `version` 入力が `vX.Y.Z`（プレリリース識別子任意）の形式であること (3) 同名タグが未使用であること (4) 入力 version と `tauri.conf.json`/`Cargo.toml`/`package.json` の version 一致 (5) CHANGELOG.md に対応する `[version]` 節が存在すること (6) `npm test`/`cargo test` の通過、を順にチェックし、いずれか失敗で fail。通過後に3-OS matrix（macOS/Linux/Windows）で `tauri-action` がビルドし、release note は CHANGELOG.md の該当節へのリンク。**成果物は署名なし**（macOS Gatekeeper/Windows SmartScreen の回避手順は README の「未署名アプリの警告について」に記載）。Windows は `--bundles nsis`（`setup.exe`）のみ、macOS は universal（`.dmg`）、Linux は AppImage/deb/rpm を生成する。`tag v*` の push では起動しない（`workflow_dispatch` のみ。タグは `tauri-action` がリリース作成時に作る）
   - **リリース手順**: 1. `tauri.conf.json` / `src-tauri/Cargo.toml` / `package.json` の version を揃えて更新 2. CHANGELOG.md の `[Unreleased]` を `[X.Y.Z] - YYYY-MM-DD` に改名し、新しい空の `[Unreleased]` を上に用意 3. これらを含む PR を作成し main にマージ 4. GitHub Actions の `Release Build` を `workflow_dispatch` で実行し、`version` に `vX.Y.Z` を入力（main ブランチから実行すること） 5. `validate` → `build` の通過を確認し、GitHub Releases に3プラットフォーム分の成果物が揃ったことを確認する
-- **Pre-commit**: Husky + lint-staged (`eslint --fix` + `prettier` for TS/JS, `prettier` for JSON/CSS/MD) + `cargo fmt`
-- **CHANGELOG.md**: Keep a Changelog 形式。v1.0.0 以降の変更を記録。**本 PR（#70 CI/CD 整備）マージ以降、コード変更を伴う PR は自分の変更を `[Unreleased]` セクションに追記する**
+- **Pre-commit**: Husky（`.husky/pre-commit`）で `npx lint-staged`（`eslint --fix` + `prettier` for TS/JS、`prettier` for JSON/CSS/MD）と `cd src-tauri && cargo fmt` を実行
+- **CHANGELOG.md**: Keep a Changelog 形式。v1.0.0 以降の変更を記録。**コード変更を伴う PR は自分の変更を `[Unreleased]` セクションに追記する**（#70 以降の運用）
 
 ## TODO: 仕様変更・機能追加
 
+実装済みの項目は `[x]`。履歴は CHANGELOG.md と各 Issue を正本とし、ここには「実装との対応」と未実装だけを残す。
+
 ### 🔧 バグ修正
 
-- [x] **keepawake設定の修正**: `.sleep(true)`を`.sleep(false)`に変更してノートPC蓋閉じ時のスリープを許可（ディスプレイスリープは抑制を継続）
-- [ ] **表示回数の2重カウント問題**: 「前へ」で戻った画像を「次へ」で再度開いた場合、表示回数が2重にカウントされる問題を修正
+- [x] **keepawake設定の修正**: `.sleep(false)`（ノートPC蓋閉じ時のスリープは許可、ディスプレイスリープは抑制）
+- [x] **表示回数の2重カウント問題**: 表示回数を加算するのは `get_next_image` が新規に進めた画像でファイルが実在する場合のみ。「前へ」（`get_previous_image`）は加算しない（#62）
 
 ### 📍 GPS/位置情報機能
 
 - [x] **EXIF GPS座標の取得**: kamadak-exifでGPS情報（緯度・経度）を抽出
-- [ ] **地図の埋め込み表示**: オーバーレイ内に地図を埋め込み表示（ボタンではなく）
-  - 位置：左端、高さ2行分
-  - GPS情報がある場合のみ表示
-  - Google Maps API または Leaflet を使用
+- [x] **地図表示**: GPSがある写真だけ、オーバーレイバー左端に OpenStreetMap タイルの小さなサムネイルを表示し、クリックで Google Maps を開く（CSP の `img-src` で `https://tile.openstreetmap.org` を許可）。Leaflet / Google Maps API は使っていない
 
 ### 📤 ピック機能（SNS用候補選別）
 
-- [x] **ファイルコピー機能**: オーバーレイの…メニューからピック（コピー）
+- [x] **ファイルコピー機能**: オーバーレイのピックボタン（手のアイコン）でコピー
 - [x] **デフォルトコピー先**: `Pictures/sss-picked`フォルダ
 - [x] **フォルダ自動作成**: コピー先フォルダが存在しない場合は自動作成
-- [x] **視覚的フィードバック**: コピー完了時にステータスメッセージを表示
-- [x] **設定画面でカスタマイズ**: コピー先フォルダパスを変更可能
+- [x] **視覚的フィードバック**: コピー完了時にステータスメッセージ＋「取り消す」トースト
+- [x] **設定画面でカスタマイズ**: オプションタブでコピー先フォルダパスを変更可能
+- [x] **ピック一覧**: 設定のピックタブ（サムネイル・削除）。「…」メニューの「ピックを見る」から直接開ける
 
 ### 🚫 除外機能（ignore_rulesテーブル連携）
 
-- [x] **オーバーレイUIに「除外」ボタンを追加**
+- [x] **オーバーレイUIの「…」メニューに「除外」を追加**
 - [x] **除外時に3つの選択肢を表示**:
   1. **撮影日付で除外**: EXIF `DateTimeOriginal`優先で撮影日を抽出し、`rule_type="date"`のルールとして`ignore_rules`に追加。`exif_cache`で既に該当日と分かっている画像は即座にプレイリストから外す
-  2. **このファイルだけ除外**: `globset::escape`したファイルパスを`rule_type="glob"`で`ignore_rules`に追加
-  3. **このフォルダで除外**: `globset::escape`した親フォルダパス+`/**`（サブフォルダ含め再帰的）を`rule_type="glob"`で`ignore_rules`に追加
+  2. **ファイルを除外**: `globset::escape`したファイルパスを`rule_type="glob"`で`ignore_rules`に追加
+  3. **フォルダを除外**: `globset::escape`した親フォルダパス+`/**`（サブフォルダ含め再帰的）を`rule_type="glob"`で`ignore_rules`に追加
 - [x] **即座にプレイリストから削除**: ファイル除外は即座、日付除外は`exif_cache`既知分のみ即座。それ以外（ディレクトリ除外・未取得の日付）は次回スキャンで反映
-- [x] **視覚的フィードバック**: 除外完了時にステータスメッセージを表示（失敗時はエラーメッセージも表示）
+- [x] **視覚的フィードバック**: 除外完了時にステータスメッセージ＋「取り消す」トースト（失敗時はエラーメッセージも表示）
+- [x] **除外ルール管理画面**: 設定の「除外ルール」タブで一覧・解除・手動追加
 
 ### 🖼️ 画像回転の設定
 
-- [ ] **EXIF Orientationの適用をON/OFF切り替え可能に**
-- [ ] **設定画面に「EXIF回転を使用する」チェックボックス追加**
-- [ ] **デフォルトはON**: 既存の動作を維持
-- [ ] **OFFの場合**: EXIF Orientationを無視して画像を表示
+- [x] **EXIF Orientationの適用をON/OFF切り替え可能に**（`apply_exif_rotation`）
+- [x] **設定画面（オプションタブ）に「EXIF回転情報に従って画像を自動回転」チェックボックス**
+- [x] **デフォルトはON**
+- [x] **OFFの場合**: EXIF Orientationを無視（バックエンドが格納画素のままのキャッシュへ差し替える。「コア機能 2. スライドショー」参照）
 
-### 🎨 オーバーレイUI全面刷新（実装済み: Issue #6）
+### 🎨 オーバーレイUI（Issue #6 → #66 で刷新）
 
-- [x] **デフォルト非表示**: マウス移動でフェードイン、3秒アイドルでフェードアウト
-- [x] **レイアウト**: 画面下部バー、4列×2行グリッド（上行=情報、下行=操作）
-- [x] **デザイン**: グラスモーフィズム半透明背景、モノクロアイコン
-- [x] **スライドショー制御**: オーバーレイ hover 中は一時停止、離れると再開
-- [x] **上行（情報）**: 地図（GPS）| 撮影日時 | ファイル名 | 位置/回数
-- [x] **下行（操作）**: …メニュー | ⏸/▶ | 前へ | 次へ
-- [x] **…サブメニュー**: 開く、ピック、除外(3粒度)、設定、ウィンドウモード切替
-- [x] **⚙️設定ボタン**: 右上に常時表示
+- [x] **デフォルト非表示**: マウス移動でフェードイン、3秒アイドルでフェードアウト（右上ボタン列・カーソルも同時）
+- [x] **レイアウト**: 画面下中央に浮かぶ角丸のガラス調バー1本（左=情報・中央=前へ/⏸▶/次へ・右=ピック/「…」）。旧「4列×2行グリッド」は廃止
+- [x] **スライドショー制御**: オーバーレイの操作バーに hover 中は一時停止、離れると再開
+- [x] **…サブメニュー**: ファイルマネージャーで開く・ピックを見る・除外（3粒度）。設定とウィンドウモード切替は右上のボタン列へ移動済み
 
 ### 📊 設定画面と統計機能
 
-- [ ] **スキャン結果表示の変更**:
-  - スキャン直後のみ表示（追加/更新/削除ファイル数、総数）
-  - 設定画面を閉じたら統計情報をクリア
-  - 再度開いたときは古い情報を表示しない（混乱防止）
-- [ ] **統計グラフの追加**:
-  - 横長の棒グラフまたは折れ線グラフ
-  - 横軸：写真のソート順ID（ファイルパスA-Z順）
-  - 縦軸：各写真の表示回数
-  - 目的：完全平等ランダムアルゴリズムの検証
-  - 理想状態：全ての写真が均等に表示される（全て0→全て1→全て2...）
-  - 異常検出：特定の写真だけ表示回数が偏っている場合、バグと判断可能
-- [ ] **表示回数のリセット設定**:
-  - 設定画面に「フォルダ変更時に表示回数をリセットする」チェックボックス追加
-  - デフォルトはON（自動リセット）
-  - ONの場合：フォルダを選び直すたびに全ての表示回数を0にリセット
-  - OFFの場合：表示回数を保持し続ける（全体的な統計を維持）
+- [x] **スキャン結果表示**: スキャン直後に新規/削除/総数/処理時間/読み取りエラーを表示。設定画面を閉じると `ScanSection` がアンマウントされ結果は消える（再度開いても古い情報は出ない）
+- [x] **統計グラフ**: 表示回数の分布ヒストグラム（表示済み/平均/最少〜最多のタイル・「均等」バッジ・表ビュー、#67）。当初案の「写真ごとの棒グラフ（パス順の横軸）」は10万枚規模で成立しないため、表示回数ごとのファイル数に集計する方式にした
+- [x] **表示回数のリセット**: 統計タブの「表示回数をリセット」ボタン（`reset_all_display_counts`）
+- [ ] **「フォルダ変更時に表示回数を自動リセットする」設定**: 未実装（現状はフォルダを切り替えても表示回数は保持される）
 
-### 🎬 動画対応の完全実装
+### 🎬 動画対応
 
-- [x] 動画ファイル形式の判定（mp4, webm, ogg, ogv, m4v）
+- [x] 動画ファイル形式の判定（mp4, webm, ogv, m4v）
 - [x] 動画プレーヤーコンポーネント（`<video>` タグ、object-fit: contain）
-- [x] 動画の自動再生と停止制御（onEnded で次送り）
-- [x] 動画の長さに応じた表示時間調整（タイマーではなく再生終了イベント）
+- [x] 動画の自動再生と停止制御（`ended` で次送り）
+- [x] 動画の長さに応じた表示時間調整（表示間隔タイマーでなく再生終了イベント。最大再生時間の上限設定、#68）
+- [x] 動画の音声ON/OFF設定（#68）
 - [ ] 動画メタデータの取得（再生時間、コーデック、解像度など）
 - [ ] ffmpeg同梱による旧フォーマット変換再生（#45: avi, mkv, flv, wmv等）
 
 ### ⚙️ その他の機能拡張
 
-- [ ] リモートフォルダ対応（ネットワークドライブ、NAS）
+- [x] 日本語/英語の多言語対応（#80）
+- [x] ウィンドウ状態の記憶（#78）
+- [x] 起動時の自動差分スキャン（前回フォルダを復元して即表示し、バックグラウンドでスキャン、#62）
+- [ ] リモートフォルダ対応（ネットワークドライブ、NAS）。OSにマウント済みのドライブは動作する
 
 ### 📱 Tauri 2アップグレードとモバイル対応
 
-- [x] **Tauri 2へのアップグレード**:
-  - Tauri v1.x → v2.xへの移行
-  - 依存関係の更新とAPIの変更対応
-  - パフォーマンスとセキュリティの改善
-  - 起動時の白いウィンドウ問題を解決（backgroundColor設定）
-  - プラグインシステムへの移行完了
-- [ ] **Android対応**:
-  - Tauri 2のAndroidサポートを活用
-  - タブレット最適化（タッチ操作、ジェスチャー対応）
-  - レスポンシブレイアウトの実装
-- [ ] **iOS対応**（オプション）:
-  - iPad向けの最適化
-  - タッチインターフェース対応
-- [ ] **タッチ操作の実装**:
-  - スワイプジェスチャーで前後移動
-  - ピンチズームでオーバーレイUI表示/非表示
-  - ダブルタップで一時停止/再生
-- [ ] **モバイルUI最適化**:
-  - 画面サイズに応じた柔軟なレイアウト
-  - タブレット向けの大きなボタンとタップエリア
-  - 縦画面・横画面の両対応
+- [x] **Tauri 2へのアップグレード**（完了、下記「Tauri 2への移行」参照）
+- [ ] **Android対応**: Tauri 2のAndroidサポートを活用（タブレット最適化）
+- [ ] **iOS対応**（オプション）: iPad向けの最適化
+- [ ] **タッチ操作の実装**: スワイプで前後移動・ダブルタップで一時停止/再生など（現状の写真上のクリック/ホイール操作は #78 でデスクトップ向けに実装済み）
+- [ ] **モバイルUI最適化**: 画面サイズに応じたレイアウト、大きなタップエリア、縦横両対応
 
 ---
 
@@ -694,6 +730,8 @@ Tauri v1のallowlist機能が、v2では新しいプラグインシステムと�
 - `tauri-plugin-dialog`: ファイル選択ダイアログ
 - `tauri-plugin-opener`: URLを開く（`tauri-plugin-shell`の`open`はv2で非推奨のため移行、#59）
 - `tauri-plugin-single-instance`: 単一インスタンス管理
+- `tauri-plugin-process`: アプリ終了（フロントの `exit(0)`）
+- `tauri-plugin-window-state`: ウィンドウ状態の保存/復元（#78）
 
 #### 2. APIの変更
 
@@ -716,7 +754,7 @@ Tauri v1のallowlist機能が、v2では新しいプラグインシステムと�
 #### 4. 依存関係の更新と最適化
 
 - Vite v5 → v7
-- rusqlite v0.31 → v0.32
+- rusqlite v0.31 → v0.32（その後 #69 で 0.40 へ更新）
 - image v0.24 → v0.25
 - rayon v1.8 → v1.x
 - **base64を削除**: Tauriの`convertFileSrc()`を使用するため不要に
@@ -746,7 +784,7 @@ Tauri v2はAndroidとiOSに対応しており、将来的なタブレット版�
 
 ## 注意事項
 
-- **削除機能なし**: 誤操作防止のため、アプリからファイルを削除する機能は実装しない
+- **元ファイルの削除・移動機能なし**: 誤操作防止のため、アプリから写真・動画の原本を削除/移動する機能は実装しない（削除できるのはピック先フォルダ内のコピーだけ。ピック/除外の「取り消し」も原本には触れない）
 - **EXIF情報**: 画像のみ対応。動画にはEXIF情報がないため、ファイル情報のみ表示
 - **4K最適化**: 表示前に画像をリサイズすることで、メモリ使用量を抑制
 - **SQLite**: 単一ファイルDBなので、バックアップが容易
