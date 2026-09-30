@@ -46,7 +46,42 @@
     // opacity<1から始まり約0.5秒でopacity=1になる（フェードインが
     // 消えていない）ことを検証する。
     fade: ['/p/a.png', '/p/v.webm', '/p/b.png'],
+    // #68: 動画設定（音声ON/OFF・最大再生時間）。
+    // 'vidset' = 設定UIの保存→再読み込みで復元（動画のみ。2秒の動画が回り続ける）。
+    // 'vidcap' = 上限30秒+音声ON。動画→画像→画像（上限到達で次へ進むことを見る）。
+    // 'vidend' = 上限60秒+音声OFF。動画(2秒)は上限に届かず onEnded で1回だけ進む。
+    // 'vidblock' = 音声ON + 音声付き play() が自動再生ポリシーで拒否される状況を模す。
+    vidset: ['/p/v.webm', '/p/v2.webm'],
+    vidcap: ['/p/v.webm', '/p/a.png', '/p/b.png'],
+    vidend: ['/p/v.webm', '/p/a.png', '/p/b.png'],
+    vidblock: ['/p/v.webm', '/p/a.png', '/p/b.png'],
   };
+
+  // #68: シナリオごとの保存済み設定の初期値。'vidset' だけは save_setting の結果を
+  // sessionStorage に残し、ページ再読み込み（=アプリ再起動）後に復元されることを見る。
+  const presets = {
+    vidcap: { video_max_duration_sec: '30', video_audio_enabled: 'true' },
+    vidend: { video_max_duration_sec: '60', video_audio_enabled: 'false' },
+    vidblock: { video_audio_enabled: 'true' },
+  };
+  const persisted = (() => {
+    try {
+      return JSON.parse(sessionStorage.getItem('__e2eSettings') || '{}');
+    } catch {
+      return {};
+    }
+  })();
+  if (sc === 'vidblock') {
+    // 実ブラウザは e2e 起動フラグで自動再生が常に許可される。音声付き(muted=false)の
+    // play() だけを NotAllowedError で拒否し、WebViewの自動再生ポリシーを再現する。
+    const originalPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      if (!this.muted) {
+        return Promise.reject(new DOMException('blocked by autoplay policy', 'NotAllowedError'));
+      }
+      return originalPlay.call(this);
+    };
+  }
   media['/p/v2.webm'] = media['/p/v.webm'];
 
   let idx = -1;
@@ -81,7 +116,16 @@
         case 'get_setting':
           // 表示間隔は許容最小値(5秒、constants.tsのMIN_DISPLAY_INTERVAL)を使い、
           // ローカル専用e2eの実行時間を現実的に保つ。
-          return args && args.key === 'display_interval' ? '5000' : null;
+          if (args && args.key === 'display_interval') return '5000';
+          if (args && args.key in persisted) return persisted[args.key];
+          return (presets[sc] && presets[sc][args && args.key]) ?? null;
+        case 'save_setting':
+          // #68: 'vidset' のみ再読み込みをまたいで保持する（他は記録だけ）。
+          if (sc === 'vidset' && args) {
+            persisted[args.key] = args.value;
+            sessionStorage.setItem('__e2eSettings', JSON.stringify(persisted));
+          }
+          return null;
         case 'get_last_directory_path':
           return sc === 'welcome' ? null : '/p';
         case 'restore_playlist':

@@ -481,6 +481,174 @@ const scenarios = [
     },
   },
   {
+    // #68: 動画設定UI（音声ON/OFF・最大再生時間）の保存と復元。実ブラウザで
+    // (1) ラベル経由でチェック/選択でき、(2) save_setting が正しい値で呼ばれ、
+    // (3) Slideshow の <video>.muted に反映され、(4) 再読み込み（=アプリ再起動）で
+    // 復元され、(5) キーボード（Space）だけでも切り替えられる、ことを確認する。
+    name: 'video settings: UI saves audio/max-duration, restores after reload, keyboard operable (#68)',
+    hash: 'vidset',
+    async run(page) {
+      const videoMuted = () =>
+        page.evaluate(() => {
+          const v = document.querySelector('video');
+          return v ? v.muted : null;
+        });
+      const savedValues = (key) =>
+        page.evaluate(
+          (k) =>
+            window.__e2eLog
+              .filter((l) => l[1] === 'save_setting' && l[2].includes(`"key":"${k}"`))
+              .map((l) => JSON.parse(l[2]).value),
+          key,
+        );
+      const openOptions = async () => {
+        await openSettingsModal(page);
+        await page.click('#tab-options');
+        await page.waitForTimeout(200);
+      };
+
+      await page.waitForSelector('video', { timeout: 5000 });
+      const mutedInitially = await videoMuted(); // 既定はOFF=無音
+
+      await openOptions();
+      const audio = page.getByLabel('動画の音声を再生する');
+      const select = page.getByLabel('動画の最大再生時間');
+      const defaultsOk = !(await audio.isChecked()) && (await select.inputValue()) === '0';
+      await audio.check();
+      await select.selectOption('60');
+      await page.waitForTimeout(200);
+      const audioSaves = await savedValues('video_audio_enabled');
+      const durationSaves = await savedValues('video_max_duration_sec');
+      const mutedAfterOn = await videoMuted();
+
+      // 再読み込み=再起動。sessionStorage経由で保存値が復元される。
+      await page.reload();
+      await page.waitForSelector('video', { timeout: 5000 });
+      const mutedAfterReload = await videoMuted();
+      await openOptions();
+      const restoredAudio = await page.getByLabel('動画の音声を再生する').isChecked();
+      const restoredDuration = await page.getByLabel('動画の最大再生時間').inputValue();
+
+      // キーボードだけで切り替える（フォーカス→Space）。
+      await page.getByLabel('動画の音声を再生する').focus();
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(200);
+      const keyboardOff = !(await page.getByLabel('動画の音声を再生する').isChecked());
+      const audioSavesAfterKey = await savedValues('video_audio_enabled');
+
+      const pass =
+        mutedInitially === true &&
+        defaultsOk &&
+        audioSaves.at(-1) === 'true' &&
+        durationSaves.at(-1) === '60' &&
+        mutedAfterOn === false &&
+        mutedAfterReload === false &&
+        restoredAudio === true &&
+        restoredDuration === '60' &&
+        keyboardOff &&
+        audioSavesAfterKey.at(-1) === 'false';
+      return {
+        pass,
+        detail: `mutedInitially=${mutedInitially} defaultsOk=${defaultsOk} audioSaves=${audioSaves} durationSaves=${durationSaves} mutedAfterOn=${mutedAfterOn} mutedAfterReload=${mutedAfterReload} restored=${restoredAudio}/${restoredDuration} keyboardOff=${keyboardOff} audioSavesAfterKey=${audioSavesAfterKey}`,
+      };
+    },
+  },
+  {
+    // #68: 最大再生時間に達したら次へ進み、1回しか進まず、退場中の古い動画は
+    // ミュート+一時停止される（音声ON）。実際に30秒待つ代わりに、動画要素の
+    // currentTime を差し替えて timeupdate を発火させる（動画自体は loop で
+    // 自然終了させない）。AnimatePresence の実マウント・退場を実ブラウザで通す。
+    name: 'video max duration: cap reached advances exactly once and silences the exiting video (#68)',
+    hash: 'vidcap',
+    async run(page) {
+      await page.waitForSelector('video', { timeout: 5000 });
+      const before = await countCalls(page, 'get_next_image');
+      const state = await page.evaluate(async () => {
+        const v = document.querySelector('video');
+        v.loop = true; // 2秒の動画が自然終了(ended)しないようにして上限側だけを検証する
+        const mutedBefore = v.muted;
+        Object.defineProperty(v, 'currentTime', { configurable: true, get: () => 31 });
+        v.dispatchEvent(new Event('timeupdate'));
+        v.dispatchEvent(new Event('timeupdate')); // 二重発火しても1回しか進まない
+        await new Promise((r) => setTimeout(r, 150));
+        // 退場アニメーション(500ms)中なので古い動画がまだDOMに残っている
+        return {
+          mutedBefore,
+          exitingMuted: v.muted,
+          exitingPaused: v.paused,
+          attached: v.isConnected,
+        };
+      });
+      await page.waitForTimeout(2500); // 次の画像は5秒間隔なので、この間は追加で進まない
+      const after = await countCalls(page, 'get_next_image');
+      const pass =
+        state.mutedBefore === false &&
+        state.attached &&
+        state.exitingMuted === true &&
+        state.exitingPaused === true &&
+        after === before + 1;
+      return {
+        pass,
+        detail: `state=${JSON.stringify(state)} nextCalls before=${before} after=${after}`,
+      };
+    },
+  },
+  {
+    // #68: 動画が上限より短い場合は従来どおり onEnded で進む（1回だけ）。
+    name: 'video shorter than the cap still advances exactly once via ended (#68)',
+    hash: 'vidend',
+    async run(page) {
+      await page.waitForSelector('video', { timeout: 5000 });
+      const before = await countCalls(page, 'get_next_image');
+      const mutedOff = await page.evaluate(() => document.querySelector('video').muted);
+      let advanced = false;
+      const deadline = Date.now() + 6000;
+      while (Date.now() < deadline) {
+        if ((await countCalls(page, 'get_next_image')) > before) {
+          advanced = true;
+          break;
+        }
+        await page.waitForTimeout(100);
+      }
+      await page.waitForTimeout(2000);
+      const after = await countCalls(page, 'get_next_image');
+      return {
+        pass: mutedOff === true && advanced && after === before + 1,
+        detail: `muted=${mutedOff} advanced=${advanced} before=${before} after=${after}`,
+      };
+    },
+  },
+  {
+    // #68: 音声付きの再生が自動再生ポリシーで拒否された場合、その動画をミュートへ
+    // 落として再生を続ける（止まったままにしない）。一時停止→再開の経路
+    // （play() の拒否を観測できる経路）で、音声付き play() だけを NotAllowedError
+    // にした状況を再現する。
+    name: 'video audio ON: a play() rejected by the autoplay policy falls back to muted and keeps playing (#68)',
+    hash: 'vidblock',
+    async run(page) {
+      await page.waitForSelector('video', { timeout: 5000 });
+      await page.evaluate(() => {
+        document.querySelector('video').loop = true;
+      });
+      await clickButtonByTitle(page, '一時停止');
+      await page.waitForTimeout(300);
+      const pausedState = await page.evaluate(() => {
+        const v = document.querySelector('video');
+        return { paused: v.paused, muted: v.muted };
+      });
+      await clickButtonByTitle(page, '再生');
+      await page.waitForTimeout(700);
+      const resumed = await page.evaluate(() => {
+        const v = document.querySelector('video');
+        return { paused: v.paused, muted: v.muted };
+      });
+      return {
+        pass: pausedState.paused === true && resumed.paused === false && resumed.muted === true,
+        detail: `pausedState=${JSON.stringify(pausedState)} resumed=${JSON.stringify(resumed)}`,
+      };
+    },
+  },
+  {
     // #65レビュー3巡目M4(must): 「同じpathの連続表示はフェード省略」nitが、
     // AnimatePresence(mode="wait")の退場500ms中の再レンダーで誤って発火し、
     // 画像→動画・動画→画像を含む全ての切り替えでフェードインが消えていた
@@ -1588,7 +1756,12 @@ async function main() {
     const browser = await launchSystemBrowser();
     const results = [];
     try {
+      // E2E_ONLY='(#68)' のようにカンマ区切りの部分文字列を指定すると、名前が一致するシナリオだけ実行する
+      // （デバッグ用。未指定なら全件）。
+      const only = process.env.E2E_ONLY ? process.env.E2E_ONLY.split(',') : null;
       for (const scenario of scenarios) {
+        if (only && !only.some((o) => scenario.name.includes(o))) continue;
+        console.log(`[e2e] 実行中: ${scenario.name}`);
         // #80: navigator.language はホストOS/ブラウザの設定に依存するため、
         // 明示指定が無い既存シナリオは 'ja-JP' に固定してロケール解決を決定的にする
         // （app_settings.language 未設定→'auto'→navigator.languageの経路）。
