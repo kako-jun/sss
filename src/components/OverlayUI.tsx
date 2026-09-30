@@ -144,6 +144,12 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   // 押せなくならないように）。直近の1件だけ取り消せる。
   const [undoToast, setUndoToast] = useState<UndoToast | null>(null);
   const undoTimeoutRef = useRef<number | undefined>(undefined);
+  // トーストの残り時間。ホバー中・フォーカス中は進行を止め、離れたら残りから再開する
+  // （キーボード利用者が「取り消す」に着く前に消えないように）。
+  const undoRemainingRef = useRef(UNDO_TOAST_MS);
+  const undoStartedAtRef = useRef(0);
+  const undoHoverRef = useRef(false);
+  const undoFocusRef = useRef(false);
   const [isUndoing, setIsUndoing] = useState(false);
   // 取り消し完了時のコールバックは、トースト生成時点のクロージャでなく常に最新の
   // ものを呼ぶ（App側の currentImage 等が除外の間に変わっているため）。
@@ -190,23 +196,53 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
       window.clearTimeout(undoTimeoutRef.current);
       undoTimeoutRef.current = undefined;
     }
+    undoHoverRef.current = false;
+    undoFocusRef.current = false;
     setUndoToast(null);
   }, []);
 
-  // 状態メッセージの代わりに、取り消しボタン付きのトーストを数秒だけ出す（#78）。
-  const showUndoToast = useCallback((message: string, onUndo: () => Promise<string>) => {
-    if (statusTimeoutRef.current !== undefined) {
-      window.clearTimeout(statusTimeoutRef.current);
-      statusTimeoutRef.current = undefined;
-    }
-    setStatusMessage('');
+  const startUndoTimer = useCallback((ms: number) => {
     if (undoTimeoutRef.current !== undefined) window.clearTimeout(undoTimeoutRef.current);
-    setUndoToast({ message, onUndo });
+    undoRemainingRef.current = ms;
+    undoStartedAtRef.current = Date.now();
     undoTimeoutRef.current = window.setTimeout(() => {
       undoTimeoutRef.current = undefined;
+      undoHoverRef.current = false;
+      undoFocusRef.current = false;
       setUndoToast(null);
-    }, UNDO_TOAST_MS);
+    }, ms);
   }, []);
+
+  // ホバー/フォーカスの状態に合わせてタイマーを止める・再開する。
+  const syncUndoTimer = useCallback(() => {
+    const hold = undoHoverRef.current || undoFocusRef.current;
+    if (hold && undoTimeoutRef.current !== undefined) {
+      window.clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = undefined;
+      undoRemainingRef.current = Math.max(
+        0,
+        undoRemainingRef.current - (Date.now() - undoStartedAtRef.current),
+      );
+    } else if (!hold && undoTimeoutRef.current === undefined) {
+      startUndoTimer(undoRemainingRef.current);
+    }
+  }, [startUndoTimer]);
+
+  // 状態メッセージの代わりに、取り消しボタン付きのトーストを数秒だけ出す（#78）。
+  const showUndoToast = useCallback(
+    (message: string, onUndo: () => Promise<string>) => {
+      if (statusTimeoutRef.current !== undefined) {
+        window.clearTimeout(statusTimeoutRef.current);
+        statusTimeoutRef.current = undefined;
+      }
+      setStatusMessage('');
+      undoHoverRef.current = false;
+      undoFocusRef.current = false;
+      setUndoToast({ message, onUndo });
+      startUndoTimer(UNDO_TOAST_MS);
+    },
+    [startUndoTimer],
+  );
 
   const handleUndo = async () => {
     if (!undoToast || isUndoing) return;
@@ -280,6 +316,11 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
           ? t('excludeAddedNeedsRescan', { pattern })
           : t('excludeAddedFile', { pattern }),
         async () => {
+          // ルールが元からあり（新規追加でない）、即座に外した画像も無い除外は、
+          // 取り消しても戻るものが無い。「取り消しました」と偽らない。
+          if (!outcome.ruleAdded && outcome.removedPaths.length === 0) {
+            return t('undoExcludeNothing');
+          }
           await undoExclude(outcome);
           onExcludeUndoneRef.current?.();
           return t('undoExcludeDone');
@@ -349,6 +390,23 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   const undoToastNode = undoToast && (
     <div
       role="status"
+      onMouseEnter={() => {
+        undoHoverRef.current = true;
+        syncUndoTimer();
+      }}
+      onMouseLeave={() => {
+        undoHoverRef.current = false;
+        syncUndoTimer();
+      }}
+      onFocus={() => {
+        undoFocusRef.current = true;
+        syncUndoTimer();
+      }}
+      onBlur={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) return;
+        undoFocusRef.current = false;
+        syncUndoTimer();
+      }}
       className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-black/80 backdrop-blur-sm text-white/70 text-xs pl-4 pr-2 py-1.5 rounded-full border border-white/10 max-w-[90vw]"
     >
       <span className="truncate min-w-0" title={undoToast.message}>

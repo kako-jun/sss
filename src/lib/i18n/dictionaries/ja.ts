@@ -79,6 +79,7 @@ export const ja = {
   // #78: 除外/ピック直後の控えめなトースト（数秒だけ「取り消す」を出す）
   undoButton: '取り消す',
   undoExcludeDone: '除外を取り消しました',
+  undoExcludeNothing: '戻すものはありませんでした',
   undoPickDone: 'ピックを取り消しました',
   undoFailed: 'エラー: 取り消せませんでした',
   excludeAddedFile: '除外パターン追加: {pattern}',

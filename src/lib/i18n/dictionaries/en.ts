@@ -79,6 +79,7 @@ export const en = {
   // #78: brief toast right after exclude/pick, with an Undo button for a few seconds
   undoButton: 'Undo',
   undoExcludeDone: 'Exclusion undone',
+  undoExcludeNothing: 'Nothing to undo',
   undoPickDone: 'Pick undone',
   undoFailed: "Error: couldn't undo",
   excludeAddedFile: 'Exclude rule added: {pattern}',
