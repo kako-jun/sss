@@ -5,7 +5,7 @@
 //! ようにするのが目的。
 
 use crate::scanner::is_media_path;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,39 +15,46 @@ const MAX_COLLISION_INDEX: u32 = 10_000;
 
 /// 同名衝突時のファイル名。`n == 0` は元の名前、`n >= 1` は `stem_n.ext`
 /// （拡張子が無ければ `stem_n`。旧実装は拡張子なしで `stem_ts.` と末尾ドットを付けていた）。
-pub fn numbered_file_name(file_name: &OsStr, n: u32) -> String {
-    let path = Path::new(file_name);
+/// 非 UTF-8 のファイル名も壊さないよう `OsString` のまま組み立てる。
+pub fn numbered_file_name(file_name: &OsStr, n: u32) -> OsString {
     if n == 0 {
-        return file_name.to_string_lossy().to_string();
+        return file_name.to_os_string();
     }
-    let stem = path.file_stem().unwrap_or(file_name).to_string_lossy();
-    match path.extension() {
-        Some(ext) => format!("{stem}_{n}.{}", ext.to_string_lossy()),
-        None => format!("{stem}_{n}"),
+    let path = Path::new(file_name);
+    let mut name = path.file_stem().unwrap_or(file_name).to_os_string();
+    name.push(format!("_{n}"));
+    if let Some(ext) = path.extension() {
+        name.push(".");
+        name.push(ext);
     }
+    name
 }
 
 /// `source` を `dest_dir` にコピーし、実際に作られたパスを返す。
 ///
 /// 同名ファイルが既にある場合は `name_1.ext`, `name_2.ext` ... と連番を付ける。以前は
 /// 秒単位のタイムスタンプを付けていたため、同じ秒に同じ名前を2回ピックすると
-/// 上書きされていた。`create_new` で「存在しなければ作成」を原子的に行うので、
-/// 存在確認と作成の間に割り込まれても既存ファイルは決して上書きしない。
+/// 上書きされていた。`create_new` で「存在しなければ作成」を原子的に行って名前を
+/// 予約するので、存在確認と作成の間に割り込まれても既存ファイルは決して上書きしない。
+/// 予約したパスへの実コピーは `fs::copy` に任せる（属性・macOS の clone/fcopyfile を
+/// 活かす）。修正日時はプラットフォームによって `fs::copy` が引き継がないため、
+/// コピー後に元ファイルの値を明示的に反映する（失敗しても無視）。
 pub fn copy_with_unique_name(source: &Path, dest_dir: &Path) -> Result<PathBuf, String> {
     let file_name = source.file_name().ok_or("Failed to get file name")?;
 
     for n in 0..=MAX_COLLISION_INDEX {
         let dest = dest_dir.join(numbered_file_name(file_name, n));
-        let mut dest_file = match OpenOptions::new().write(true).create_new(true).open(&dest) {
-            Ok(f) => f,
+        match OpenOptions::new().write(true).create_new(true).open(&dest) {
+            Ok(reserved) => drop(reserved),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(format!("Failed to copy file: {e}")),
-        };
-        let copied = fs::File::open(source).and_then(|mut src| io::copy(&mut src, &mut dest_file));
-        return match copied {
-            Ok(_) => Ok(dest),
+        }
+        return match fs::copy(source, &dest) {
+            Ok(_) => {
+                preserve_modified_time(source, &dest);
+                Ok(dest)
+            }
             Err(e) => {
-                drop(dest_file);
                 let _ = fs::remove_file(&dest);
                 Err(format!("Failed to copy file: {e}"))
             }
@@ -56,15 +63,30 @@ pub fn copy_with_unique_name(source: &Path, dest_dir: &Path) -> Result<PathBuf, 
     Err("Too many files with the same name in the picked directory".to_string())
 }
 
+/// `dest` の修正日時を `source` に揃える（ベストエフォート。失敗は無視）。
+fn preserve_modified_time(source: &Path, dest: &Path) {
+    let Ok(modified) = fs::metadata(source).and_then(|m| m.modified()) else {
+        return;
+    };
+    if let Ok(file) = OpenOptions::new().write(true).open(dest) {
+        let _ = file.set_modified(modified);
+    }
+}
+
 /// ピックフォルダ直下のメディアファイル（画像＋動画。スキャナと同じ拡張子定義）の一覧。
 pub fn list_picked_media(picked_dir: &Path) -> Result<Vec<String>, String> {
     let mut items: Vec<String> = Vec::new();
     let entries = fs::read_dir(picked_dir).map_err(|e| format!("Failed to read directory: {e}"))?;
     for entry in entries {
-        let path = entry
-            .map_err(|e| format!("Failed to read entry: {e}"))?
-            .path();
-        if path.is_file() && is_media_path(&path) {
+        let entry = entry.map_err(|e| format!("Failed to read entry: {e}"))?;
+        // シンボリックリンクは辿らず一覧から除く。フォルダ外を指すリンクを出すと、
+        // 表示はできても `validate_picked_delete_target` に拒否されて削除できない。
+        let is_regular_file = entry
+            .file_type()
+            .map(|file_type| file_type.is_file())
+            .unwrap_or(false);
+        let path = entry.path();
+        if is_regular_file && is_media_path(&path) {
             items.push(path.to_string_lossy().to_string());
         }
     }
@@ -194,6 +216,66 @@ mod tests {
             })
             .collect();
         assert_eq!(names, ["a.mp4", "b.JPG", "c.webm"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_excludes_symlinks_even_when_they_point_to_media_files() {
+        let dir = workspace("list_symlink");
+        let outside = dir.join("outside.jpg");
+        fs::write(&outside, b"x").unwrap();
+        let picked = dir.join("picked");
+        fs::create_dir_all(&picked).unwrap();
+        fs::write(picked.join("real.jpg"), b"x").unwrap();
+        std::os::unix::fs::symlink(&outside, picked.join("link.jpg")).unwrap();
+        std::os::unix::fs::symlink(dir.join("nowhere.jpg"), picked.join("dangling.jpg")).unwrap();
+        let listed = list_picked_media(&picked).unwrap();
+        let names: Vec<_> = listed
+            .iter()
+            .map(|p| {
+                Path::new(p)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(names, ["real.jpg"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn numbered_file_name_keeps_non_utf8_names_intact() {
+        use std::os::unix::ffi::OsStrExt;
+        let raw = OsStr::from_bytes(b"caf\xe9.jpg"); // Latin-1 の é（UTF-8 として不正）
+        assert_eq!(numbered_file_name(raw, 0).as_bytes(), b"caf\xe9.jpg");
+        assert_eq!(numbered_file_name(raw, 1).as_bytes(), b"caf\xe9_1.jpg");
+    }
+
+    #[test]
+    fn copy_preserves_source_modified_time() {
+        let dir = workspace("mtime");
+        let dest = dir.join("picked");
+        fs::create_dir_all(&dest).unwrap();
+        let src = dir.join("old.jpg");
+        fs::write(&src, b"data").unwrap();
+        let past =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_500_000_000);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&src)
+            .unwrap()
+            .set_modified(past)
+            .unwrap();
+
+        let first = copy_with_unique_name(&src, &dest).unwrap();
+        let second = copy_with_unique_name(&src, &dest).unwrap();
+        for copied in [first, second] {
+            assert_eq!(fs::metadata(&copied).unwrap().modified().unwrap(), past);
+            assert_eq!(fs::read(&copied).unwrap(), b"data");
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
