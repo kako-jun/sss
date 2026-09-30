@@ -443,7 +443,10 @@ pub async fn undo_exclude(
         .into_iter()
         .filter(|p| {
             let path = Path::new(p);
+            // 取り消し猶予中にフォルダを切り替えて再スキャンした場合、旧フォルダの画像を
+            // 新しいプレイリストへ混ぜない（現在のスキャンルート配下だけを復帰対象にする）。
             path.exists()
+                && scan_root.as_ref().is_none_or(|root| path.starts_with(root))
                 && !match &scan_root {
                     Some(root) => ignore_filter.is_ignored(path, root),
                     None => ignore_filter.is_ignored_anywhere(path),

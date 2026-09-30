@@ -85,8 +85,8 @@ fn undoing_a_file_exclusion_removes_the_rule_and_restores_the_image_to_the_unpla
     let state = f.app.state::<AppState>();
     let target = f.photos_dir.join("img0.jpg").to_string_lossy().to_string();
 
-    // 2枚進めて「表示済み区間」を作ってから、未表示の1枚を除外する（現実には
-    // 直前に見ていた1枚だが、どの位置にあっても未再生区間へ戻ることを検証する）。
+    // 2枚進めて「表示済み区間」を作ってから、1枚を除外する（現実には直前に見ていた
+    // 1枚だが、その画像が元のシャッフル順のどこにあっても未再生区間へ戻ることを検証する）。
     {
         let mut lock = state.playlist.lock().unwrap();
         let pl = lock.as_mut().unwrap();
@@ -264,6 +264,49 @@ fn undoing_a_directory_exclusion_only_removes_the_rule() {
             .total_count(),
         TOTAL
     );
+
+    let _ = std::fs::remove_dir_all(&f.dir);
+}
+
+#[test]
+fn undo_does_not_restore_an_image_outside_the_current_scan_root() {
+    let f = setup("folder_switch");
+    let state = f.app.state::<AppState>();
+    let target = f.photos_dir.join("img4.jpg").to_string_lossy().to_string();
+
+    let outcome = tauri::async_runtime::block_on(exclude_image(
+        target.clone(),
+        "file".to_string(),
+        state.clone(),
+    ))
+    .unwrap();
+    assert_eq!(outcome.removed_paths, vec![target.clone()]);
+
+    // 取り消し猶予中に別フォルダへ切り替えて再スキャンした状況を再現する
+    // （スキャンルートが変わり、プレイリストは新フォルダの画像だけになる）。
+    let other_dir = f.dir.join("other_photos");
+    std::fs::create_dir_all(&other_dir).unwrap();
+    let other_img = other_dir.join("new0.jpg");
+    std::fs::write(&other_img, b"fixture").unwrap();
+    *state.directory_path.lock().unwrap() = Some(other_dir.clone());
+    *state.playlist.lock().unwrap() =
+        Some(Playlist::new(vec![other_img.to_string_lossy().to_string()]));
+
+    tauri::async_runtime::block_on(undo_exclude(
+        outcome.pattern.clone(),
+        outcome.rule_type.clone(),
+        outcome.rule_added,
+        outcome.removed_paths.clone(),
+        state.clone(),
+    ))
+    .unwrap();
+
+    // ルールは消えるが、旧フォルダの画像は新プレイリストへ混ざらない。
+    assert!(!rule_exists(&state, &outcome.pattern, RuleType::Glob));
+    let lock = state.playlist.lock().unwrap();
+    let pl = lock.as_ref().unwrap();
+    assert_eq!(pl.total_count(), 1);
+    assert!(!pl.current_paths().contains(&target));
 
     let _ = std::fs::remove_dir_all(&f.dir);
 }
