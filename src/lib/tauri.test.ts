@@ -147,6 +147,23 @@ describe('tauri command wrappers', () => {
     });
   });
 
+  it('undoExclude maps the exclude outcome onto the undo_exclude arguments (#78)', async () => {
+    invoke.mockResolvedValue(undefined);
+    await tauri.undoExclude({
+      pattern: '/a.jpg',
+      needsRescan: false,
+      ruleType: 'glob',
+      ruleAdded: true,
+      removedPaths: ['/a.jpg'],
+    });
+    expect(invoke).toHaveBeenCalledWith('undo_exclude', {
+      pattern: '/a.jpg',
+      ruleType: 'glob',
+      removeRule: true,
+      restorePaths: ['/a.jpg'],
+    });
+  });
+
   it('getDisplayStats returns the aggregated histogram (not a per-file list, #67)', async () => {
     const stats: DisplayStats = {
       files: 3,

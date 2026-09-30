@@ -10,7 +10,13 @@ import {
   Ellipsis,
 } from 'lucide-react';
 import type { ImageInfo } from '../types';
-import { openInExplorer, pickImage, excludeImage } from '../lib/tauri';
+import {
+  openInExplorer,
+  pickImage,
+  excludeImage,
+  undoExclude,
+  deletePickedImage,
+} from '../lib/tauri';
 import {
   useState,
   useMemo,
@@ -74,6 +80,20 @@ interface OverlayUIProps {
    * 「プレイリスト情報の再取得」の両方を行う想定。
    */
   onExcluded?: () => void;
+  /**
+   * 除外の取り消しが成功した後に呼ぶ（#78）。プレイリストへ画像が戻ったので、
+   * 位置/総数の再取得や、除外で空になっていた場合の表示再開を呼び出し側が行う。
+   */
+  onExcludeUndone?: () => void;
+}
+
+/** 除外/ピック直後に「取り消す」を出しておく時間（#78）。 */
+const UNDO_TOAST_MS = 6000;
+
+/** 取り消しトーストの状態。`onUndo` は完了時に表示する文言を返す。 */
+interface UndoToast {
+  message: string;
+  onUndo: () => Promise<string>;
 }
 
 /**
@@ -111,6 +131,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
     onMouseLeave,
     onTogglePause,
     onExcluded,
+    onExcludeUndone,
   },
   ref,
 ) {
@@ -119,6 +140,22 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   const [showExcludeSubmenu, setShowExcludeSubmenu] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
   const statusTimeoutRef = useRef<number | undefined>(undefined);
+  // #78: 除外/ピック直後の取り消しトースト。状態表示（statusMessage）と同じ位置に
+  // 出るが、idleフェードの外側に置く（マウスを動かさず数秒経ってもボタンが消えて
+  // 押せなくならないように）。直近の1件だけ取り消せる。
+  const [undoToast, setUndoToast] = useState<UndoToast | null>(null);
+  const undoTimeoutRef = useRef<number | undefined>(undefined);
+  // トーストの残り時間。ホバー中・フォーカス中は進行を止め、離れたら残りから再開する
+  // （キーボード利用者が「取り消す」に着く前に消えないように）。
+  const undoRemainingRef = useRef(UNDO_TOAST_MS);
+  const undoStartedAtRef = useRef(0);
+  const undoHoverRef = useRef(false);
+  const undoFocusRef = useRef(false);
+  const [isUndoing, setIsUndoing] = useState(false);
+  // 取り消し完了時のコールバックは、トースト生成時点のクロージャでなく常に最新の
+  // ものを呼ぶ（App側の currentImage 等が除外の間に変わっているため）。
+  const onExcludeUndoneRef = useRef(onExcludeUndone);
+  onExcludeUndoneRef.current = onExcludeUndone;
   const t = useT();
   // #66レビュー3巡目nit: 操作バー内の各ボタンへ個別に付ける
   // onMouseDownガード（コンテナ一括ではなくボタン単位にすることで、
@@ -155,10 +192,81 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
     }, 3000);
   }, []);
 
+  const clearUndoToast = useCallback(() => {
+    if (undoTimeoutRef.current !== undefined) {
+      window.clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = undefined;
+    }
+    undoHoverRef.current = false;
+    undoFocusRef.current = false;
+    setUndoToast(null);
+  }, []);
+
+  const startUndoTimer = useCallback((ms: number) => {
+    if (undoTimeoutRef.current !== undefined) window.clearTimeout(undoTimeoutRef.current);
+    undoRemainingRef.current = ms;
+    undoStartedAtRef.current = Date.now();
+    undoTimeoutRef.current = window.setTimeout(() => {
+      undoTimeoutRef.current = undefined;
+      undoHoverRef.current = false;
+      undoFocusRef.current = false;
+      setUndoToast(null);
+    }, ms);
+  }, []);
+
+  // ホバー/フォーカスの状態に合わせてタイマーを止める・再開する。
+  const syncUndoTimer = useCallback(() => {
+    const hold = undoHoverRef.current || undoFocusRef.current;
+    if (hold && undoTimeoutRef.current !== undefined) {
+      window.clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = undefined;
+      undoRemainingRef.current = Math.max(
+        0,
+        undoRemainingRef.current - (Date.now() - undoStartedAtRef.current),
+      );
+    } else if (!hold && undoTimeoutRef.current === undefined) {
+      startUndoTimer(undoRemainingRef.current);
+    }
+  }, [startUndoTimer]);
+
+  // 状態メッセージの代わりに、取り消しボタン付きのトーストを数秒だけ出す（#78）。
+  const showUndoToast = useCallback(
+    (message: string, onUndo: () => Promise<string>) => {
+      if (statusTimeoutRef.current !== undefined) {
+        window.clearTimeout(statusTimeoutRef.current);
+        statusTimeoutRef.current = undefined;
+      }
+      setStatusMessage('');
+      undoHoverRef.current = false;
+      undoFocusRef.current = false;
+      setUndoToast({ message, onUndo });
+      startUndoTimer(UNDO_TOAST_MS);
+    },
+    [startUndoTimer],
+  );
+
+  const handleUndo = async () => {
+    if (!undoToast || isUndoing) return;
+    const { onUndo } = undoToast;
+    clearUndoToast();
+    setIsUndoing(true);
+    try {
+      showStatusMessage(await onUndo());
+    } catch (err) {
+      console.error('Failed to undo:', err);
+      showStatusMessage(t('undoFailed'));
+    } finally {
+      setIsUndoing(false);
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (statusTimeoutRef.current !== undefined) {
         window.clearTimeout(statusTimeoutRef.current);
+      }
+      if (undoTimeoutRef.current !== undefined) {
+        window.clearTimeout(undoTimeoutRef.current);
       }
     };
   }, []);
@@ -182,7 +290,11 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
 
     try {
       const destPath = await pickImage(image.path);
-      showStatusMessage(t('pickCopyDone', { path: destPath }));
+      // #78: コピーしたファイルだけを消す（ピックフォルダ内の検証はバックエンド側）。
+      showUndoToast(t('pickCopyDone', { path: destPath }), async () => {
+        await deletePickedImage(destPath);
+        return t('undoPickDone');
+      });
     } catch (err) {
       console.error('Failed to share image:', err);
       showStatusMessage(resolvePickErrorMessage(String(err)));
@@ -197,11 +309,23 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
       // #80: excludeImage は構造化データ（pattern/needsRescan）を返す。文言は
       // フロント辞書側で組み立てる（旧実装はバックエンドが組み立て済みの日本語
       // 文字列をそのまま表示しており、言語切替に追従できなかった）。
-      const { pattern, needsRescan } = await excludeImage(image.path, type);
-      showStatusMessage(
+      const outcome = await excludeImage(image.path, type);
+      const { pattern, needsRescan } = outcome;
+      // #78: 除外ルールの削除と、即座に外した画像の未再生区間への復帰を1操作で戻す。
+      showUndoToast(
         needsRescan
           ? t('excludeAddedNeedsRescan', { pattern })
           : t('excludeAddedFile', { pattern }),
+        async () => {
+          // ルールが元からあり（新規追加でない）、即座に外した画像も無い除外は、
+          // 取り消しても戻るものが無い。「取り消しました」と偽らない。
+          if (!outcome.ruleAdded && outcome.removedPaths.length === 0) {
+            return t('undoExcludeNothing');
+          }
+          await undoExclude(outcome);
+          onExcludeUndoneRef.current?.();
+          return t('undoExcludeDone');
+        },
       );
       // #65 問題5: 除外した画像を表示し続けず、即座に次へ進んでプレイリスト
       // 情報（位置/総数）も最新化する。
@@ -262,7 +386,44 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
     return `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
   }, [hasGps, image?.exif?.gpsLatitude, image?.exif?.gpsLongitude]);
 
-  if (!image) return null;
+  // #78: 取り消しトースト。除外の結果プレイリストが空になり `image` が null に
+  // なっても（最後の1枚を除外した直後）取り消せるよう、画像の有無に依存させない。
+  const undoToastNode = undoToast && (
+    <div
+      role="status"
+      onMouseEnter={() => {
+        undoHoverRef.current = true;
+        syncUndoTimer();
+      }}
+      onMouseLeave={() => {
+        undoHoverRef.current = false;
+        syncUndoTimer();
+      }}
+      onFocus={() => {
+        undoFocusRef.current = true;
+        syncUndoTimer();
+      }}
+      onBlur={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) return;
+        undoFocusRef.current = false;
+        syncUndoTimer();
+      }}
+      className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-black/80 backdrop-blur-sm text-white/70 text-xs pl-4 pr-2 py-1.5 rounded-full border border-white/10 max-w-[90vw]"
+    >
+      <span className="truncate min-w-0" title={undoToast.message}>
+        {undoToast.message}
+      </span>
+      <button
+        onClick={handleUndo}
+        onMouseDown={(e) => e.preventDefault()}
+        className="shrink-0 px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-white/90 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
+      >
+        {t('undoButton')}
+      </button>
+    </div>
+  );
+
+  if (!image) return undoToastNode ?? null;
 
   // #66 視覚刷新: 見えなくても困らない情報（ファイルサイズ・表示回数・最終表示日時・
   // フルパス）は、本文としては出さずファイル名のtitleツールチップにまとめる
@@ -302,6 +463,8 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
           }}
         />
       </div>
+
+      {undoToastNode}
 
       {/* ステータスメッセージ・フローティングの操作バー。idleでフェードする
           （#66レビューshould: プログレスラインの一時停止中の扱いは上で独立

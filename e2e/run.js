@@ -1650,6 +1650,156 @@ const scenarios = [
       return { pass, detail: `opacity=${opacity}` };
     },
   },
+  {
+    // #78: 除外の取り消し。除外直後に「取り消す」が出て、マウスを動かさず idle に
+    // なっても（操作バーがフェードアウトしても）押せる状態のまま残り、押すと
+    // undo_exclude が除外の結果（removeRule/restorePaths）つきで呼ばれる。
+    name: 'exclude shows an undo toast that survives idle and calls undo_exclude (#78)',
+    hash: 'undo',
+    async run(page) {
+      await page.waitForTimeout(800);
+      await wakeFromIdle(page);
+      await page.click('button[title="メニュー"]');
+      await page.click('text=除外');
+      await page.click('text=ファイルを除外');
+      await page.waitForTimeout(300);
+      const shown = await isVisible(page, '取り消す');
+      // マウスを動かさず idle（3秒）を越えても残る。
+      await page.waitForTimeout(3600);
+      const barOpacity = await getOverlayBarWrapperOpacity(page);
+      const stillShown = await isVisible(page, '取り消す');
+      await page.click('button:has-text("取り消す")');
+      await page.waitForTimeout(300);
+      const undoCalls = await page.evaluate(() =>
+        window.__e2eLog.filter((l) => l[1] === 'undo_exclude').map((l) => l[2]),
+      );
+      const doneShown = await isVisible(page, '除外を取り消しました');
+      const buttonGone = !(await isVisible(page, '取り消す'));
+      const pass =
+        shown &&
+        stillShown &&
+        barOpacity === 0 &&
+        undoCalls.length === 1 &&
+        undoCalls[0].includes('"removeRule":true') &&
+        undoCalls[0].includes('"restorePaths":["/p/') &&
+        doneShown &&
+        buttonGone;
+      return {
+        pass,
+        detail: `shown=${shown} stillShown(idle)=${stillShown} barOpacity=${barOpacity} undoCalls=${JSON.stringify(undoCalls)} doneShown=${doneShown} buttonGone=${buttonGone}`,
+      };
+    },
+  },
+  {
+    // #78: ピックの取り消しはコピーしたファイルだけを delete_picked_image で消す。
+    // 取り消さずに放置すれば数秒でトーストは消える（確認ダイアログは出ない）。
+    name: 'pick undo deletes only the copied file; the toast expires by itself (#78)',
+    hash: 'undo',
+    async run(page) {
+      await page.waitForTimeout(800);
+      await wakeFromIdle(page);
+      await page.click('button[title="ピック（コピー）"]');
+      await page.waitForTimeout(300);
+      const shown = await isVisible(page, '取り消す');
+      await page.click('button:has-text("取り消す")');
+      await page.waitForTimeout(300);
+      const deleteCalls = await page.evaluate(() =>
+        window.__e2eLog.filter((l) => l[1] === 'delete_picked_image').map((l) => l[2]),
+      );
+      const doneShown = await isVisible(page, 'ピックを取り消しました');
+
+      // もう一度ピックして放置 → 6秒で消える。
+      await page.click('button[title="ピック（コピー）"]');
+      await page.waitForTimeout(300);
+      const shownAgain = await isVisible(page, '取り消す');
+      await page.waitForTimeout(6300);
+      const expired = !(await isVisible(page, '取り消す'));
+      const deleteCallsAfterExpiry = await page.evaluate(
+        () => window.__e2eLog.filter((l) => l[1] === 'delete_picked_image').length,
+      );
+      const pass =
+        shown &&
+        deleteCalls.length === 1 &&
+        deleteCalls[0].includes('/tmp/sss-picked/a.png') &&
+        doneShown &&
+        shownAgain &&
+        expired &&
+        deleteCallsAfterExpiry === 1;
+      return {
+        pass,
+        detail: `shown=${shown} deleteCalls=${JSON.stringify(deleteCalls)} doneShown=${doneShown} shownAgain=${shownAgain} expired=${expired}`,
+      };
+    },
+  },
+  {
+    // #78: 写真上のマウス操作。クリック=一時停止/再開（連打は1回に畳む）、
+    // ホイール=前/次（連続イベントは1回に畳む）。オーバーレイのボタンは写真クリック扱いにならない。
+    name: 'photo click toggles pause and wheel navigates, without interfering with the overlay (#78)',
+    hash: 'gestures',
+    async run(page) {
+      await page.waitForTimeout(1000);
+      const pausedTitle = (p) => p.locator('button[title="再生"]').count();
+      const playingTitle = (p) => p.locator('button[title="一時停止"]').count();
+
+      // 写真上の実クリック → 一時停止
+      await page.mouse.move(640, 300);
+      await page.mouse.click(640, 300);
+      await page.waitForTimeout(150);
+      const pausedAfterClick = (await pausedTitle(page)) === 1;
+      // 少し空けてもう一度 → 再生に戻る
+      await page.waitForTimeout(450);
+      await page.mouse.click(640, 300);
+      await page.waitForTimeout(150);
+      const playingAfterSecond = (await playingTitle(page)) === 1;
+      // ダブルクリック（2発目は無視される）→ 1回分だけ切り替わって一時停止
+      await page.waitForTimeout(450);
+      await page.mouse.dblclick(640, 300);
+      await page.waitForTimeout(150);
+      const pausedAfterDouble = (await pausedTitle(page)) === 1;
+      await page.waitForTimeout(450);
+      await page.mouse.click(640, 300); // 再生へ戻す
+      await page.waitForTimeout(150);
+
+      // オーバーレイのボタン（次へ）は一時停止状態を変えない。
+      await wakeFromIdle(page);
+      const beforeOverlayClick = await countCalls(page, 'get_next_image');
+      await realMouseClickByTitle(page, '次へ (→)');
+      await page.waitForTimeout(200);
+      const overlayStillPlaying = (await playingTitle(page)) === 1;
+      const nextAfterOverlay = await countCalls(page, 'get_next_image');
+
+      // ホイール: 下=次へ。続けて届くイベントは1回に畳まれる。
+      await page.mouse.move(640, 300);
+      await page.waitForTimeout(400);
+      const nextBefore = await countCalls(page, 'get_next_image');
+      await page.mouse.wheel(0, 100);
+      await page.waitForTimeout(50);
+      await page.mouse.wheel(0, 100);
+      await page.mouse.wheel(0, 100);
+      await page.waitForTimeout(300);
+      const nextAfter = await countCalls(page, 'get_next_image');
+
+      // 上=前へ（戻れる状態）。一連の操作が落ち着いてから。
+      await page.waitForTimeout(400);
+      const prevBefore = await countCalls(page, 'get_previous_image');
+      await page.mouse.wheel(0, -100);
+      await page.waitForTimeout(300);
+      const prevAfter = await countCalls(page, 'get_previous_image');
+
+      const pass =
+        pausedAfterClick &&
+        playingAfterSecond &&
+        pausedAfterDouble &&
+        overlayStillPlaying &&
+        nextAfterOverlay - beforeOverlayClick === 1 &&
+        nextAfter - nextBefore === 1 &&
+        prevAfter - prevBefore === 1;
+      return {
+        pass,
+        detail: `pausedAfterClick=${pausedAfterClick} playingAfterSecond=${playingAfterSecond} pausedAfterDouble=${pausedAfterDouble} overlayStillPlaying=${overlayStillPlaying} overlayNext=${nextAfterOverlay - beforeOverlayClick} wheelNext=${nextAfter - nextBefore} wheelPrev=${prevAfter - prevBefore}`,
+      };
+    },
+  },
 ];
 
 /**

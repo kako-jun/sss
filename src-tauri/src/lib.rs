@@ -31,6 +31,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        // #78: ウィンドウ状態（全画面/ウィンドウ・位置・サイズ・装飾）を終了時に保存し、
+        // 起動時に復元する。VISIBLE は対象外（非表示のまま復元される事故を避ける）。
+        // 保存先ディスプレイが外れていれば位置は復元されずOSの既定位置に出る
+        // （プラグイン側が実在モニタとの交差を確認する）。
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // 2つ目のインスタンス起動時は、新規ウィンドウを作らず既存ウィンドウへフォーカスする
             // （最小化されていた場合は unminimize() してから show/focus しないと前面に出てこない）
@@ -163,6 +175,7 @@ pub fn run() {
             commands::settings::get_setting,
             commands::file_operations::pick_image,
             commands::file_operations::exclude_image,
+            commands::file_operations::undo_exclude,
             commands::stats::get_display_stats,
             commands::file_operations::get_default_share_directory,
             commands::file_operations::get_ignore_patterns,
