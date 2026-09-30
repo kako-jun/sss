@@ -1364,8 +1364,9 @@ const scenarios = [
   },
   {
     // #67: 履歴タブでも同様に、静止画=サムネイル・動画=フィルム+ファイル名・表示回数バッジ。
-    // サムネイルは画面に入った分だけ get_thumbnail を要求する（2 件とも見えているので 2 回）。
-    name: 'History tab shows thumbnails and video labels and requests each visible thumbnail once (#67)',
+    // 2 件（静止画・動画）とも常に可視なので、get_thumbnail は 1 件につき 1 回＝計 2 回呼ばれる。
+    // （画面外を要求しない遅延取得の検証は Thumbnail のユニットテスト側で行う）
+    name: 'History tab shows a downscaled thumbnail, a video label and counts, calling get_thumbnail once per listed item (2 calls) (#67)',
     hash: 'thumbs',
     async run(page) {
       await page.waitForTimeout(600);
