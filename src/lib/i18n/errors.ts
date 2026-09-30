@@ -15,7 +15,7 @@ function splitBackendError(raw: string): { code: string; detail?: string } {
 }
 
 /**
- * `scan_directory`（および `ScanGuard` を共有する `reset_all_data`）が返す
+ * `select_and_scan` / `rescan_last_directory`（および `ScanGuard` を共有する `reset_all_data`）が返す
  * エラーコードを表示文言へ変換する。`path` は呼び出し元が渡した対象ディレクトリ
  * （バックエンドは文字列にパスを埋め込み直さないため、フロントが自分の知っている
  * 値を補う）。未知のコード（想定外の内部エラー等）はそのまま返す（ログ相当の
@@ -30,6 +30,8 @@ export function resolveScanErrorMessage(raw: string, path: string): string {
       return t('errorDirectoryNotFound', { path });
     case 'directoryUnsafe':
       return t('errorDirectoryUnsafe', { path });
+    case 'noLastDirectory':
+      return t('errorNoLastDirectory');
     default:
       return raw;
   }
@@ -96,7 +98,7 @@ export function resolveExcludeErrorMessage(raw: string): string {
   }
 }
 
-/** `save_setting`（`share_directory_path`）が返すエラーコードを表示文言へ変換する（#87）。 */
+/** `select_share_directory` が返すエラーコードを表示文言へ変換する（#87）。 */
 export function resolveShareDirectoryErrorMessage(raw: string): string {
   const { code } = splitBackendError(raw);
   switch (code) {
@@ -137,6 +139,8 @@ export function resolveStartupDirectoryError(raw: string, directory: string): st
       return t('errorDirectoryNotFound', { path: directory });
     case 'directoryUnsafe':
       return t('errorDirectoryUnsafe', { path: directory });
+    case 'noLastDirectory':
+      return t('errorNoLastDirectory');
     default:
       return t('startupDirectoryRejected', { reason: raw });
   }

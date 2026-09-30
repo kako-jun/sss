@@ -118,7 +118,7 @@ export const en = {
   directorySelectionTitle: 'Select Folder',
   // #66 visual refresh: description for the heading+description+control rhythm.
   directorySelectionDescription:
-    'Only what changed since last time is re-scanned, so even 100,000+ photos start in seconds',
+    'Choosing a folder with Select scans it right away; Scan re-scans the selected folder. Only what changed since last time is detected, so even 100,000+ photos take seconds',
   scanningLabel: 'Scanning...',
   scanLabel: 'Scan',
   scanResultTitle: 'Scan Results',
@@ -130,12 +130,13 @@ export const en = {
   errorCountValue: '{count}',
   keptAsUnknownNote: '(kept in the list, not removed)',
   pleaseSelectDirectoryFirst: 'Please select a folder first',
-  failedToSelectDirectory: 'Failed to select a folder',
   failedToScanDirectory: 'Failed to scan the folder',
   errorScanInProgress: 'A scan is already in progress. Please wait for it to finish.',
   errorDirectoryNotFound: "Couldn't find the selected folder: {path}",
   errorDirectoryUnsafe: "This folder can't be used for security reasons: {path}",
   selectDirectoryDialogTitle: 'Select Photo Folder',
+  selectShareDirectoryDialogTitle: 'Select Pick Destination Folder',
+  errorNoLastDirectory: 'No folder has been selected to scan yet',
 
   // === Settings: Options ===
   displayIntervalTitle: 'Display Interval',

@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-dialog';
 import type {
   DisplayStats,
   ThumbnailResult,
@@ -26,38 +25,47 @@ export async function getShareDirectory(): Promise<string> {
 }
 
 /**
- * ディレクトリ選択ダイアログを開く
+ * フォルダ選択ダイアログ（Rust 側で開く）で選んだフォルダをスキャンしてプレイリストを初期化する（#93）。
+ *
+ * JS はダイアログの表示タイトルだけを渡し、パス文字列は一切渡さない（選ばれたパスは
+ * Rust 側だけが受け取り、スキャン・asset scope 許可・保存に使う）。ユーザーが
+ * ダイアログをキャンセルした場合は `null`（エラーではない）。
  */
-export async function selectDirectory(): Promise<string | null> {
-  const selected = await open({
-    directory: true,
-    multiple: false,
+export async function selectAndScan(): Promise<ScanProgress | null> {
+  return await invoke<ScanProgress | null>('select_and_scan', {
     title: t('selectDirectoryDialogTitle'),
   });
-
-  if (typeof selected === 'string') {
-    return selected;
-  }
-
-  return null;
 }
 
 /**
- * ディレクトリをスキャンしてプレイリストを初期化
+ * DB 保存済みの前回フォルダ（過去にダイアログで選択されたパス）を再スキャンする（#93）。
+ * 起動時の自動スキャン・設定画面の再スキャンで使う。引数は取らない
+ * （WebView から任意パスを指定する経路は無い）。
  */
-export async function scanDirectory(directoryPath: string): Promise<ScanProgress> {
-  return await invoke<ScanProgress>('scan_directory', { directoryPath });
+export async function rescanLastDirectory(): Promise<ScanProgress> {
+  return await invoke<ScanProgress>('rescan_last_directory');
+}
+
+/**
+ * ピック先ディレクトリをフォルダ選択ダイアログ（Rust 側で開く）で選んで保存する（#93）。
+ * 戻り値は保存したパス。ユーザーがキャンセルした場合は `null`。
+ */
+export async function selectShareDirectory(): Promise<string | null> {
+  return await invoke<string | null>('select_share_directory', {
+    title: t('selectShareDirectoryDialogTitle'),
+  });
 }
 
 /**
  * 起動時、DBに保存済みのプレイリスト状態を復元する（#62レビューS1）。
- * スキャン完了を待たずに表示を始めるため、`scanDirectory` とは独立して呼ぶ。
+ * 復元対象は DB 保存済みの前回フォルダ（#93: 引数でパスは渡さない）。
+ * スキャン完了を待たずに表示を始めるため、`rescanLastDirectory` とは独立して呼ぶ。
  * `true`（復元できた）ならスキャンはバックグラウンドで実行してよい。
  * `false`（保存が無い/ディレクトリ不一致）ならスキャン完了を待つ従来のフローに
  * フォールバックする。
  */
-export async function restorePlaylist(directoryPath: string): Promise<boolean> {
-  return await invoke<boolean>('restore_playlist', { directoryPath });
+export async function restorePlaylist(): Promise<boolean> {
+  return await invoke<boolean>('restore_playlist');
 }
 
 /**

@@ -31,8 +31,8 @@ describe('runStartupSequence', () => {
         order.push('restorePlaylist');
         return false;
       },
-      scanDirectory: async () => {
-        order.push('scanDirectory');
+      rescanLastDirectory: async () => {
+        order.push('rescanLastDirectory');
         return { totalFiles: 0 };
       },
       initialize: async () => {
@@ -64,8 +64,8 @@ describe('runStartupSequence', () => {
         order.push('restorePlaylist');
         return true;
       },
-      scanDirectory: async (dir) => {
-        order.push(`scanDirectory:${dir}`);
+      rescanLastDirectory: async () => {
+        order.push('rescanLastDirectory');
         return scanDeferred.promise;
       },
       initialize: async () => {
@@ -94,7 +94,7 @@ describe('runStartupSequence', () => {
       'initialize',
       'setIsInitialized:true',
       'updatePlaylistInfo',
-      'scanDirectory:/photos',
+      'rescanLastDirectory',
     ]);
 
     // スキャンを完了させると、その後にもう一度updatePlaylistInfoが呼ばれる。
@@ -109,7 +109,7 @@ describe('runStartupSequence', () => {
       'initialize',
       'setIsInitialized:true',
       'updatePlaylistInfo',
-      'scanDirectory:/photos',
+      'rescanLastDirectory',
       'updatePlaylistInfo',
     ]);
   });
@@ -124,8 +124,8 @@ describe('runStartupSequence', () => {
         order.push('restorePlaylist');
         return false;
       },
-      scanDirectory: async (dir) => {
-        order.push(`scanDirectory:${dir}`);
+      rescanLastDirectory: async () => {
+        order.push('rescanLastDirectory');
         return { totalFiles: 7 };
       },
       initialize: async () => {
@@ -145,7 +145,7 @@ describe('runStartupSequence', () => {
 
     expect(order).toEqual([
       'restorePlaylist',
-      'scanDirectory:/photos',
+      'rescanLastDirectory',
       'initialize',
       'setIsInitialized:true',
       'updatePlaylistInfo',
@@ -162,8 +162,8 @@ describe('runStartupSequence', () => {
         order.push('restorePlaylist');
         throw new Error('boom');
       },
-      scanDirectory: async () => {
-        order.push('scanDirectory');
+      rescanLastDirectory: async () => {
+        order.push('rescanLastDirectory');
         return { totalFiles: 1 };
       },
       initialize: async () => {
@@ -183,7 +183,7 @@ describe('runStartupSequence', () => {
 
     expect(order).toEqual([
       'restorePlaylist',
-      'scanDirectory',
+      'rescanLastDirectory',
       'initialize',
       'setIsInitialized:true',
       'updatePlaylistInfo',
@@ -197,7 +197,7 @@ describe('runStartupSequence', () => {
       getSetting: async () => null,
       getLastDirectoryPath: async () => '/photos',
       restorePlaylist: async () => false,
-      scanDirectory: async () => {
+      rescanLastDirectory: async () => {
         throw new Error('scan failed');
       },
       initialize: async () => {
@@ -227,7 +227,7 @@ describe('runStartupSequence', () => {
       getSetting: async () => null,
       getLastDirectoryPath: async () => '/photos',
       restorePlaylist: async () => true,
-      scanDirectory: async () => {
+      rescanLastDirectory: async () => {
         throw new Error('background scan failed');
       },
       initialize: async () => {
@@ -265,7 +265,7 @@ describe('runStartupSequence', () => {
       getSetting: async () => null,
       getLastDirectoryPath: async () => '/photos',
       restorePlaylist: async () => false,
-      scanDirectory: async () => {
+      rescanLastDirectory: async () => {
         throw failure;
       },
       initialize: async () => {
@@ -295,7 +295,7 @@ describe('runStartupSequence', () => {
       getSetting: async () => null,
       getLastDirectoryPath: async () => '/photos',
       restorePlaylist: async () => false,
-      scanDirectory: async () => {
+      rescanLastDirectory: async () => {
         throw new Error('boom');
       },
       initialize: async () => {},
@@ -320,7 +320,7 @@ describe('runStartupSequence', () => {
       getSetting: async () => null,
       getLastDirectoryPath: async () => null,
       restorePlaylist: async () => false,
-      scanDirectory: async () => ({ totalFiles: 0 }),
+      rescanLastDirectory: async () => ({ totalFiles: 0 }),
       initialize: async () => {},
       listenScanProgress: async () => () => {},
       setInitStatus: () => {},
@@ -346,7 +346,7 @@ describe('runStartupSequence: video settings (#68)', () => {
       getSetting: async (key) => stored[key] ?? null,
       getLastDirectoryPath: async () => null,
       restorePlaylist: async () => false,
-      scanDirectory: async () => ({ totalFiles: 0 }),
+      rescanLastDirectory: async () => ({ totalFiles: 0 }),
       initialize: async () => {},
       listenScanProgress: async () => () => {},
       setInitStatus: () => {},

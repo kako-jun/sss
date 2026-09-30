@@ -1,7 +1,7 @@
 import { FolderOpen, RefreshCw } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { UnlistenFn, listen } from '@tauri-apps/api/event';
-import { selectDirectory, scanDirectory, getLastDirectoryPath } from '../../lib/tauri';
+import { selectAndScan, rescanLastDirectory, getLastDirectoryPath } from '../../lib/tauri';
 import type { ScanProgress } from '../../types';
 import { useT, resolveScanErrorMessage } from '../../lib/i18n';
 import type { MessageKey } from '../../lib/i18n';
@@ -49,44 +49,32 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
     loadLastDirectory();
   }, []);
 
-  const handleSelectDirectory = async () => {
-    try {
-      const directory = await selectDirectory();
-      if (directory) {
-        setSelectedDirectory(directory);
-        setError(null);
-      }
-    } catch (err) {
-      console.error('Failed to select directory:', err);
-      if (err instanceof Error) {
-        setError({ kind: 'code', raw: err.message, directory: selectedDirectory });
-      } else {
-        setError({ kind: 'key', key: 'failedToSelectDirectory' });
-      }
-    }
-  };
-
-  const handleScan = async () => {
-    if (!selectedDirectory) {
-      setError({ kind: 'key', key: 'pleaseSelectDirectoryFirst' });
-      return;
-    }
-
+  // 選択+スキャン（#93）も再スキャンも、スキャンの進捗購読・結果表示・エラー処理は共通。
+  // どちらもパス文字列は渡さない（選択はRust側のダイアログ、再スキャンはDB保存済みの前回フォルダ）。
+  const runScan = async (run: () => Promise<ScanProgress | null>) => {
     let unlisten: UnlistenFn | null = null;
 
     try {
       setIsScanning(true);
       setError(null);
-      setScanProgress(null);
       setRealtimeProgress(null);
 
       unlisten = await listen<{ current: number; total: number }>('scan-progress', (event) => {
         setRealtimeProgress(event.payload);
       });
 
-      const progress = await scanDirectory(selectedDirectory);
-      setScanProgress(progress);
+      const progress = await run();
       setRealtimeProgress(null);
+      // ダイアログをキャンセルした場合は null（エラーではない。何も変えない）
+      if (progress === null) return;
+      setScanProgress(progress);
+      // 選択で前回フォルダが変わりうるので、表示を保存値に合わせ直す
+      try {
+        const lastDirectory = await getLastDirectoryPath();
+        if (lastDirectory) setSelectedDirectory(lastDirectory);
+      } catch (err) {
+        console.error('Failed to load last directory path:', err);
+      }
       // スキャン完了を通知するが、設定画面は閉じない
       onScanComplete();
     } catch (err) {
@@ -109,6 +97,17 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
     }
   };
 
+  const handleSelectDirectory = () => runScan(selectAndScan);
+
+  const handleScan = async () => {
+    if (!selectedDirectory) {
+      setError({ kind: 'key', key: 'pleaseSelectDirectoryFirst' });
+      return;
+    }
+    setScanProgress(null);
+    await runScan(rescanLastDirectory);
+  };
+
   return (
     <div className="space-y-4">
       <div>
@@ -127,7 +126,8 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
         />
         <button
           onClick={handleSelectDirectory}
-          className="flex items-center gap-2 px-4 py-2 text-white/50 hover:text-white/80 hover:bg-white/8 rounded-lg transition-colors shrink-0 text-sm"
+          disabled={isScanning}
+          className="flex items-center gap-2 px-4 py-2 text-white/50 hover:text-white/80 hover:bg-white/8 rounded-lg transition-colors shrink-0 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <FolderOpen className="w-4 h-4" />
           {t('selectButtonLabel')}

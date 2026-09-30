@@ -118,7 +118,7 @@ export const ja = {
   directorySelectionTitle: 'フォルダ選択',
   // #66視覚刷新: 見出し＋説明＋コントロールの一貫した縦リズムのための説明文。
   directorySelectionDescription:
-    '10万枚規模でも数秒で起動できるよう、前回からの変更分だけを検出します',
+    '「選択」でフォルダを選ぶとすぐにスキャンします。「スキャン」は選択済みのフォルダを再スキャンします。前回からの変更分だけを検出するので、10万枚規模でも数秒で済みます',
   scanningLabel: 'スキャン中...',
   scanLabel: 'スキャン',
   scanResultTitle: 'スキャン結果',
@@ -130,12 +130,13 @@ export const ja = {
   errorCountValue: '{count}件',
   keptAsUnknownNote: '（不明として保持、削除しません）',
   pleaseSelectDirectoryFirst: '先にフォルダを選択してください',
-  failedToSelectDirectory: 'フォルダの選択に失敗しました',
   failedToScanDirectory: 'フォルダのスキャンに失敗しました',
   errorScanInProgress: 'スキャン実行中です。完了までお待ちください。',
   errorDirectoryNotFound: '指定したフォルダが見つかりません: {path}',
   errorDirectoryUnsafe: 'セキュリティ上の理由でこのフォルダは使用できません: {path}',
   selectDirectoryDialogTitle: '写真フォルダを選択',
+  selectShareDirectoryDialogTitle: 'ピック先フォルダを選択',
+  errorNoLastDirectory: 'スキャンするフォルダがまだ選択されていません',
 
   // === 設定画面: オプション ===
   displayIntervalTitle: '表示間隔',
