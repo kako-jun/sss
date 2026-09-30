@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { getRecentImages, excludeImage } from '../../lib/tauri';
 import type { RecentImage } from '../../types';
 import { useT } from '../../lib/i18n';
+import { resolveExcludeErrorMessage } from '../../lib/i18n/errors';
 import { Thumbnail } from './Thumbnail';
 
 export function HistorySection() {
@@ -11,6 +12,8 @@ export function HistorySection() {
   const [images, setImages] = useState<RecentImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  // #92: 除外失敗（管理外の拒否など）はコンソールだけでなく画面にも出す。
+  const [excludeError, setExcludeError] = useState<string | null>(null);
 
   useEffect(() => {
     getRecentImages()
@@ -25,12 +28,15 @@ export function HistorySection() {
   }, []);
 
   const handleExclude = async (path: string, type: 'date' | 'file' | 'directory') => {
+    setExcludeError(null);
     try {
       await excludeImage(path, type);
       setImages((prev) => prev.filter((img) => img.path !== path));
       setActiveMenu(null);
     } catch (err) {
       console.error('Failed to exclude image:', err);
+      setExcludeError(resolveExcludeErrorMessage(String(err)));
+      setActiveMenu(null);
     }
   };
 
@@ -42,6 +48,12 @@ export function HistorySection() {
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-medium text-white/70">{t('recentHistoryTitle')}</h3>
+
+      {excludeError && (
+        <div role="alert" className="p-2 bg-black/30 rounded-lg text-red-300/80 text-xs">
+          {excludeError}
+        </div>
+      )}
 
       {images.length === 0 ? (
         <div className="p-4 bg-black/30 rounded-lg text-center text-white/50 text-sm">

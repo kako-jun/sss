@@ -21,6 +21,11 @@ Dates use `YYYY-MM-DD`.
 
 ### Fixed
 
+- `open_in_explorer` / `exclude_image` / `undo_exclude` の任意パス指定を塞いだ (#92)。管理下パス検証（#87）の適用先を広げる
+  - `open_in_explorer`: DB 登録またはピックフォルダ内のみ。管理外は存在有無に関わらず同一の `pathNotManaged`（存在確認のオラクル遮断）、管理下で実在しなければ `imageFileNotFound`。`~` 展開は廃止。Windows ではファイラに verbatim 接頭辞（`\\?\`）付きのパスを渡さない
+  - `exclude_image`: DB 登録パスのみ（ピック先内の未登録ファイルは対象外。`open_in_explorer` とはこの点が非対称）。管理外は存在確認・EXIF 撮影日の読み取り・ルール追加より前に `pathNotManaged` で拒否し、任意ファイルの撮影日や存在が漏れず、除外ルール・`image_stats` 行も作られない。登録後に symlink へ差し替えられたパスも拒否
+  - `undo_exclude`: `restore_paths` の復帰対象を、DB 登録済みかつメディア拡張子のパスに限定（従来はスキャンルート配下の実在パスであれば `<root>/../x` や非メディアも復帰しえた）。通常フローの `removedPaths` はスキャン登録済みなので影響しない
+  - 拒否は ja/en のメッセージで表示（オーバーレイ・設定の履歴タブ）。`undo_display_count` は直前加算パスとの一致が必須で問題なし。`scan_directory` の再設計は #93 で別途検討
 - `get_thumbnail`（静止画）と `pick_image` に、素朴な任意パス指定を拒否する「管理下パス」検証を追加。許可するのは次の2つだけ (#87)
   - スキャン済みプレイリスト構成員・表示履歴として DB に登録済みのパス。ファイル自体が symlink に差し替えられていれば拒否する（スキャナは symlink ファイルを登録しない）。中間ディレクトリの symlink までは判別できない（残余リスク）
   - ピックフォルダ内の実体ファイル。`canonicalize` 後に包含判定し、`..`・フォルダ外を指す symlink は拒否。検証後の処理には canonical パスを使う

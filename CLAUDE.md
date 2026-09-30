@@ -416,17 +416,17 @@ CREATE TABLE scan_history (
      自体の生死確認とProcessingFailedの即時打ち切りも同様（T-M1/S-b）。戻り値も
      同じ`ImageNavigationResult`（#65）で、履歴の先頭に達して戻れない場合は
      `noHistory`（エラーではなく単純な境界）
-  5. `open_in_explorer`: ファイルマネージャーで開く（OS別対応）
+  5. `open_in_explorer`: ファイルマネージャーで開く（OS別対応）。**対象は管理下パスのみ**（#92）: `pick_image`/`get_thumbnail` と同じ`pick::ensure_managed_media_path`（DB登録 or ピックフォルダ内）を通し、管理外は存在有無に関わらず同一の`pathNotManaged`で拒否（存在確認のオラクルにならない）。管理下だが実在しない場合のみ`imageFileNotFound`。`~`展開は廃止（UIは絶対パスを渡す）。Windowsではcanonicalの`\\?\`接頭辞を除去してからファイラへ渡す（`pick::strip_verbatim_prefix`）。検証部は`pick::resolve_open_target`に切り出し単体テスト済み。**`exclude_image`とは非対称**（こちらはピックフォルダ内の実在ファイルも開ける）。フロントは`resolveOpenInExplorerErrorMessage`でja/en表示
   6. `get_playlist_info`: プレイリスト情報取得（位置、総数、戻れるか）
   7. `get_last_directory_path`: 最後にスキャンしたフォルダパス取得
   8. `exit_app`: アプリケーション終了
   9. `save_setting`: 設定を保存
   10. `get_setting`: 設定を取得
   11. `pick_image`: 画像をPictures/sss-pickedフォルダにコピー（同名は`name_1.ext`の連番で、`create_new`で名前を予約→`fs::copy`し上書きしない。更新日時は元ファイルに揃える。#67。**元パスは管理下＋メディア拡張子のみ**: DB（`file_metadata`/`image_stats`）に文字列一致で登録済み、またはピックフォルダ内の実体ファイル（`canonicalize`で`..`・フォルダ外symlinkを拒否）。管理外は`pathNotManaged`、非メディアは`notMediaFile`のエラーコードで拒否。検証は`pick::ensure_managed_media_path`（canonicalパスを返し後続処理はそれを使う。DB登録パスでもsymlinkは拒否）。**基準のピック先も検証**: `get_picked_directory`は`resolve_validated_share_directory`で不正な保存値（相対・`..`・ルート・ホーム/その祖先）を既定へフォールバックし、`save_setting`は`share_directory_path`を保存前に`is_acceptable_share_directory`で検証（`shareDirectoryInvalid`）。**拒否するのは**ルート（Windowsはホームと同一ドライブのみ。`D:\`・UNC共有ルートは可）・ホーム自身とその祖先・システム領域（`/etc` `/usr` `/System` `/Library` 等、Windowsは`SystemRoot`/`ProgramFiles`）・ホーム配下の`.ssh/.gnupg/.aws/.kube`・Linuxの`/root`・macOSの`~/Library/Keychains`・相対/`..`（`/opt`と`/run`は外付け/自動マウント`/run/media`を壊すため対象外）。**それ以外の任意ディレクトリは保存できる**（管理下扱いは画像・動画拡張子のファイルのみ。allowlistは外付け/NASを壊すため採らない）。比較は実パス化し、macOS/Windowsは大文字小文字無視。設定画面は`get_share_directory`（解決済みパス）を表示。**脅威モデル**: 防ぐのは素朴な任意パス指定。WebViewが`scan_directory`/設定を正規手順で操作するケースは防がない（フォルダ選択はJS側ダイアログ前提の既存設計、#87）
-  12. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。
+  12. `exclude_image`: 画像をDBの除外ルールに追加（日付/ファイル/フォルダ除外）。**対象はDB登録パス（`file_metadata`/`image_stats`）のみ**（#92）: `pick::ensure_registered_media_path`で管理外（登録済みでも symlink に差し替えられたパスを含む）を、存在確認・EXIF撮影日の読み取り・ルール追加より前に`pathNotManaged`で拒否する（任意ファイルの存在有無・撮影日が漏れず、`image_stats`行も作られない）。登録済みで実在しない場合のみ`imageFileNotFound`。フロントは`resolveExcludeErrorMessage`でja/en表示。**`open_in_explorer`とは非対称**（`open_in_explorer`はピックフォルダ内の実在ファイルも許可、`exclude_image`は除外ルール・`image_stats`行を作るため登録済みパスのみ）。同類の`undo_display_count`は直前に加算したパスとの一致を要求するため問題なし
       即時反映（file/date）は `Playlist::update_images` の直後に必ずフル保存する
       （#62レビューM2(must): 保存し忘れると再起動を跨いだときに除外した画像が復活する）
-      12b. `undo_exclude`: 直前の除外を取り消す（#78）。`exclude_image` の戻り値（`ExcludeOutcome`）をそのまま受け取り、`ruleAdded` が真の時だけルールを削除し（元からあったルールは消さない）、即時にプレイリストから外していた画像（`removedPaths`）を、除外ルール削除後の残りルールで再判定した上で `Playlist::update_images` の既存規則で**未再生区間**へ戻し、フル保存する。バックエンドは取り消し用の状態を持たない（`AppState` 不変）
+      12b. `undo_exclude`: 直前の除外を取り消す（#78）。**復帰対象（`restore_paths`）はDB登録済み（`is_known_media_path`）かつメディア拡張子のパスのみ**（#92。`starts_with`は`..`を解決しないため`<root>/../x`が通りうるのを塞ぐ。通常フローの`removedPaths`はスキャン登録済み由来なので影響なし。スキャンルートが`None`のままプレイリストが`Some`になる経路は本番に無く〔`perform_scan`/`restore_playlist`は両者を同じロック内で同時に設定、`reset_all_data`は両方を`None`に戻す〕、`None`分岐は主にテスト用）。`exclude_image` の戻り値（`ExcludeOutcome`）をそのまま受け取り、`ruleAdded` が真の時だけルールを削除し（元からあったルールは消さない）、即時にプレイリストから外していた画像（`removedPaths`）を、除外ルール削除後の残りルールで再判定した上で `Playlist::update_images` の既存規則で**未再生区間**へ戻し、フル保存する。バックエンドは取り消し用の状態を持たない（`AppState` 不変）
   13. `get_display_stats`: 統計データ取得（グラフ用の表示回数ヒストグラム。表示回数ごとのファイル数・最小/最大/平均のみ返し、全件の一覧は返さない）
   14. `get_default_share_directory`: ピック先デフォルトパス取得
   15. `reset_all_data`: 全データ初期化（#64）。中核ロジックは`commands::system::

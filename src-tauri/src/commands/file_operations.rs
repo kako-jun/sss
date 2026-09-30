@@ -57,24 +57,27 @@ pub async fn get_share_directory(state: State<'_, AppState>) -> Result<String, S
 
 /// ファイラで画像を選択状態で開く（OS別）
 #[tauri::command]
-pub async fn open_in_explorer(image_path: String) -> Result<(), String> {
-    // チルダ（~）を展開
-    let expanded_path = if image_path.starts_with("~/") || image_path == "~" {
-        let home = dirs::home_dir().ok_or("Failed to get home directory")?;
-        if image_path == "~" {
-            home
-        } else {
-            home.join(&image_path[2..])
-        }
-    } else {
-        PathBuf::from(&image_path)
+pub async fn open_in_explorer(
+    image_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // #92: 任意パスの存在確認・ファイラ表示をさせない（管理下＝DB 登録 or ピックフォルダ内のみ）。
+    // UI は表示中の画像の絶対パスを渡すので `~` 展開は不要（管理外扱いになる）。
+    let (share_directory, known) = {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            get_picked_directory(&db)?,
+            db.is_known_media_path(&image_path).unwrap_or_else(|e| {
+                eprintln!(
+                    "open_in_explorer: is_known_media_path failed (treated as unmanaged): {e}"
+                );
+                false
+            }),
+        )
     };
-
-    let path = expanded_path.as_path();
-
-    if !path.exists() {
-        return Err(format!("File does not exist: {}", path.display()));
-    }
+    // 検証（管理下 → 実在 → verbatim 接頭辞の除去）は `pick::resolve_open_target` に集約。
+    let target = crate::pick::resolve_open_target(Path::new(&image_path), &share_directory, known)?;
+    let path = target.as_path();
 
     let image_path = path.to_str().ok_or("Invalid path")?.to_string();
 
@@ -262,6 +265,9 @@ fn persist_current_playlist(state: &State<AppState>, playlist: &crate::playlist:
 
 /// 除外機能：画像をDBのignore_rulesに追加
 ///
+/// #92: 対象は DB 登録済み（`file_metadata`/`image_stats`）のパスのみ。管理外は
+/// `pathNotManaged`（存在確認・EXIF 日付のオラクル遮断）。
+///
 /// #80: 戻り値は完成済みの日本語文字列でなく `ExcludeOutcome`（構造化データ）。
 /// エラーもユーザー向け文言でなくエラーコードで返す（呼び出し元のOverlayUIは
 /// 現状これらのエラーメッセージ自体を表示せずconsole.errorのみに流している
@@ -273,6 +279,18 @@ pub async fn exclude_image(
     state: State<'_, AppState>,
 ) -> Result<ExcludeOutcome, String> {
     let path = Path::new(&image_path);
+
+    // #92: 除外できるのは DB 登録済み（プレイリスト構成員・表示履歴）のパスだけ。
+    // 管理外の任意パスは、存在確認・EXIF 撮影日の読み取り・除外ルール追加のいずれよりも
+    // 前に `pathNotManaged` で拒否する（存在有無や任意ファイルの撮影日が漏れない）。
+    let known = {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.is_known_media_path(&image_path).unwrap_or_else(|e| {
+            eprintln!("exclude_image: is_known_media_path failed (treated as unmanaged): {e}");
+            false
+        })
+    };
+    crate::pick::ensure_registered_media_path(path, known)?;
 
     if !path.exists() {
         return Err("imageFileNotFound".to_string());
@@ -454,7 +472,28 @@ pub async fn undo_exclude(
         .into_iter()
         .filter_map(|(path, date, _)| date.map(|d| (path, d)))
         .collect();
+    // #92: 復帰対象は DB 登録済み（`file_metadata`/`image_stats` に文字列完全一致）かつ
+    // メディア拡張子のパスだけ。`<root>/../x` のような未登録パスや非メディアは、
+    // `starts_with`（成分単位の比較で `..` を解決しない）を通ってもプレイリストへ入れない。
+    // 通常フローの `removedPaths` は `playlist.current_paths()` 由来＝スキャン登録済みなので影響しない。
+    let registered: std::collections::HashSet<String> = restore_paths
+        .iter()
+        .filter(|p| {
+            crate::scanner::is_media_path(Path::new(p.as_str()))
+                && db.is_known_media_path(p).unwrap_or_else(|e| {
+                    eprintln!(
+                        "undo_exclude: is_known_media_path failed (treated as unmanaged): {e}"
+                    );
+                    false
+                })
+        })
+        .cloned()
+        .collect();
     drop(db);
+    let restore_paths: Vec<String> = restore_paths
+        .into_iter()
+        .filter(|p| registered.contains(p))
+        .collect();
     let ignore_filter = IgnoreFilter::from_rules_with_captured_dates(&rules, captured_dates);
     let scan_root = state
         .directory_path

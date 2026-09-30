@@ -83,7 +83,12 @@ export const en = {
     'The pick destination was saved, but the display could not be refreshed',
   errorShareDirectorySaveFailed: "Couldn't save the pick destination",
   errorNotMediaFile: "This isn't an image or video file, so it can't be copied",
+  errorOpenNotManaged:
+    "This file isn't managed by the slideshow, so it can't be shown in the file manager",
+  errorImageFileNotFound: 'File not found',
+  openInExplorerFailed: "Error: couldn't open the file manager",
   excludeFailed: 'Error: exclude failed',
+  errorExcludeNotManaged: "This file isn't managed by the slideshow, so it can't be excluded",
   // #78: brief toast right after exclude/pick, with an Undo button for a few seconds
   undoButton: 'Undo',
   undoExcludeDone: 'Exclusion undone',
