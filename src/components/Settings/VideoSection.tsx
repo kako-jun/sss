@@ -118,7 +118,7 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
           value={maxDurationSec}
           onChange={(e) => handleMaxDurationChange(e.target.value)}
           aria-describedby={maxDurationDescId}
-          className="px-2 py-1 bg-black/40 text-white/60 rounded border border-white/8 text-sm focus:outline-none focus:border-white/20"
+          className="sss-select px-2 py-1 bg-black/40 text-white/60 rounded border border-white/8 text-sm focus:outline-none focus:border-white/20"
         >
           {VIDEO_MAX_DURATION_OPTIONS_SEC.map((sec) => (
             <option key={sec} value={sec}>
