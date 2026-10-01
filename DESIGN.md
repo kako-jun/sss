@@ -167,6 +167,20 @@ rounded-lg
 (no background at rest)
 ```
 
+### Buttons — Inline hint (#100)
+
+A hint that is also a control (the welcome screen's "? Show keyboard shortcuts"):
+Ghost text color with a key-cap chip, no background at rest. Hover/focus-visible only
+brightens the text (`/50` -> `/80`) and the chip (`bg-white/8` -> `bg-white/15`) —
+no borders or fills are added. The chip is `aria-hidden`; the button's accessible
+name comes from its text and `aria-keyshortcuts="?"` exposes the key.
+
+```
+text-white/50 hover:text-white/80 focus-visible:text-white/80
+chip: bg-white/8 group-hover:bg-white/15 group-focus-visible:bg-white/15
+rounded-lg px-2 py-1 text-xs transition-colors
+```
+
 ### Input Fields
 
 ```
