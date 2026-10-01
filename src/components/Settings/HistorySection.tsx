@@ -1,5 +1,5 @@
 import { Ban, ChevronRight } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getRecentImages, excludeImage } from '../../lib/tauri';
 import type { RecentImage } from '../../types';
@@ -7,6 +7,8 @@ import { useT } from '../../lib/i18n';
 import { resolveExcludeErrorMessage } from '../../lib/i18n/errors';
 import { Thumbnail } from './Thumbnail';
 import type { ExcludeRuleChange } from './useExcludeRescan';
+import { useAsyncLoad } from '../../hooks/useAsyncLoad';
+import { LoadError } from './SectionErrors';
 
 interface HistorySectionProps {
   /**
@@ -18,25 +20,14 @@ interface HistorySectionProps {
 
 export function HistorySection({ onRuleChanged }: HistorySectionProps = {}) {
   const t = useT();
-  const [images, setImages] = useState<RecentImage[]>([]);
-  const [loading, setLoading] = useState(true);
+  // #115: 取得失敗は「表示履歴はありません」の空状態と区別してエラー表示＋再試行にする。
+  const load = useAsyncLoad<RecentImage[]>(getRecentImages, 'recent images');
+  const images = load.state.status === 'ready' ? load.state.data : [];
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   // #92: 除外失敗（管理外の拒否など）はコンソールだけでなく画面にも出す。
   const [excludeError, setExcludeError] = useState<string | null>(null);
   // #111: 再スキャンが要る除外（フォルダ/撮影日）をした直後の案内（オーバーレイと同じ文言）。
   const [rescanHint, setRescanHint] = useState<string | null>(null);
-
-  useEffect(() => {
-    getRecentImages()
-      .then((result) => {
-        setImages(result);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error('Failed to load recent images:', err);
-        setLoading(false);
-      });
-  }, []);
 
   const handleExclude = async (path: string, type: 'date' | 'file' | 'directory') => {
     setExcludeError(null);
@@ -47,7 +38,7 @@ export function HistorySection({ onRuleChanged }: HistorySectionProps = {}) {
         setRescanHint(outcome.pattern);
         onRuleChanged?.({ kind: 'added', pattern: outcome.pattern });
       }
-      setImages((prev) => prev.filter((img) => img.path !== path));
+      load.update((prev) => prev.filter((img) => img.path !== path));
       setActiveMenu(null);
     } catch (err) {
       console.error('Failed to exclude image:', err);
@@ -56,9 +47,18 @@ export function HistorySection({ onRuleChanged }: HistorySectionProps = {}) {
     }
   };
 
-  if (loading) {
+  if (load.state.status === 'loading') {
     // #66レビュー2巡目nit: /30→/50（他の説明/補助テキストと同じ濃さに統一）。
     return <div className="text-white/50 text-sm">{t('loadingLabel')}</div>;
+  }
+
+  if (load.state.status === 'error') {
+    return (
+      <div className="space-y-4">
+        <h3 className="text-sm font-medium text-white/70">{t('recentHistoryTitle')}</h3>
+        <LoadError onRetry={load.reload} testId="history-load-error" />
+      </div>
+    );
   }
 
   return (

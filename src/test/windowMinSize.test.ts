@@ -14,9 +14,9 @@ const conf = JSON.parse(readFileSync(join(ROOT, 'src-tauri/tauri.conf.json'), 'u
 };
 
 describe('window minimum size (#116)', () => {
-  it('メインウィンドウに minWidth >= 480 / minHeight >= 400 が設定されている', () => {
+  it('メインウィンドウに minWidth >= 480 / minHeight >= 420 が設定されている', () => {
     const w = conf.app.windows[0];
     expect(w.minWidth).toBeGreaterThanOrEqual(480);
-    expect(w.minHeight).toBeGreaterThanOrEqual(400);
+    expect(w.minHeight).toBeGreaterThanOrEqual(420);
   });
 });

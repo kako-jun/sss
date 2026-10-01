@@ -15,6 +15,7 @@ export const ja = {
   windowModeLabel: 'ウィンドウモード',
   fullscreenLabel: 'フルスクリーン',
   windowModeToggleFailed: 'ウィンドウモードを切り替えられませんでした',
+  exitFailed: 'アプリを終了できませんでした',
   genericErrorTitle: 'エラーが発生しました',
   closeTooltip: '閉じる',
   cancelButton: 'キャンセル',
@@ -89,6 +90,11 @@ export const ja = {
   lastDisplayedTooltip: '最終表示: {when}',
   pickCopyDone: 'コピー完了: {path}',
   pickCopyFailed: 'エラー: コピー失敗',
+  errorPickPermissionDenied: 'ピック先に書き込む権限がないためコピーできません',
+  errorPickDiskFull: 'ピック先の空き容量が足りないためコピーできません',
+  errorPickDestinationMissing:
+    'ピック先として使えないためコピーできません（同名のファイルがあるか、フォルダが見つかりません）',
+  errorPickSourceMissing: 'コピー元の写真が見つからないためコピーできません',
   errorPathNotManaged: 'このファイルはスライドショーの管理外のためコピーできません',
   errorShareDirectoryInvalid:
     'このフォルダはピック先に指定できません（ルート・ホームフォルダ・相対パスなどは不可）',
@@ -112,6 +118,26 @@ export const ja = {
 
   // === 設定画面: 共通 ===
   loadingLabel: '読み込み中...',
+  // #115: 失敗が「空」や成功に見えないよう、取得失敗・保存失敗・操作失敗を明示する
+  loadFailed: '読み込みに失敗しました',
+  retryButton: '再試行',
+  settingLoadFailed: '設定を読み込めませんでした。表示は既定値です',
+  intervalSaveFailed: '表示間隔を保存できませんでした。元の値に戻しました',
+  exifSaveFailed: 'EXIF回転の設定を保存できませんでした。元の値に戻しました',
+  videoSaveFailed: '動画の設定を保存できませんでした。元の値に戻しました',
+  languageSaveFailed: '言語の設定を保存できませんでした。元の値に戻しました',
+  startupSettingsLoadFailed:
+    '保存済みの設定を読み込めませんでした。表示間隔・動画の設定は既定値で動いています',
+  startupInitFailedTitle: '起動時の読み込みに失敗しました',
+  startupFailedSubtitle: '再試行するか、設定からフォルダを選び直してください',
+  errorPickSourceUnreadable: 'コピー元の写真を読み取れないためコピーできません',
+  removeRuleFailed: '除外ルール「{pattern}」を解除できませんでした',
+  chooseAnotherFolder: 'ほかのフォルダを選ぶ',
+  deletePickedFailed: 'ピックした写真「{name}」を削除できませんでした',
+  resetDisplayCountsFailed: '表示回数をリセットできませんでした',
+  openGitHubFailed: 'GitHub を開けませんでした',
+  versionUnavailable: '取得できません',
+  errorLastDirectoryLoadFailed: '前回のフォルダを読み込めませんでした',
   selectButtonLabel: '選択',
   secondsUnit: '{value}秒',
   // #82レビューnit: IntervalSectionの「秒」単独表示は`secondsUnit`に空文字を

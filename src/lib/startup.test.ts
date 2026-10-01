@@ -408,3 +408,85 @@ describe('runStartupSequence: video settings (#68)', () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 });
+
+describe('runStartupSequence: startup failures are surfaced (#115)', () => {
+  function makeDeps(overrides: Partial<StartupDeps> = {}) {
+    const failures: string[] = [];
+    const initialized: boolean[] = [];
+    const hasDirectory: boolean[] = [];
+    const intervals: number[] = [];
+    const deps: StartupDeps = {
+      getSetting: async () => null,
+      getLastDirectoryPath: async () => null,
+      restorePlaylist: async () => false,
+      rescanLastDirectory: async () => ({ totalFiles: 0 }),
+      initialize: async () => {},
+      listenScanProgress: async () => () => {},
+      setInitStatus: () => {},
+      setRealtimeProgress: () => {},
+      setIsInitialized: (v) => initialized.push(v),
+      setDisplayInterval: (v) => intervals.push(v),
+      updatePlaylistInfo: async () => {},
+      setHasDirectory: (v) => hasDirectory.push(v),
+      onStartupFailure: (kind) => failures.push(kind),
+      ...overrides,
+    };
+    return { deps, failures, initialized, hasDirectory, intervals };
+  }
+
+  it('getLastDirectoryPath rejecting is reported as lastDirectory and is not treated as "first run"', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { deps, failures, initialized, hasDirectory } = makeDeps({
+      getLastDirectoryPath: async () => {
+        throw new Error('db down');
+      },
+    });
+    await runStartupSequence(deps);
+    expect(failures).toEqual(['lastDirectory']);
+    expect(initialized).toEqual([true]);
+    expect(hasDirectory).toEqual([]);
+  });
+
+  it('display_interval rejecting is reported as settings and startup still continues to the folder check', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const getLastDirectoryPath = vi.fn(async () => null);
+    const { deps, failures, initialized } = makeDeps({
+      getSetting: async (key) => {
+        if (key === 'display_interval') throw new Error('db down');
+        return null;
+      },
+      getLastDirectoryPath,
+    });
+    await runStartupSequence(deps);
+    expect(failures).toEqual(['settings']);
+    expect(getLastDirectoryPath).toHaveBeenCalled();
+    expect(initialized).toEqual([true]);
+  });
+
+  it('video settings failing is reported once as settings', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { deps, failures } = makeDeps({
+      getSetting: async (key) => {
+        if (key.startsWith('video_')) throw new Error('db down');
+        return null;
+      },
+      setVideoAudioEnabled: () => {},
+    });
+    await runStartupSequence(deps);
+    expect(failures).toEqual(['settings']);
+  });
+
+  it('an unexpected failure while initializing is reported as initialize', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { deps, failures, initialized } = makeDeps({
+      getLastDirectoryPath: async () => '/photos',
+      restorePlaylist: async () => true,
+      initialize: async () => {
+        throw new Error('boom');
+      },
+    });
+    await runStartupSequence(deps);
+    expect(failures).toEqual(['initialize']);
+    expect(initialized).toEqual([true]);
+  });
+});

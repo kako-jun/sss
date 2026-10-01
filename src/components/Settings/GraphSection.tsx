@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useAsyncLoad } from '../../hooks/useAsyncLoad';
 import { getDisplayStats, resetAllDisplayCounts } from '../../lib/tauri';
 import type { DisplayStats } from '../../types';
 import { Check } from 'lucide-react';
@@ -8,6 +9,7 @@ import { useT, useLocale } from '../../lib/i18n';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { EVEN_SPREAD_MAX, percentOf, spreadOf } from '../../lib/displayCountChart';
 import { CHART_HEIGHT, buildDisplayCountOptions } from './displayCountPlot';
+import { LoadError, InlineError } from './SectionErrors';
 
 export function GraphSection() {
   const t = useT();
@@ -15,26 +17,16 @@ export function GraphSection() {
   // 起こす）なので、下のチャート再構築effectを言語切替に追従させるには
   // `locale` 自体を依存配列に含める必要がある。
   const locale = useLocale();
-  const [displayStats, setDisplayStats] = useState<DisplayStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // #115: 取得失敗は「データがありません」の空状態と区別してエラー表示＋再試行にする。
+  // 取得はキャンセル付きの共通 hook に任せる（再試行を連打しても古い応答が後勝ちしない）。
+  const load = useAsyncLoad<DisplayStats>(getDisplayStats, 'display stats');
+  const displayStats = load.state.status === 'ready' ? load.state.data : null;
+  const isLoading = load.state.status === 'loading';
+  const loadFailed = load.state.status === 'error';
   const [isResetting, setIsResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
-
-  const loadStats = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      setDisplayStats(await getDisplayStats());
-    } catch (err) {
-      console.error('Failed to load display stats:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadStats();
-  }, [loadStats]);
 
   const handleReset = async () => {
     const ok = await confirmDialog({
@@ -44,14 +36,17 @@ export function GraphSection() {
     if (!ok) return;
 
     setIsResetting(true);
+    setResetError(null);
     try {
       await resetAllDisplayCounts();
-      await loadStats();
     } catch (err) {
       console.error('Failed to reset display counts:', err);
-    } finally {
+      setResetError(t('resetDisplayCountsFailed'));
       setIsResetting(false);
+      return;
     }
+    load.reload();
+    setIsResetting(false);
   };
 
   useEffect(() => {
@@ -92,6 +87,18 @@ export function GraphSection() {
       <div className="p-4 bg-black/30 rounded-lg text-center text-white/50 text-sm">
         {t('loadingLabel')}
       </div>
+    );
+  }
+
+  if (loadFailed) {
+    return (
+      <LoadError
+        onRetry={() => {
+          setResetError(null);
+          load.reload();
+        }}
+        testId="stats-load-error"
+      />
     );
   }
 
@@ -212,6 +219,7 @@ export function GraphSection() {
       >
         {isResetting ? t('resettingLabel') : t('resetDisplayCountsButton')}
       </button>
+      <InlineError message={resetError} testId="stats-reset-error" />
     </div>
   );
 }

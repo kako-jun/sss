@@ -30,6 +30,76 @@ pub fn numbered_file_name(file_name: &OsStr, n: u32) -> OsString {
     name
 }
 
+/// ピック先（書き込み側）の IO エラーを、フロント辞書が原因別の文言へ変換するエラーコードに
+/// 分類する純粋関数（#115。ログ出力は呼び出し側が行う）。
+///
+/// - `pickPermissionDenied`: 権限なし・読み取り専用のファイルシステム（EROFS）
+/// - `pickDiskFull`: 空き容量なし（ENOSPC / Windows の ERROR_DISK_FULL 等は std が `StorageFull` に
+///   写す）・クォータ超過（EDQUOT）。OS の生コードは OS ごとに意味が違うので見ない
+/// - `pickDestinationMissing`: ピック先（またはその親）が見つからない・フォルダでない
+/// - `pickCopyFailed`: その他
+pub fn pick_io_error_code(e: &io::Error) -> &'static str {
+    match e.kind() {
+        io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem => {
+            "pickPermissionDenied"
+        }
+        io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => "pickDiskFull",
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => "pickDestinationMissing",
+        _ => "pickCopyFailed",
+    }
+}
+
+/// 元ファイル（読み取り側）の IO エラーを分類する（#115）。書き込み側の権限エラーと取り違えない。
+/// `imageFileNotFound`（消えた）/ `pickSourceUnreadable`（読み取り権限なし）/ `pickCopyFailed`。
+pub fn pick_source_error_code(e: &io::Error) -> &'static str {
+    match e.kind() {
+        io::ErrorKind::NotFound => "imageFileNotFound",
+        io::ErrorKind::PermissionDenied => "pickSourceUnreadable",
+        _ => "pickCopyFailed",
+    }
+}
+
+/// 失敗の詳細を標準エラーに残し、フロントへ返すコードを `String` にする。
+fn fail(stage: &str, e: &io::Error, code: &'static str) -> String {
+    eprintln!("pick_image: {stage} failed ({code}): {e}");
+    code.to_string()
+}
+
+/// ピック先フォルダを（無ければ親ごと）作る。失敗は原因別のコードで返す（#115）。
+pub fn ensure_pick_dir(dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| fail("create_dir_all", &e, create_dir_error_code(&e)))
+}
+
+/// `create_dir_all` の失敗を分類する純粋関数。ピック先のパスの途中にファイルが居座っている場合、
+/// Windows は `AlreadyExists`（os error 183）、Unix は `NotADirectory` を返す。どちらも
+/// 「ピック先として使えない」＝`pickDestinationMissing` で同じ扱いにする（OS 非依存でテストできる）。
+pub fn create_dir_error_code(e: &io::Error) -> &'static str {
+    if e.kind() == io::ErrorKind::AlreadyExists {
+        "pickDestinationMissing"
+    } else {
+        pick_io_error_code(e)
+    }
+}
+
+/// コピー元が存在し読み取れる状態かを確認する（#115）。親ディレクトリの権限エラーを
+/// 「存在しない」と取り違えず、`pickSourceUnreadable` に分類する（`Path::exists` は権限エラーも
+/// false にしてしまう）。
+pub fn check_source_exists(source: &Path) -> Result<(), String> {
+    fs::metadata(source)
+        .map(|_| ())
+        .map_err(|e| fail("stat source", &e, pick_source_error_code(&e)))
+}
+
+/// `fs::copy` の失敗を分類する。宛先は予約済み・元ファイルは事前に開けているので、ここでの
+/// NotFound は「確認後に元ファイルが消えた」。それ以外は書き込み側（容量・権限）として扱う。
+fn copy_failure_code(e: &io::Error) -> &'static str {
+    if e.kind() == io::ErrorKind::NotFound {
+        "imageFileNotFound"
+    } else {
+        pick_io_error_code(e)
+    }
+}
+
 /// `source` を `dest_dir` にコピーし、実際に作られたパスを返す。
 ///
 /// 同名ファイルが既にある場合は `name_1.ext`, `name_2.ext` ... と連番を付ける。以前は
@@ -47,12 +117,18 @@ pub fn numbered_file_name(file_name: &OsStr, n: u32) -> OsString {
 pub fn copy_with_unique_name(source: &Path, dest_dir: &Path) -> Result<PathBuf, String> {
     let file_name = source.file_name().ok_or("Failed to get file name")?;
 
+    // 先に元ファイルを開けるか確認し、読み取り側の失敗（消えた・読み取り権限なし）を、
+    // 書き込み側の失敗（ピック先の権限・容量）と区別できるようにする（#115）。
+    if let Err(e) = fs::File::open(source) {
+        return Err(fail("open source", &e, pick_source_error_code(&e)));
+    }
+
     for n in 0..=MAX_COLLISION_INDEX {
         let dest = dest_dir.join(numbered_file_name(file_name, n));
         match OpenOptions::new().write(true).create_new(true).open(&dest) {
             Ok(reserved) => drop(reserved),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(format!("Failed to copy file: {e}")),
+            Err(e) => return Err(fail("reserve destination", &e, pick_io_error_code(&e))),
         }
         return match fs::copy(source, &dest) {
             Ok(_) => {
@@ -61,7 +137,7 @@ pub fn copy_with_unique_name(source: &Path, dest_dir: &Path) -> Result<PathBuf, 
             }
             Err(e) => {
                 let _ = fs::remove_file(&dest);
-                Err(format!("Failed to copy file: {e}"))
+                Err(fail("copy", &e, copy_failure_code(&e)))
             }
         };
     }
@@ -220,6 +296,162 @@ pub fn resolve_open_target(
 mod tests {
     use super::*;
 
+    #[test]
+    fn pick_io_error_code_classifies_causes() {
+        use std::io::{Error, ErrorKind};
+        let code = |kind| pick_io_error_code(&Error::from(kind));
+        assert_eq!(code(ErrorKind::PermissionDenied), "pickPermissionDenied");
+        assert_eq!(code(ErrorKind::ReadOnlyFilesystem), "pickPermissionDenied");
+        assert_eq!(code(ErrorKind::StorageFull), "pickDiskFull");
+        assert_eq!(code(ErrorKind::QuotaExceeded), "pickDiskFull");
+        assert_eq!(code(ErrorKind::NotFound), "pickDestinationMissing");
+        assert_eq!(code(ErrorKind::NotADirectory), "pickDestinationMissing");
+        assert_eq!(code(ErrorKind::Other), "pickCopyFailed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pick_io_error_code_maps_enospc_via_std_kind() {
+        // ENOSPC(28) は std が StorageFull に写す。生コードを自前で見なくても容量不足と分かる。
+        assert_eq!(
+            pick_io_error_code(&io::Error::from_raw_os_error(28)),
+            "pickDiskFull"
+        );
+    }
+
+    #[test]
+    fn pick_source_error_code_separates_read_side_from_write_side() {
+        use std::io::{Error, ErrorKind};
+        let code = |kind| pick_source_error_code(&Error::from(kind));
+        assert_eq!(code(ErrorKind::NotFound), "imageFileNotFound");
+        assert_eq!(code(ErrorKind::PermissionDenied), "pickSourceUnreadable");
+        assert_eq!(code(ErrorKind::Other), "pickCopyFailed");
+    }
+
+    #[test]
+    fn copy_failure_code_treats_not_found_as_source_vanished() {
+        use std::io::{Error, ErrorKind};
+        assert_eq!(
+            copy_failure_code(&Error::from(ErrorKind::NotFound)),
+            "imageFileNotFound"
+        );
+        assert_eq!(
+            copy_failure_code(&Error::from(ErrorKind::StorageFull)),
+            "pickDiskFull"
+        );
+        assert_eq!(
+            copy_failure_code(&Error::from(ErrorKind::PermissionDenied)),
+            "pickPermissionDenied"
+        );
+    }
+
+    #[test]
+    fn check_source_exists_distinguishes_missing_from_ok() {
+        let dir = workspace("check_source");
+        let f = dir.join("a.jpg");
+        fs::write(&f, b"x").unwrap();
+        assert_eq!(check_source_exists(&f), Ok(()));
+        assert_eq!(
+            check_source_exists(&dir.join("nope.jpg")),
+            Err("imageFileNotFound".to_string())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn check_source_exists_reports_unreadable_parent_as_source_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = workspace("check_parent");
+        let sub = dir.join("locked");
+        fs::create_dir_all(&sub).unwrap();
+        let f = sub.join("a.jpg");
+        fs::write(&f, b"x").unwrap();
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o000)).unwrap();
+        // root は権限を無視するので、その場合は検証できない
+        if fs::metadata(&f).is_err() {
+            assert_eq!(
+                check_source_exists(&f),
+                Err("pickSourceUnreadable".to_string())
+            );
+        }
+        let _ = fs::set_permissions(&sub, fs::Permissions::from_mode(0o755));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_dir_error_code_is_os_independent() {
+        use std::io::{Error, ErrorKind};
+        let code = |kind| create_dir_error_code(&Error::from(kind));
+        // Windows はファイルが居座っていると AlreadyExists、Unix は NotADirectory
+        assert_eq!(code(ErrorKind::AlreadyExists), "pickDestinationMissing");
+        assert_eq!(code(ErrorKind::NotADirectory), "pickDestinationMissing");
+        assert_eq!(code(ErrorKind::NotFound), "pickDestinationMissing");
+        assert_eq!(code(ErrorKind::PermissionDenied), "pickPermissionDenied");
+        assert_eq!(code(ErrorKind::StorageFull), "pickDiskFull");
+        assert_eq!(code(ErrorKind::Other), "pickCopyFailed");
+    }
+
+    #[test]
+    fn ensure_pick_dir_reports_a_destination_problem_as_a_code() {
+        let dir = workspace("ensure_dir");
+        fs::write(dir.join("file"), b"x").unwrap();
+        // ファイルの下にはフォルダを作れない（ピック先として使えない）
+        assert_eq!(
+            ensure_pick_dir(&dir.join("file").join("sub")),
+            Err("pickDestinationMissing".to_string())
+        );
+        assert_eq!(ensure_pick_dir(&dir.join("ok").join("nested")), Ok(()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_source_is_reported_as_source_side_not_destination_permission() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = workspace("unreadable");
+        let dest = dir.join("picked");
+        fs::create_dir_all(&dest).unwrap();
+        let src = dir.join("a.jpg");
+        fs::write(&src, b"x").unwrap();
+        fs::set_permissions(&src, fs::Permissions::from_mode(0o000)).unwrap();
+        // root は権限を無視して開けてしまうので、その場合は検証できない
+        if fs::File::open(&src).is_err() {
+            assert_eq!(
+                copy_with_unique_name(&src, &dest),
+                Err("pickSourceUnreadable".to_string())
+            );
+            assert_eq!(fs::read_dir(&dest).unwrap().count(), 0);
+        }
+        let _ = fs::set_permissions(&src, fs::Permissions::from_mode(0o644));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unwritable_destination_is_reported_as_destination_permission() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = workspace("unwritable");
+        let dest = dir.join("picked");
+        fs::create_dir_all(&dest).unwrap();
+        let src = dir.join("a.jpg");
+        fs::write(&src, b"x").unwrap();
+        fs::set_permissions(&dest, fs::Permissions::from_mode(0o555)).unwrap();
+        if OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(dest.join("probe"))
+            .is_err()
+        {
+            assert_eq!(
+                copy_with_unique_name(&src, &dest),
+                Err("pickPermissionDenied".to_string())
+            );
+        }
+        let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o755));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     fn workspace(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("sss_pick_{tag}_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -284,7 +516,10 @@ mod tests {
         let dir = workspace("missing");
         let dest = dir.join("picked");
         fs::create_dir_all(&dest).unwrap();
-        assert!(copy_with_unique_name(&dir.join("nope.jpg"), &dest).is_err());
+        assert_eq!(
+            copy_with_unique_name(&dir.join("nope.jpg"), &dest),
+            Err("imageFileNotFound".to_string())
+        );
         assert_eq!(fs::read_dir(&dest).unwrap().count(), 0);
         let _ = fs::remove_dir_all(&dir);
     }

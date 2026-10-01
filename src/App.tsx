@@ -17,6 +17,7 @@ import {
   getOsLocale,
 } from './lib/tauri';
 import { runStartupSequence } from './lib/startup';
+import { subscribeFailureNotice } from './lib/failureNotice';
 import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
 import { X, Settings as SettingsIcon, Minimize2, Maximize2, Keyboard } from 'lucide-react';
@@ -93,6 +94,15 @@ function App() {
   const [windowModeError, setWindowModeError] = useState<{ text: string; seq: number } | null>(
     null,
   );
+  // #115: 起動時に続行できない失敗（前回フォルダの取得失敗など）。ようこそ画面に見せず、再試行できる案内にする。
+  const [startupFailure, setStartupFailure] = useState<'lastDirectory' | 'initialize' | null>(null);
+  // 非同期コールバック/一度だけ登録するリスナーから、常に現在のロケールで文言を引くための参照。
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  });
+  // 起動時の設定取得失敗。読み込み中画面の間にトーストが消えないよう、表示可能になってから通知する。
+  const [startupSettingsFailed, setStartupSettingsFailed] = useState(false);
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
   const overlayRef = useRef<OverlayUIHandle>(null);
   const { isIdle, setIsHovering, resetIdle } = useMouseIdle(3000);
@@ -185,6 +195,43 @@ function App() {
     };
   }, []);
 
+  // 起動シーケンス（前回状態の復元→可能なら即表示、スキャンはバックグラウンド）を走らせる。
+  // 初回の起動と、起動失敗の案内画面の「再試行」の両方から呼ぶ（#115）。
+  const startSequence = () => {
+    runStartupSequence({
+      getSetting,
+      getLastDirectoryPath,
+      restorePlaylist,
+      rescanLastDirectory,
+      initialize,
+      listenScanProgress: (cb) =>
+        listen<{ current: number; total: number }>('scan-progress', (event) => cb(event.payload)),
+      setInitStatus,
+      setRealtimeProgress,
+      setIsInitialized,
+      setDisplayInterval: (ms) => setDisplayInterval(clampDisplayInterval(ms)),
+      setVideoAudioEnabled,
+      setVideoMaxDurationSec: (sec) => setVideoMaxDurationSec(normalizeVideoMaxDuration(sec)),
+      updatePlaylistInfo,
+      setHasDirectory,
+      onStartupFailure: (kind) => {
+        // #115: 設定の取得失敗は既定値で続行して上部の通知で伝え、前回フォルダの取得失敗など
+        // 続行できない失敗は「ようこそ」にせず、再試行できる案内画面にする。
+        if (kind === 'settings') {
+          setStartupSettingsFailed(true);
+        } else {
+          setStartupFailure(kind);
+        }
+      },
+      onDirectoryError: (err, directory) => {
+        // #82レビューshould1: ここでは文言に確定させず、raw文字列のまま
+        // 保持する（表示側で毎レンダー`resolveStartupDirectoryError`にかける）。
+        const raw = err instanceof Error ? err.message : String(err);
+        setDirectoryError({ raw, directory });
+      },
+    });
+  };
+
   // 初期化（React Strict Modeで2回実行されるのを防ぐ）
   useEffect(() => {
     if (initRef.current) {
@@ -209,31 +256,7 @@ function App() {
         // #62レビューS1: 起動時の初期化シーケンス（前回状態の復元→可能なら即表示、
         // スキャンはバックグラウンド）は React から切り離した純粋関数に委譲する
         // （src/lib/startup.ts。単体テストしやすくするため）。
-        runStartupSequence({
-          getSetting,
-          getLastDirectoryPath,
-          restorePlaylist,
-          rescanLastDirectory,
-          initialize,
-          listenScanProgress: (cb) =>
-            listen<{ current: number; total: number }>('scan-progress', (event) =>
-              cb(event.payload),
-            ),
-          setInitStatus,
-          setRealtimeProgress,
-          setIsInitialized,
-          setDisplayInterval: (ms) => setDisplayInterval(clampDisplayInterval(ms)),
-          setVideoAudioEnabled,
-          setVideoMaxDurationSec: (sec) => setVideoMaxDurationSec(normalizeVideoMaxDuration(sec)),
-          updatePlaylistInfo,
-          setHasDirectory,
-          onDirectoryError: (err, directory) => {
-            // #82レビューshould1: ここでは文言に確定させず、raw文字列のまま
-            // 保持する（表示側で毎レンダー`resolveStartupDirectoryError`にかける）。
-            const raw = err instanceof Error ? err.message : String(err);
-            setDirectoryError({ raw, directory });
-          },
-        });
+        startSequence();
       });
     }, 0);
 
@@ -242,6 +265,35 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!startupSettingsFailed || !isInitialized) return;
+    setStartupSettingsFailed(false);
+    setWindowModeError((prev) => ({
+      text: tRef.current('startupSettingsLoadFailed'),
+      seq: (prev?.seq ?? 0) + 1,
+    }));
+  }, [startupSettingsFailed, isInitialized]);
+
+  // #115: セクションがアンマウントされた後の保存失敗など、画面内に出せない失敗を上部の通知で伝える。
+  useEffect(
+    () =>
+      subscribeFailureNotice((key) =>
+        setWindowModeError((prev) => ({ text: tRef.current(key), seq: (prev?.seq ?? 0) + 1 })),
+      ),
+    [],
+  );
+
+  // 既に画像が表示された後に起動シーケンスが失敗した場合（案内カードは画像が無いときだけ出る）は、
+  // 見えないままにせず上部の通知で伝える。
+  useEffect(() => {
+    if (startupFailure !== 'initialize' || !currentImage) return;
+    setStartupFailure(null);
+    setWindowModeError((prev) => ({
+      text: tRef.current('startupInitFailedTitle'),
+      seq: (prev?.seq ?? 0) + 1,
+    }));
+  }, [startupFailure, currentImage]);
+
   // 画像が変わったらプレイリスト情報を更新。復帰できたので古いディレクトリエラーは消す。
   useEffect(() => {
     if (currentImage) {
@@ -249,6 +301,13 @@ function App() {
       setDirectoryError(null);
     }
   }, [currentImage]);
+
+  // 起動失敗の案内画面の「再試行」: 失敗を消して、起動シーケンスをもう一度走らせる（#115）。
+  const retryStartup = () => {
+    setStartupFailure(null);
+    setIsInitialized(false);
+    startSequence();
+  };
 
   const handlePrevious = async () => {
     await loadPreviousImage();
@@ -353,7 +412,8 @@ function App() {
   // #103: 失敗通知は数秒で自動的に消す
   useEffect(() => {
     if (!windowModeError) return;
-    const timer = setTimeout(() => setWindowModeError(null), 5000);
+    // 全文を読み切れるよう、折り返した長い通知（フォールバックの旨など）の分だけ長めに出す。
+    const timer = setTimeout(() => setWindowModeError(null), 8000);
     return () => clearTimeout(timer);
   }, [windowModeError]);
 
@@ -437,6 +497,11 @@ function App() {
           await invoke('exit_app');
         } catch (err) {
           console.error('Failed to exit app:', err);
+          // #115: Esc を押しても何も起きない無反応にせず、上部の通知（#103）で失敗を伝える。
+          setWindowModeError((prev) => ({
+            text: tRef.current('exitFailed'),
+            seq: (prev?.seq ?? 0) + 1,
+          }));
         }
         return;
       }
@@ -551,6 +616,9 @@ function App() {
     // 手動スキャンなのでディレクトリは確定済み。
     setHasDirectory(true);
     setDirectoryError(null);
+    // 設定でフォルダを選び直してスキャンできたなら、起動失敗の案内は役目を終える。
+    // （表示できる画像が0件でも、「前回のフォルダを読み込めませんでした」を出し続けない）
+    setStartupFailure(null);
     await initialize();
     setIsInitialized(true);
     // 設定画面は閉じない（ユーザーが結果を確認できるように）
@@ -576,7 +644,18 @@ function App() {
     title: string;
     subtitle: string;
     canContinue?: boolean;
+    canRetry?: boolean;
   } | null => {
+    if (startupFailure !== null) {
+      return {
+        title:
+          startupFailure === 'lastDirectory'
+            ? t('errorLastDirectoryLoadFailed')
+            : t('startupInitFailedTitle'),
+        subtitle: t('startupFailedSubtitle'),
+        canRetry: true,
+      };
+    }
     if (!hasDirectory) {
       return { title: t('welcomeTitle'), subtitle: t('welcomeSubtitle') };
     }
@@ -735,13 +814,13 @@ function App() {
       {windowModeError && (
         // 下部のトースト・操作バー・その他メニューと重ならないよう画面上部に出す。右上のボタン列
         // （約9rem幅）と重ならないよう、右端を空けた枠の中で中央寄せする（#103）。枠自体は
-        // pointer-events-none で写真上のクリック/ホイールを吸わない。切り詰められた全文を
-        // title で読めるよう、通知本体（小さな丸薬）だけ pointer-events-auto にする。
+        // pointer-events-none で写真上のクリック/ホイールを吸わない。長い通知（フォールバックの旨など）は
+        // 切り詰めず折り返して全文を見せる（狭幅でも読める）。通知本体だけ pointer-events-auto にする。
         <div className="fixed top-4 left-4 right-[11rem] z-50 flex justify-center pointer-events-none">
           <div
             role="alert"
             title={windowModeError.text}
-            className="pointer-events-auto max-w-full truncate bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10"
+            className="pointer-events-auto max-w-full whitespace-normal break-words text-center bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-2xl border border-white/10"
           >
             {windowModeError.text}
           </div>
@@ -836,7 +915,7 @@ function App() {
               不自然な位置で折り返っていた。max-w-mdに広げ、`text-balance`
               （Tailwind `text-wrap: balance`）で行の折返し位置を均等にする。 */}
           <div className="text-center max-w-md w-full bg-black/30 backdrop-blur-md border border-white/10 rounded-2xl px-8 py-10">
-            {!hasDirectory && (
+            {!hasDirectory && !startupFailure && (
               <img src={logoBg} alt="" aria-hidden="true" className="w-14 h-14 mx-auto mb-5" />
             )}
             <div className="text-white/85 text-xl font-medium mb-2">{emptyStateContent.title}</div>
@@ -854,6 +933,14 @@ function App() {
               </div>
             )}
             <div className="flex items-center justify-center gap-3">
+              {emptyStateContent.canRetry && (
+                <button
+                  onClick={retryStartup}
+                  className="flex items-center justify-center gap-2 px-6 py-2.5 bg-white/90 hover:bg-white text-black font-medium rounded-lg transition-colors text-sm"
+                >
+                  {t('retryButton')}
+                </button>
+              )}
               {emptyStateContent.canContinue && (
                 // #120: 失敗で止まった時の主操作は「続ける」（失敗セットを空にして次へ）。
                 // 主ボタンは1画面に1つなので、この時の「設定を開く」は標準ボタンにする。
@@ -867,16 +954,20 @@ function App() {
               <button
                 onClick={handleSettings}
                 className={
-                  emptyStateContent.canContinue
+                  emptyStateContent.canContinue || emptyStateContent.canRetry
                     ? 'flex items-center justify-center gap-2 px-6 py-2.5 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded-lg transition-colors text-sm'
                     : 'flex items-center justify-center gap-2 px-6 py-2.5 bg-white/90 hover:bg-white text-black font-medium rounded-lg transition-colors text-sm'
                 }
               >
                 <SettingsIcon size={16} />
-                {hasDirectory ? t('openSettings') : t('selectFolder')}
+                {startupFailure
+                  ? t('chooseAnotherFolder')
+                  : hasDirectory
+                    ? t('openSettings')
+                    : t('selectFolder')}
               </button>
             </div>
-            {!hasDirectory && (
+            {!hasDirectory && !startupFailure && (
               <button
                 type="button"
                 onClick={(e) => {

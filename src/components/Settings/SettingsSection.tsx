@@ -1,31 +1,46 @@
 import { useState, useEffect } from 'react';
 import { getSetting, saveSetting } from '../../lib/tauri';
 import { useT } from '../../lib/i18n';
+import { useRollbackSave } from '../../hooks/useRollbackSave';
+import { InlineError } from './SectionErrors';
 
 export function SettingsSection() {
   const t = useT();
   const [applyExifRotation, setApplyExifRotation] = useState(true);
+  // #115: 取得失敗（既定値表示）と保存失敗（巻き戻し）を利用者に伝える。
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const { saveFailed, save, beginLoad, markLoaded } = useRollbackSave<boolean>(
+    setApplyExifRotation,
+    true,
+    'exifSaveFailed',
+  );
 
   useEffect(() => {
+    let cancelled = false;
+    const token = beginLoad();
     // apply_exif_rotation設定を読み込む
     getSetting('apply_exif_rotation')
       .then((value) => {
+        if (cancelled) return;
+        setLoadFailed(false);
         if (value !== null) {
-          setApplyExifRotation(value === 'true');
+          if (markLoaded(value === 'true', token)) setApplyExifRotation(value === 'true');
         }
       })
       .catch((err) => {
         console.error('Failed to load apply_exif_rotation:', err);
+        if (!cancelled) setLoadFailed(true);
       });
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt, beginLoad, markLoaded]);
 
   const handleExifRotationChange = async (checked: boolean) => {
     setApplyExifRotation(checked);
-    try {
-      await saveSetting('apply_exif_rotation', checked ? 'true' : 'false');
-    } catch (err) {
-      console.error('Failed to save apply_exif_rotation:', err);
-    }
+    const ok = await save(checked, (v) => saveSetting('apply_exif_rotation', v ? 'true' : 'false'));
+    if (ok) setLoadFailed(false);
   };
 
   return (
@@ -43,6 +58,11 @@ export function SettingsSection() {
           {t('exifRotationLabel')}
         </div>
       </label>
+      <InlineError
+        message={saveFailed ? t('exifSaveFailed') : loadFailed ? t('settingLoadFailed') : null}
+        onRetry={!saveFailed && loadFailed ? () => setAttempt((n) => n + 1) : undefined}
+        testId="exif-error"
+      />
     </div>
   );
 }

@@ -39,8 +39,13 @@ describe('ShareDirectorySection (#87)', () => {
     getShareDirectory.mockRejectedValue('boom');
     render(<ShareDirectorySection />);
     expect(await screen.findByRole('alert')).toBeTruthy();
-    expect(screen.getByRole('alert').textContent).toBe('ピック先を読み込めませんでした');
+    expect(screen.getByRole('alert').textContent).toContain('ピック先を読み込めませんでした');
     expect(pathInput().value).toBe('');
+    // 再試行できる(#115)。直ったら通知は消えてパスが出る
+    getShareDirectory.mockResolvedValue('/resolved/picked');
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }));
+    await waitFor(() => expect(pathInput().value).toBe('/resolved/picked'));
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('saves the chosen directory and re-fetches the resolved path', async () => {

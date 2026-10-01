@@ -22,7 +22,27 @@
     '/p/pending.png': '/__e2e_pending.png',
   };
 
-  const sc = (location.hash || '#slides').slice(1);
+  // URL の #hash は `シナリオ名[?クエリ]`。クエリで失敗注入ができる（#115）:
+  //   fail=cmd1,cmd2          指定コマンドを毎回失敗させる（バックエンドの Err(String) 相当の文字列を throw）
+  //   fail=pick_image:pickDiskFull   `コマンド:エラーコード` でバックエンドのエラーコードを指定して失敗させる
+  // 失敗注入を止める（再試行で回復する経路の検証用）には、テスト側で `window.__e2eHealFailures()` を呼ぶ。
+  // （「最初の1回だけ失敗」にしないのは、dev の React StrictMode が mount 時の effect を2回呼ぶため、
+  //   1回目の失敗が捨てられる effect に消費されて検証にならないから。）
+  // 例: #slides?fail=get_ignore_patterns,save_setting
+  const [sc, hashQuery = ''] = (location.hash || '#slides').slice(1).split('?');
+  const hashParams = new URLSearchParams(hashQuery);
+  const parseFailList = (name) =>
+    new Map(
+      (hashParams.get(name) || '')
+        .split(',')
+        .filter(Boolean)
+        .map((entry) => {
+          const i = entry.indexOf(':');
+          return i === -1 ? [entry, null] : [entry.slice(0, i), entry.slice(i + 1)];
+        }),
+    );
+  const failAlways = parseFailList('fail');
+  window.__e2eHealFailures = () => failAlways.clear();
   const log = (window.__e2eLog = []);
 
   // #65レビューM2: 1件だけのプレイリストで同じpathが連続で返るケース（'one'）。
@@ -170,6 +190,8 @@
     convertFileSrc: (p) => media[p] || 'data:,',
     invoke: async (cmd, args) => {
       log.push([Date.now(), cmd, JSON.stringify(args || {}).slice(0, 160)]);
+      // #115: 失敗注入。実際のバックエンドと同じく Err(String) はそのまま文字列で reject される。
+      if (failAlways.has(cmd)) throw failAlways.get(cmd) || `injected failure: ${cmd}`;
       switch (cmd) {
         case 'get_setting':
           // 表示間隔は許容最小値(5秒、constants.tsのMIN_DISPLAY_INTERVAL)を使い、
@@ -348,6 +370,7 @@
           // 実バックエンドは解決済みパス(文字列)を返す。null だと controlled input の警告が出る。
           return '/tmp/sss-picked';
         case 'get_default_share_directory':
+        case 'get_share_directory':
           return '/tmp/sss-picked';
         // #66: 情報タブの表示バージョン（getVersion()、@tauri-apps/api/appが
         // 内部で呼ぶコマンド）。未定義のままだとバージョン表示が空欄のままになる。
