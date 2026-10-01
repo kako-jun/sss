@@ -13,7 +13,8 @@ Dates use `YYYY-MM-DD`.
 
 ### Fixed
 
-- `PickSection.test.tsx` の「requests no thumbnail while every picked item is outside the viewport」が負荷時に偶発失敗していた問題を修正(テスト側の欠陥)。Thumbnail の IntersectionObserver 購読は描画後の非同期 effect なのに、削除ボタンが出た時点で検証して `unstubAllGlobals()` していたため、effect 前に空振りで通過したうえ、後続の cleanup が消えたスタブに当たり `window.IntersectionObserver is not a constructor` で落ちていた。`observe()` の呼び出しを待ち、unmount してからスタブを戻すよう変更。実装側のレースではない (#108)
+- `PickSection.test.tsx` の「requests no thumbnail while every picked item is outside the viewport」が負荷時に偶発失敗していた問題を修正(テスト側の欠陥。同型の `HistorySection.test.tsx` も同様に修正し、`Thumbnail.test.tsx` の `stubGlobal` 解除も try/finally に統一)。Thumbnail の IntersectionObserver 購読は描画後の非同期 effect なのに、削除ボタンが出た時点で検証して `unstubAllGlobals()` していたため、effect 前に空振りで通過したうえ、後続の cleanup が消えたスタブに当たり `window.IntersectionObserver is not a constructor` で落ちていた。`observe()` の呼び出しを待ち、unmount してからスタブを戻すよう変更。実装側のレースではない (#108)
+- オーバーレイの「…」メニュー→「除外」サブメニューが画面下端ではみ出し、最後の項目が viewport 外・操作バー上に重なっていた問題を修正。サブメニューを項目の上端基準(`top-0`)から下端基準(`bottom-0`)で上へ展開するようにし、幅430px以下では親メニューの左に置く余白が無い（親メニュー右端の位置 約231px＋余白4px＋サブ192px＋余白4px＝431px 未満では収まらない。側方展開は親メニュー枠の4px左に揃える）ため、項目の真上（右端揃え）へ重ねて展開する。1920x1080/1280x800/800x600/480x800/431x700/430x700/360x640/360x300/320x568 の実描画で全項目が viewport 内かつ操作バー・右上ボタン群と交差しない(高さ360px以下では項目の縦余白を詰める)ことを確認（幅320pxまで）。実ブラウザ e2e シナリオを追加 (#110)
 - 設定モーダルのタブ行が、タブの内容が長いとき（オプション・情報等、内容の長いタブ）に flex-shrink で潰れ、1280x800 で 39→31px、800x600 で 21px になってラベル下部が切れる不具合を修正。タブ行に `shrink-0` を付け、全タブ・全サイズで高さを一定にした。実ブラウザ e2e に高さ一定の回帰シナリオを追加 (#109)
 - 狭幅（タブ行が横スクロールになる幅）で、タブをクリックしても選択中のタブが見える位置までタブ行がスクロールしなかった問題を修正。選択タブを `scrollIntoView` で追従させた (#109)
 - 日本語の「設定を初期化」ボタンを、英語の "Reset All Data" と同じ意味の「すべてのデータを初期化」に変更。確認ダイアログ・README・ユーザーガイドの破壊範囲の表記を実処理に合わせ、「ピック先フォルダ」の呼称も統一 (#112)

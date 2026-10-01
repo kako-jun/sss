@@ -42,13 +42,7 @@ describe('PickSection thumbnails (#67)', () => {
   });
 
   it('requests no thumbnail while every picked item is outside the viewport', async () => {
-    // #108: Thumbnail は IntersectionObserver の購読を passive effect（描画コミットの後に
-    // 非同期で走る）で張る。以前は「削除ボタンが出た」時点で検証してしまい、effect が
-    // まだ走っていない（＝何も検証していない）うえ、直後の unstubAllGlobals() で
-    // IntersectionObserver が消えた後に afterEach の cleanup が effect を流して
-    // "window.IntersectionObserver is not a constructor" で落ちることがあった（負荷時）。
-    // observe() の呼び出しを「effect が走った」証拠として決定的に待ち、unmount してから
-    // スタブを戻す。
+    // #108: observe() は描画後の effect で呼ばれる。呼び出しを待ってから検証し、unmount してからスタブを戻す。
     const observed: unknown[] = [];
     class NeverVisibleObserver {
       observe(el: unknown) {
@@ -57,12 +51,13 @@ describe('PickSection thumbnails (#67)', () => {
       disconnect() {}
     }
     vi.stubGlobal('IntersectionObserver', NeverVisibleObserver);
-    getPickedImages.mockResolvedValue(['/pick/a.jpg', '/pick/b.jpg']);
+    const picked = ['/pick/a.jpg', '/pick/b.jpg'];
+    getPickedImages.mockResolvedValue(picked);
 
     const { unmount } = render(<PickSection />);
     try {
-      await waitFor(() => expect(screen.getAllByTitle('削除').length).toBe(2));
-      await waitFor(() => expect(observed.length).toBe(2));
+      await waitFor(() => expect(screen.getAllByTitle('削除').length).toBe(picked.length));
+      await waitFor(() => expect(observed.length).toBe(picked.length));
 
       expect(getThumbnail).not.toHaveBeenCalled();
     } finally {

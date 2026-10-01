@@ -86,13 +86,17 @@ describe('Thumbnail (#67)', () => {
     vi.stubGlobal('IntersectionObserver', FakeObserver);
     getThumbnail.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/x.jpg' });
 
-    const { container } = render(<Thumbnail path="/photos/a.jpg" />);
-    expect(getThumbnail).not.toHaveBeenCalled();
+    const { container, unmount } = render(<Thumbnail path="/photos/a.jpg" />);
+    try {
+      expect(getThumbnail).not.toHaveBeenCalled();
 
-    trigger([{ isIntersecting: true }]);
-    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
-    expect(getThumbnail).toHaveBeenCalledTimes(1);
-    vi.unstubAllGlobals();
+      trigger([{ isIntersecting: true }]);
+      await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+      expect(getThumbnail).toHaveBeenCalledTimes(1);
+    } finally {
+      unmount();
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -219,14 +223,18 @@ describe('Thumbnail labels (#67)', () => {
     vi.stubGlobal('IntersectionObserver', FakeObserver);
     getThumbnail.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/x.jpg' });
 
-    const { container } = render(<Thumbnail path="/photos/a.jpg" />);
-    act(() => trigger([{ isIntersecting: false }]));
-    expect(getThumbnail).not.toHaveBeenCalled();
+    const { container, unmount } = render(<Thumbnail path="/photos/a.jpg" />);
+    try {
+      act(() => trigger([{ isIntersecting: false }]));
+      expect(getThumbnail).not.toHaveBeenCalled();
 
-    act(() => trigger([{ isIntersecting: true }]));
-    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
-    expect(getThumbnail).toHaveBeenCalledTimes(1);
-    expect(observed.disconnect).toBeGreaterThan(0);
-    vi.unstubAllGlobals();
+      act(() => trigger([{ isIntersecting: true }]));
+      await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+      expect(getThumbnail).toHaveBeenCalledTimes(1);
+      expect(observed.disconnect).toBeGreaterThan(0);
+    } finally {
+      unmount();
+      vi.unstubAllGlobals();
+    }
   });
 });

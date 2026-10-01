@@ -1932,6 +1932,102 @@ const scenarios = [
       };
     },
   },
+  {
+    // #110: 「…」メニュー→「除外」サブメニューの3項目が、どの画面サイズでも
+    // viewport内に収まり、操作バーと交差しない（以前は top-0 で下へ伸びて
+    // 最後の項目が viewport を超え、バーに重なっていた）。
+    name: 'exclude submenu stays inside the viewport and clear of the bar (#110)',
+    hash: 'slides',
+    async run(page) {
+      await wakeFromIdle(page);
+      // 言語非依存: 「…」ボタンと除外トリガーは aria-haspopup="menu" で拾い、
+      // サブメニューは除外トリガーの直後の兄弟要素、親メニューはその祖先で辿る。
+      await page.locator('button[aria-haspopup="menu"]').first().click();
+      await page.waitForTimeout(300);
+      await page.locator('button[aria-haspopup="menu"]').nth(1).click();
+      await page.waitForTimeout(400);
+      const details = [];
+      let pass = true;
+      for (const [w, h] of [
+        [1920, 1080],
+        [1280, 800],
+        [800, 600],
+        [480, 800],
+        [431, 700],
+        [430, 700],
+        [360, 640],
+        [360, 300],
+        [320, 568],
+      ]) {
+        await page.setViewportSize({ width: w, height: h });
+        await page.waitForTimeout(300);
+        const m = await page.evaluate(() => {
+          const rect = (e) => e.getBoundingClientRect();
+          const triggers = [...document.querySelectorAll('button[aria-haspopup="menu"]')];
+          const dots = triggers[0];
+          const trigger = triggers[1];
+          const sub = trigger && trigger.nextElementSibling;
+          if (!sub || sub.children.length !== 3) return null;
+          const rs = [...sub.children].map(rect);
+          const parent = rect(trigger.parentElement.parentElement);
+          let bar = dots;
+          while (bar && getComputedStyle(bar).position !== 'fixed') bar = bar.parentElement;
+          const b = rect(bar);
+          const hits = (box) =>
+            rs.some(
+              (r) =>
+                r.bottom > box.top &&
+                r.top < box.bottom &&
+                r.right > box.left &&
+                r.left < box.right,
+            );
+          // 右上のボタン群（ピル）。表示中のものすべてと交差しないこと。
+          const pills = [...document.querySelectorAll('div.fixed.top-4.right-4')]
+            .map(rect)
+            .filter((p) => p.width > 0 && p.height > 0);
+          return {
+            top: Math.min(...rs.map((r) => r.top)),
+            bottom: Math.max(...rs.map((r) => r.bottom)),
+            left: Math.min(...rs.map((r) => r.left)),
+            right: Math.max(...rs.map((r) => r.right)),
+            barTop: b.top,
+            parentTop: parent.top,
+            parentBottom: parent.bottom,
+            parentLeft: parent.left,
+            subRight: rect(sub).right,
+            scrollable: sub.scrollHeight > sub.clientHeight,
+            hitsBar: hits(b),
+            hitsPill: pills.some(hits),
+            vh: innerHeight,
+            vw: innerWidth,
+          };
+        });
+        // 側方展開（親メニューの左）では、右端が親メニュー枠に食い込まない。
+        // 積み重ね展開（幅430px以下）では対象外。
+        const sideBySide = !!m && m.subRight <= m.parentLeft - 2;
+        const stacked = !!m && !sideBySide;
+        const ok =
+          !!m &&
+          m.top >= 0 &&
+          m.left >= 0 &&
+          m.bottom <= m.vh &&
+          m.right <= m.vw &&
+          !m.hitsBar &&
+          !m.hitsPill &&
+          // 縦スクロール不要（border 分の数pxでも溢れさせない）
+          !m.scrollable &&
+          // 親メニューの縦範囲から大きく外れない（下へ突き抜けない／上へ離れすぎない）
+          m.bottom <= m.parentBottom + 4 &&
+          m.top >= m.parentTop - 60 &&
+          (w <= 430 ? stacked || sideBySide : sideBySide);
+        if (!ok) pass = false;
+        details.push(
+          `${w}x${h}:${ok ? 'ok' : 'NG'}(${m ? `left=${Math.round(m.left)} right=${Math.round(m.right)} subRight=${Math.round(m.subRight)} top=${Math.round(m.top)} bottom=${Math.round(m.bottom)} parent=${Math.round(m.parentTop)}-${Math.round(m.parentBottom)} parentLeft=${Math.round(m.parentLeft)} barTop=${Math.round(m.barTop)} pill=${m.hitsPill} scrollable=${m.scrollable}` : 'items missing'})`,
+        );
+      }
+      return { pass, detail: details.join(' ') };
+    },
+  },
 ];
 
 /**
