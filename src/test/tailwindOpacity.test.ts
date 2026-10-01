@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
 import resolveConfig from 'tailwindcss/resolveConfig';
@@ -17,7 +17,7 @@ const SRC_DIR = join(ROOT, 'src');
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function loadUserConfig(): Promise<any> {
-  return (await import(/* @vite-ignore */ CONFIG_PATH)).default;
+  return (await import(/* @vite-ignore */ pathToFileURL(CONFIG_PATH).href)).default;
 }
 
 // content を raw 文字列にして、渡した設定で `@tailwind utilities` を処理する。
@@ -48,7 +48,7 @@ describe('tailwind opacity 設定の解決 (#99)', () => {
 });
 
 describe('tailwind CSS 生成 (#99)', () => {
-  const classes = 'opacity-2 bg-white/8 border-white/8';
+  const classes = 'opacity-2 opacity-50 bg-white/8 border-white/8';
 
   it('現行設定で .opacity-2 が opacity: 0.02 として生成される', async () => {
     const css = await generateCss(await loadUserConfig(), classes);
@@ -66,6 +66,7 @@ describe('tailwind CSS 生成 (#99)', () => {
     const { opacity: _opacity, ...extendWithoutOpacity } = config.theme.extend;
     void _opacity;
     const css = await generateCss({ ...config, theme: { extend: extendWithoutOpacity } }, classes);
+    expect(css).toMatch(/\.opacity-50\s*\{/);
     expect(css).not.toMatch(/\.opacity-2\s*\{/);
     expect(css).not.toMatch(/\.bg-white\\\/8\s*\{/);
   });
@@ -88,11 +89,12 @@ function listSourceFiles(dir: string): string[] {
 // 先頭の hover: / group-hover: 等のバリアントは読み飛ばす。
 const OPACITY_CLASS_RE = new RegExp(
   '(?<![\\w-])(?:[\\w-]+:)*' +
-    '(?:(opacity-(\\d+))|((?:bg|text|border|ring|from|to|via|fill|stroke|divide|outline|shadow)-[\\w-]+\\/(\\d+)))' +
+    '(?:(opacity-(\\d+))|((?:bg|text|border|ring|from|to|via|fill|stroke|divide|outline|shadow|accent|caret|decoration|placeholder)-[\\w-]+\\/(\\d+)))' +
     '(?![\\w\\[./-])',
   'g',
 );
 
+// 限界: 文字列リテラルとして直接書かれたクラスのみ走査する。clsx 等で動的に組み立てたクラスと .css は対象外。
 describe('ソース中の未登録 opacity クラス検出 (#66/#99 再発防止)', () => {
   it('src の opacity-N / 色/N は既定5刻みか theme.opacity 登録値のみ', async () => {
     const resolved = resolveConfig(await loadUserConfig());
