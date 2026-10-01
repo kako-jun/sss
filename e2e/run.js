@@ -28,7 +28,7 @@ import net from 'node:net';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, '..');
-const PORT = 1420;
+const PORT = Number(process.env.E2E_PORT) || 1420;
 const BASE_URL = `http://localhost:${PORT}`;
 const INIT_SCRIPT = path.join(__dirname, 'init.js');
 
@@ -1931,6 +1931,11 @@ const scenarios = [
         [1280, 800],
         [800, 600],
         [480, 800],
+        [421, 700],
+        [420, 700],
+        [360, 640],
+        [360, 300],
+        [320, 568],
       ]) {
         await page.setViewportSize({ width: w, height: h });
         await page.waitForTimeout(300);
@@ -1944,12 +1949,18 @@ const scenarios = [
           while (bar && getComputedStyle(bar).position !== 'fixed') bar = bar.parentElement;
           const rs = items.map(rect);
           const b = rect(bar);
+          // 親メニュー（「ピックを見る」ボタンを含む箱）との縦の位置関係用
+          const pm = [...document.querySelectorAll('button')]
+            .find((x) => /^(ピックを見る)$/.test(x.textContent.trim()))
+            .parentElement.getBoundingClientRect();
           return {
             top: Math.min(...rs.map((r) => r.top)),
             bottom: Math.max(...rs.map((r) => r.bottom)),
             left: Math.min(...rs.map((r) => r.left)),
             right: Math.max(...rs.map((r) => r.right)),
             barTop: b.top,
+            parentTop: pm.top,
+            parentBottom: pm.bottom,
             hitsBar: rs.some(
               (r) => r.bottom > b.top && r.top < b.bottom && r.right > b.left && r.left < b.right,
             ),
@@ -1958,7 +1969,15 @@ const scenarios = [
           };
         }, labels);
         const ok =
-          !!m && m.top >= 0 && m.left >= 0 && m.bottom <= m.vh && m.right <= m.vw && !m.hitsBar;
+          !!m &&
+          m.top >= 0 &&
+          m.left >= 0 &&
+          m.bottom <= m.vh &&
+          m.right <= m.vw &&
+          !m.hitsBar &&
+          // 親メニューの縦範囲から大きく外れない（下へ突き抜けない／上へ離れすぎない）
+          m.bottom <= m.parentBottom + 4 &&
+          m.top >= m.parentTop - 60;
         if (!ok) pass = false;
         details.push(
           `${w}x${h}:${ok ? 'ok' : 'NG'}(${m ? `top=${Math.round(m.top)} bottom=${Math.round(m.bottom)} barTop=${Math.round(m.barTop)}` : 'items missing'})`,

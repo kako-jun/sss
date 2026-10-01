@@ -662,7 +662,11 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                       {t('viewPicks')}
                     </button>
 
-                    {/* 除外サブメニュー。親メニューは操作バーの上に出るので、`top-0`（項目の上端基準で下へ伸ばす）だと最後の項目の下へはみ出して画面外・操作バーに重なる。`bottom-0`（項目の下端基準で上へ伸ばす）にして親メニューの縦範囲内に収める (#110) */}
+                    {/* 除外サブメニュー (#110)。親メニューは操作バーの上に出るので、
+                        `top-0`（項目の上端基準で下へ伸ばす）だと最後の項目が画面外・
+                        操作バーへはみ出す。広い画面では項目の下端基準（`bottom-0`）で
+                        親メニューの左へ、幅420px以下では親メニューの左に置く余白が
+                        無い（208+192+4px > 画面幅）ので、項目の真上（右端揃え）へ重ねて展開する。 */}
                     <div className="relative">
                       <button
                         onClick={() => setShowExcludeSubmenu(!showExcludeSubmenu)}
@@ -676,7 +680,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                         <ChevronLeft size={12} className="ml-auto" />
                       </button>
                       {showExcludeSubmenu && (
-                        <div className="absolute right-full bottom-0 mr-1 bg-black/90 rounded-xl shadow-2xl border border-white/10 p-1.5 space-y-0.5 w-48 z-50 backdrop-blur-md">
+                        <div className="absolute right-full bottom-0 mr-1 max-[420px]:right-0 max-[420px]:bottom-full max-[420px]:mr-0 max-[420px]:mb-1 bg-black/90 rounded-xl shadow-2xl border border-white/10 p-1.5 space-y-0.5 w-48 z-50 backdrop-blur-md">
                           <button
                             onClick={() => handleExclude('date')}
                             onMouseDown={guardButtonMouseDown}

@@ -348,7 +348,11 @@ The overlay "…" menu opens upward from the floating bar, so its nested Exclude
 submenu is anchored by its **bottom** edge (`absolute right-full bottom-0`), not
 `top-0`: it is opened from the last row of the parent menu, and growing downward
 from there would run past the viewport and over the bar (#110). Any new nested
-submenu opened from a bottom-anchored menu follows the same rule.
+submenu opened from a bottom-anchored menu follows the same rule. At viewport
+width <= 420px there is no room left of the parent (208 + 192 + 4px > width), so
+the submenu instead stacks directly above the Exclude row, right-aligned with the
+parent (`max-[420px]:right-0 max-[420px]:bottom-full`). Verified in a real browser
+down to 320px wide.
 
 ### Hover-reveal Controls (#66)
 
