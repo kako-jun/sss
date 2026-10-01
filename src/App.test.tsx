@@ -923,3 +923,59 @@ describe('App mouse gestures on the photo (#78)', () => {
     expect(getNextImage).not.toHaveBeenCalled();
   });
 });
+
+// #103: capability 不足などで setFullscreen/setDecorations が拒否されても、ボタン
+// （とF/F11）が無反応にならず、ユーザーへ失敗を通知する。表示はOSの実態に再同期する。
+describe('App window mode toggle failure notice (#103)', () => {
+  it('shows an alert and keeps the displayed mode consistent when setFullscreen rejects', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    win.isFullscreen.mockReset().mockResolvedValue(true);
+    win.setFullscreen.mockReset().mockRejectedValue(new Error('not allowed'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toBe(
+        'ウィンドウモードを切り替えられませんでした',
+      );
+    });
+    // 切替に失敗したので表示は元のまま（OSの実態=フルスクリーン）
+    expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
+    expect(win.setDecorations).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('also shows the alert for the F key and clears it after a successful toggle', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    win.isFullscreen.mockReset().mockResolvedValue(true);
+    win.setFullscreen
+      .mockReset()
+      .mockRejectedValueOnce(new Error('denied'))
+      .mockResolvedValue(undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+    expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
+    errorSpy.mockRestore();
+  });
+});

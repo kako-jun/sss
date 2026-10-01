@@ -7,6 +7,10 @@ Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+### Fixed
+
+- 右上のウィンドウモード切替ボタン（F/F11 キー含む）が何も起こさなかった問題を修正。capability に `core:window:allow-set-fullscreen`・`allow-set-decorations` が無く呼び出しが拒否されていた。同じく `core:default` に含まれないウィンドウタイトル更新用の `allow-set-title` も追加（#80 のタイトル切替が実機で効いていなかった可能性）。切替に失敗した場合は無反応にせず画面下に通知を出し、表示をOSの実態に再同期する。権限の不足・過剰を静的に検出する回帰テストを追加 (#103)
+
 ## [1.1.0] - 2026-10-01
 
 ### Added

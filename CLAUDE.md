@@ -574,7 +574,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 ## セキュリティ設計
 
-- **capability**（`src-tauri/capabilities/main.json`）: `core:default`・`opener:allow-open-url`（`https://*` のみ）・`process:allow-exit` だけ。ファイル読み書きはすべて自前の Tauri コマンド経由で `plugin-fs` は使わない。フォルダ選択ダイアログは Rust 側で開くため `dialog:*` 権限は付与しない（#93。JS から `plugin:dialog|*` は呼べない）
+- **capability**（`src-tauri/capabilities/main.json`）: `core:default`・`core:window:allow-set-fullscreen`/`allow-set-decorations`/`allow-set-title`（ウィンドウモード切替とタイトル更新。`core:default` には含まれず、無いと呼び出しが黙って拒否されてボタンが無反応になる #103）・`opener:allow-open-url`（`https://*` のみ）・`process:allow-exit` だけ。ウィンドウ状態の保存復元（`tauri-plugin-window-state`）は Rust 側のみで JS から呼ばないため権限不要。`src/lib/capabilities.test.ts` が src 内のウィンドウ API/プラグイン import と main.json を突き合わせて権限の不足・過剰を検出する（新しいウィンドウ API を使う時は同ファイルの対応表と main.json を更新する）。切替失敗時は画面下に `role="alert"` の通知を出す。ファイル読み書きはすべて自前の Tauri コマンド経由で `plugin-fs` は使わない。フォルダ選択ダイアログは Rust 側で開くため `dialog:*` 権限は付与しない（#93。JS から `plugin:dialog|*` は呼べない）
 - **CSP**（`tauri.conf.json`）: `default-src 'self'`。`img-src` は `'self' asset: https://asset.localhost https://tile.openstreetmap.org data:`、`media-src` は `'self' asset: https://asset.localhost`、`connect-src` は `'self' ipc: http://ipc.localhost https://ipc.localhost`
 - **asset scope**: `tauri.conf.json` の静的 scope は空。キャッシュ・ピック先・スキャン履歴のフォルダ・スキャン対象を、起動時と `select_and_scan`/`rescan_last_directory`/`restore_playlist`/`select_share_directory`/`pick_image` で `sanitize_allow_dir`（相対パス・存在しないパス・ルート等を拒否）を通してから動的に許可する
 - **管理下パス**（#87・#92）: `pick_image`・`get_thumbnail`（静止画）・`open_in_explorer`・`exclude_image`・`undo_exclude` は、DB登録済み（またはピックフォルダ内）のメディアファイルだけを対象にする。ピック先の設定値もルート・ホーム・システム領域などを拒否する

@@ -14,6 +14,7 @@ export const en = {
   switchToFullscreen: 'Switch to fullscreen',
   windowModeLabel: 'Windowed',
   fullscreenLabel: 'Fullscreen',
+  windowModeToggleFailed: "Couldn't switch window mode",
   genericErrorTitle: 'Something went wrong',
   closeTooltip: 'Close',
 

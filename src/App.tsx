@@ -87,6 +87,8 @@ function App() {
   const [directoryError, setDirectoryError] = useState<{ raw: string; directory: string } | null>(
     null,
   );
+  // #103: ウィンドウモード切替の失敗通知（権限不足等で setFullscreen が拒否されても無反応にしない）
+  const [windowModeError, setWindowModeError] = useState<string | null>(null);
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
   const overlayRef = useRef<OverlayUIHandle>(null);
   const { isIdle, setIsHovering, resetIdle } = useMouseIdle(3000);
@@ -324,10 +326,25 @@ function App() {
       // フルスクリーン時は decorations を非表示に戻す
       await win.setDecorations(!next);
       setIsFullscreen(next);
+      setWindowModeError(null);
     } catch (err) {
       console.error('Failed to toggle window mode:', err);
+      setWindowModeError(t('windowModeToggleFailed'));
+      // 片方だけ成功した場合に表示とOSの実態がずれないよう、実態から再同期する
+      try {
+        setIsFullscreen(await getCurrentWindow().isFullscreen());
+      } catch {
+        // 実態も取れなければ現状維持
+      }
     }
   };
+
+  // #103: 失敗通知は数秒で自動的に消す
+  useEffect(() => {
+    if (!windowModeError) return;
+    const timer = setTimeout(() => setWindowModeError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [windowModeError]);
 
   // #66レビューmust1: キーボードハンドラが参照する値
   // （handlePrevious/handleNext/handleToggleWindowMode と、canGoBack/isSettingsOpen/
@@ -675,6 +692,15 @@ function App() {
           onMediaError={handleMediaError}
         />
       </div>
+
+      {windowModeError && (
+        <div
+          role="alert"
+          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 max-w-[90vw]"
+        >
+          {windowModeError}
+        </div>
+      )}
 
       {/* 右上の常設ボタン（終了・ショートカット・ウィンドウモード・設定）。
           #66視覚刷新: 枠線付き四角ボタン4つの並びから、枠線なしアイコンを1つの
