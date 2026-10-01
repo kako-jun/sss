@@ -3145,7 +3145,7 @@ const scenarios = [
   },
   // #116: 最小ウィンドウサイズ（tauri.conf.json の minWidth/minHeight）で、設定の全タブ・
   // 確認モーダル・ようこそ画面・オーバーレイ・「…」メニューが崩れない（ボタン切れ・
-  // 横スクロール・画面外はみ出し無し）。値は設定ファイルから読むので、下げると本テストが検出する。
+  // 横スクロール・画面外はみ出し無し、フォルダタブの主要操作が折り返しの下に隠れない）。値は設定ファイルから読むので、下げると本テストが検出する。
   ...['ja', 'en'].map((lang) => ({
     name: `layout holds at the minimum window size from tauri.conf.json, ${lang} (#116)`,
     hash: 'thumbs',
@@ -3170,6 +3170,23 @@ const scenarios = [
         await page.evaluate((n) => document.querySelectorAll('[role="tab"]')[n].click(), i);
         await page.waitForTimeout(300);
         await check(`tab${i}`);
+        if (i === 0) {
+          // フォルダタブの主要操作（パス欄と「選択」ボタン）が、本文をスクロールしなくても
+          // 本文スクロール領域の中に見えていること（高さを下げすぎるとここが折り返しの下に隠れる）。
+          const vis = await page.evaluate(() => {
+            const c = document.querySelector('div.flex-1.overflow-y-auto').getBoundingClientRect();
+            const inView = (e) => {
+              if (!e) return false;
+              const r = e.getBoundingClientRect();
+              return r.top >= c.top - 1 && r.bottom <= c.bottom + 1;
+            };
+            const input = document.querySelector('[role="dialog"] input[readonly]');
+            const select = input && input.parentElement.querySelector('button');
+            return { input: inView(input), select: inView(select) };
+          });
+          if (!vis.input) problems.push('folder tab: path field hidden below the fold');
+          if (!vis.select) problems.push('folder tab: Select button hidden below the fold');
+        }
         await page.evaluate(() => {
           const c = document.querySelector('div.flex-1.overflow-y-auto');
           if (c) c.scrollTop = c.scrollHeight;

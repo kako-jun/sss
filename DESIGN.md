@@ -701,6 +701,9 @@ uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
   no overlap, and the Folder tab's path field + "Select" button visible without scrolling
   (the settings tab row scrolling horizontally is the one designed exception; 360px of
   height is already cramped)
+
+### Don't
+
 - Add colorful accent colors. Red-400/80 is only for errors/destructive actions
 - Use thick borders or strong box-shadows
 - Create large, dramatic buttons or hover effects
@@ -716,8 +719,8 @@ uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
 currentColor`, rendering a visibly brighter border than intended). Adding any
   further non-multiple-of-5 value here requires the same `tailwind.config.js`
   addition, verified against the built `dist/assets/*.css`
-- Show the WebView's browser chrome: right-click context menu, reload/devtools/print/
-  find/zoom shortcuts are suppressed in production (`src/lib/webviewGuards.ts`, #116;
+- Expose the WebView's browser chrome: the right-click context menu and the reload/
+  devtools/print/find/zoom shortcuts are suppressed in production (`src/lib/webviewGuards.ts`, #116;
   decision table in CLAUDE.md). Right-click stays enabled inside text inputs
 - Reach for `rounded` (4px) on anything but a tiny inline badge — buttons/cards
   are `rounded-lg`, floating surfaces are `rounded-2xl`/`rounded-full` (#66)
