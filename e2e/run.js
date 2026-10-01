@@ -477,7 +477,8 @@ async function inputDarkScenario(page, lang) {
   await page.waitForSelector('svg.lucide-settings', { state: 'attached', timeout: 5000 });
   await openSettingsModal(page);
   await page.click('#tab-options');
-  // 遷移途中の色を読まないよう transition を切り、設定の非同期読み込み完了を待つ。
+  // transition を切って最終状態だけを検証する(遷移途中の色は見ない。reduced-motion 相当の副作用は
+  // 承知の上)。設定の非同期読み込み完了も待つ。
   await page.addStyleTag({ content: '*, *::after { transition: none !important; }' });
   await page.waitForTimeout(800);
   const boxes = page.locator('input[type="checkbox"]');
@@ -507,7 +508,20 @@ async function inputDarkScenario(page, lang) {
     const dis = await read(box);
     await shot(box, `checkbox${i}-disabled`);
     await box.evaluate((e) => (e.disabled = false));
+    // 箱の中心とラベル1行目の中心が ±1px に収まる(縦位置のずれ検出)
+    const align = await box.evaluate((e) => {
+      const sib = e.nextElementSibling;
+      const w = document.createTreeWalker(sib, NodeFilter.SHOW_TEXT);
+      let node = w.nextNode();
+      while (node && !node.textContent.trim()) node = w.nextNode();
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const line = range.getClientRects()[0];
+      const b = e.getBoundingClientRect();
+      return Math.abs(b.top + b.height / 2 - (line.top + line.height / 2));
+    });
     const ok =
+      align <= 1 &&
       off.appearance === 'none' &&
       lum(off.bg) < 0.2 &&
       lum(off.border) > 0.45 && // 枠 vs 黒背景で 3:1 以上
@@ -523,7 +537,7 @@ async function inputDarkScenario(page, lang) {
       Number(dis.opacity) < 1;
     if (!ok) pass = false;
     details.push(
-      `cb${i}=${ok} off=${off.bg}/${off.border} on=${on.bg} focus=${focused.outlineStyle}/${focused.outlineColor} dis=${dis.opacity} size=${off.w}x${off.h}`,
+      `cb${i}=${ok} align=${align.toFixed(1)} off=${off.bg}/${off.border} on=${on.bg} focus=${focused.outlineStyle}/${focused.outlineColor} dis=${dis.opacity} size=${off.w}x${off.h}`,
     );
   }
   // range は全タブを巡って探す（所属タブに依存しない）
@@ -547,6 +561,52 @@ async function inputDarkScenario(page, lang) {
   }
   if (rangeInfo === 'range not found') pass = false;
   return { pass, detail: `checkboxes=${n} ${details.join(' ')} ${rangeInfo}` };
+}
+
+/**
+ * #122: 強制カラー(Windows ハイコントラスト、WebView2 に伝わる)でも、チェック済みが空の箱に
+ * ならず、未チェックと視覚的に区別できることを computed style で検証する。
+ * E2E_SHOT_DIR を指定すると設定モーダルのスクリーンショットを保存する(目視確認用)。
+ */
+async function inputForcedColorsScenario(page) {
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.waitForSelector('svg.lucide-settings', { state: 'attached', timeout: 5000 });
+  await openSettingsModal(page);
+  await page.click('#tab-options');
+  await page.addStyleTag({ content: '*, *::after { transition: none !important; }' });
+  await page.waitForTimeout(800);
+  const box = page.locator('input[type="checkbox"]').first();
+  const read = () =>
+    box.evaluate((e) => {
+      const cs = getComputedStyle(e);
+      const a = getComputedStyle(e, '::after');
+      return {
+        bg: cs.backgroundColor,
+        border: cs.borderTopColor,
+        afterBg: a.backgroundColor,
+        afterDisplay: a.display,
+        adjust: cs.forcedColorAdjust,
+        forced: matchMedia('(forced-colors: active)').matches,
+      };
+    });
+  if (await box.isChecked()) await box.evaluate((e) => e.click());
+  await page.waitForTimeout(200);
+  const off = await read();
+  const shotDir = process.env.E2E_SHOT_DIR;
+  if (shotDir) await page.screenshot({ path: path.join(shotDir, 'forced-colors-unchecked.png') });
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(200);
+  const on = await read();
+  if (shotDir) await page.screenshot({ path: path.join(shotDir, 'forced-colors-checked.png') });
+  // チェック済みは背景が未チェックと異なり、チェックマークは背景と異なる色で、表示されている
+  const pass =
+    off.forced &&
+    on.adjust === 'none' &&
+    on.bg !== off.bg &&
+    on.afterDisplay === 'block' &&
+    on.afterBg !== on.bg &&
+    off.afterDisplay === 'none';
+  return { pass, detail: `off=${JSON.stringify(off)} on=${JSON.stringify(on)}` };
 }
 
 const scenarios = [
@@ -2622,6 +2682,14 @@ const scenarios = [
     locale: 'en-US',
     async run(page) {
       return inputDarkScenario(page, 'en');
+    },
+  },
+  {
+    // #122: 強制カラー(ハイコントラスト)でチェック済みが空の箱にならない。
+    name: 'settings checkbox stays distinguishable when checked in forced-colors mode (#122)',
+    hash: 'slides',
+    async run(page) {
+      return inputForcedColorsScenario(page);
     },
   },
   {

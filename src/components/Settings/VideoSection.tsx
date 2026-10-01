@@ -100,7 +100,7 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
           className="sss-checkbox"
         />
         <div>
-          <label htmlFor={audioId} className="text-white/50 text-sm cursor-pointer">
+          <label htmlFor={audioId} className="block leading-5 text-white/50 text-sm cursor-pointer">
             {t('videoAudioLabel')}
           </label>
           <p id={audioDescId} className="text-xs text-white/50 mt-1">

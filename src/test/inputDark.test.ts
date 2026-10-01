@@ -5,16 +5,15 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 /**
- * #122: checkbox / radio / range はOS既定だと WebKit(Linux WebKitGTK)で未チェック時に
- * 白い箱になりダークテーマと不整合になる。全ての `<input type="checkbox|radio|range">` が
- * 型に対応する共通クラス(`sss-checkbox` / `sss-radio` / `sss-range`)を付け、CSS側が
+ * #122: checkbox / range はOS既定だと WebKit(Linux WebKitGTK)で未チェック時に
+ * 白い箱になりダークテーマと不整合になる。全ての `<input type="checkbox|range">` が
+ * 型に対応する共通クラス(`sss-checkbox` / `sss-range`)を付け、CSS側が
  * appearance: none の自前描画を持つことを固定する(selectDark.test.ts と同じ方針)。
  */
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const CLASS_FOR: Record<string, string> = {
   checkbox: 'sss-checkbox',
-  radio: 'sss-radio',
   range: 'sss-range',
 };
 
@@ -78,7 +77,10 @@ function scanInputs(src: string): Found[] {
       if (init && ts.isJsxExpression(init)) init = init.expression;
       if (typeAttr && init && ts.isStringLiteralLike(init)) {
         const cls = CLASS_FOR[init.text];
-        if (cls) {
+        if (init.text === 'radio') {
+          // radio 用のスタイルは未定義(利用箇所が無い)。使うなら index.css に足して CLASS_FOR に登録する。
+          results.push({ kind: 'radio', ok: false });
+        } else if (cls) {
           const classAttr = attrOf(node.attributes, 'className');
           results.push({ kind: init.text, ok: exprHasClass(classAttr?.initializer, cls) });
         }
@@ -124,12 +126,13 @@ describe('scan helpers (#122)', () => {
     expect(oks('const x = <input type="checkbox" className="sss-checkbox mt-1" />;')).toEqual([
       true,
     ]);
-    expect(oks('const x = <input type="radio" className="sss-radio" />;')).toEqual([true]);
+    // radio は未定義のスタイルに頼れないので常に offender(使うときにスタイルと CLASS_FOR を足す)
+    expect(oks('const x = <input type="radio" className="sss-radio" />;')).toEqual([false]);
     expect(oks('const x = <input type="range" className="flex-1 sss-range" />;')).toEqual([true]);
     expect(oks('const x = <input type="checkbox" />;')).toEqual([false]);
     expect(oks('const x = <input type="checkbox" className="sss-radio" />;')).toEqual([false]);
     expect(oks('const x = <input type="range" className="sss-range-foo" />;')).toEqual([false]);
-    expect(oks('const x = <input type={"radio"} className="sss-radio" />;')).toEqual([true]);
+    expect(oks('const x = <input type={"checkbox"} className="sss-checkbox" />;')).toEqual([true]);
   });
 
   it('treats dynamic className / type and createElement as offenders', () => {
@@ -149,8 +152,13 @@ describe('scan helpers (#122)', () => {
   });
 });
 
-describe('checkbox / radio / range dark styling (#122)', () => {
-  it('every checkbox/radio/range input in src carries its shared class', () => {
+/**
+ * 走査の前提と限界: 対象は src 配下の .tsx の JSX リテラル(`<input type="checkbox">` 等)のみ。
+ * .ts / index.html の input、`{...props}` のスプレッド経由で渡される type、type 属性の無い
+ * input は検出できない(type が動的な場合は検証不能として offender にする)。
+ */
+describe('checkbox / range dark styling (#122)', () => {
+  it('every checkbox/range input in src carries its shared class (radio is unstyled -> offender)', () => {
     const offenders: string[] = [];
     let found = 0;
     for (const file of walk(SRC)) {
@@ -169,21 +177,38 @@ describe('checkbox / radio / range dark styling (#122)', () => {
       const m = css.match(new RegExp(`${sel.replace(/[.]/g, '\\.')}\\s*\\{([^}]*)\\}`));
       return m ? m[1] : '';
     };
-    expect(css).toMatch(/\.sss-checkbox,\s*\.sss-radio\s*\{[^}]*appearance:\s*none/);
-    expect(css).toMatch(/\.sss-checkbox,\s*\.sss-radio\s*\{[^}]*-webkit-appearance:\s*none/);
-    expect(css).toMatch(/\.sss-checkbox,\s*\.sss-radio\s*\{[^}]*width:\s*20px/);
-    expect(css).toMatch(/\.sss-checkbox,\s*\.sss-radio\s*\{[^}]*height:\s*20px/);
+    // unprefixed の appearance を -webkit-appearance と取り違えないよう前置否定で縛る
+    const unprefixed = /(?<![-\w])appearance:\s*none/;
+    const webkit = /-webkit-appearance:\s*none/;
+    const checkbox = block('.sss-checkbox');
+    expect(checkbox).toMatch(unprefixed);
+    expect(checkbox).toMatch(webkit);
+    expect(checkbox).toMatch(/width:\s*20px/);
+    expect(checkbox).toMatch(/height:\s*20px/);
     // チェック済みは明るい塗り + チェックマークは clip-path (画像・絵文字不使用)
-    expect(css).toMatch(/\.sss-checkbox:checked,\s*\.sss-radio:checked\s*\{[^}]*background-color/);
+    expect(block('.sss-checkbox:checked')).toMatch(/background-color/);
     expect(block('.sss-checkbox::after')).toMatch(/clip-path:\s*polygon/);
     // 状態: フォーカス・disabled
     expect(css).toMatch(/\.sss-checkbox:focus-visible[^{]*\{[^}]*outline:\s*2px solid/);
     expect(css).toMatch(/\.sss-checkbox:disabled[^{]*\{[^}]*opacity/);
     // range: つまみ/トラックを WebKit・Firefox 両方で明示
-    expect(block('.sss-range')).toMatch(/appearance:\s*none/);
+    const range = block('.sss-range');
+    expect(range).toMatch(unprefixed);
+    expect(range).toMatch(webkit);
     expect(css).toMatch(/\.sss-range::-webkit-slider-thumb\s*\{/);
     expect(css).toMatch(/\.sss-range::-webkit-slider-runnable-track\s*\{/);
     expect(css).toMatch(/\.sss-range::-moz-range-thumb\s*\{/);
     expect(css).toMatch(/\.sss-range::-moz-range-track\s*\{/);
+  });
+
+  it('css keeps the checked state visible in forced-colors mode', () => {
+    const css = readFileSync(join(SRC, 'index.css'), 'utf8');
+    const m = css.match(/@media \(forced-colors: active\) \{([\s\S]*)\n\}/);
+    expect(m).not.toBeNull();
+    const fc = m![1];
+    expect(fc).toMatch(/forced-color-adjust:\s*none/);
+    expect(fc).toMatch(/\.sss-checkbox:checked\s*\{[^}]*background-color:\s*Highlight/);
+    expect(fc).toMatch(/\.sss-checkbox::after\s*\{[^}]*background-color:\s*HighlightText/);
+    expect(fc).toMatch(/-webkit-slider-runnable-track[^{]*\{[^}]*ButtonText/);
   });
 });
