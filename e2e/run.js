@@ -28,7 +28,7 @@ import net from 'node:net';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, '..');
-const PORT = 1420;
+const PORT = Number(process.env.E2E_PORT || 1420);
 const BASE_URL = `http://localhost:${PORT}`;
 const INIT_SCRIPT = path.join(__dirname, 'init.js');
 
@@ -958,6 +958,26 @@ const scenarios = [
       // 1px未満の丸め誤差は許容する。
       const allSame = allTops.every((t) => t !== null && Math.abs(t - initialTop) < 1);
       return { pass: allSame, detail: JSON.stringify(tops) };
+    },
+  },
+  {
+    // #109: 設定モーダルのタブ行（role=tablist）は overflow-x-auto の flex 子で
+    // 最小高が0になるため、タブ内容が長い（オプション等）と flex-shrink で
+    // 行ごと潰れていた（1280x800 で 39→31px、800x600 で 21px。ラベル下部が
+    // 切れる）。shrink-0 で潰れないことを、ja で 3 サイズ × 全 7 タブの
+    // getBoundingClientRect().height が一定であることで確認する。
+    name: 'Settings tablist height stays constant across all tabs and viewport sizes, ja (#109)',
+    hash: 'slides',
+    async run(page) {
+      return measureSettingsTablistHeights(page);
+    },
+  },
+  {
+    name: 'Settings tablist height stays constant across all tabs and viewport sizes, en (#109)',
+    hash: 'slides',
+    locale: 'en-US',
+    async run(page) {
+      return measureSettingsTablistHeights(page);
     },
   },
   {
@@ -1912,6 +1932,41 @@ const scenarios = [
     },
   },
 ];
+
+/**
+ * #109: 設定モーダルのタブ行(role=tablist)の高さが、全タブ × 複数ウィンドウ
+ * サイズで一定であることを実描画の getBoundingClientRect で測る。
+ * 1920x1080 で測った基準高と、1280x800・800x600 の全タブが一致すること。
+ */
+async function measureSettingsTablistHeights(page) {
+  await page.waitForTimeout(400);
+  await openSettingsModal(page);
+  const tabIds = ['scan', 'options', 'exclude', 'pick', 'history', 'stats', 'info'];
+  const rows = {};
+  let baseline = null;
+  let pass = true;
+  for (const [w, h] of [
+    [1920, 1080],
+    [1280, 800],
+    [800, 600],
+  ]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForTimeout(250);
+    const heights = [];
+    for (const id of tabIds) {
+      await page.evaluate((i) => document.getElementById(`tab-${i}`).click(), id);
+      await page.waitForTimeout(200);
+      const height = await page.evaluate(
+        () => document.querySelector('[role="tablist"]').getBoundingClientRect().height,
+      );
+      heights.push(height);
+      if (baseline === null) baseline = height;
+      if (Math.abs(height - baseline) >= 0.5) pass = false;
+    }
+    rows[`${w}x${h}`] = heights.map((x) => Math.round(x * 10) / 10);
+  }
+  return { pass, detail: `baseline=${baseline} ${JSON.stringify(rows)}` };
+}
 
 /**
  * #82レビュー2巡目 should1（回帰）/ 3巡目 should・nit: 設定タブ行の折返し・横
