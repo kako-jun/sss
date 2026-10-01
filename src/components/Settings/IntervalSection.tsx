@@ -124,7 +124,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
           max={MAX_DISPLAY_INTERVAL}
           value={displayInterval / 1000}
           onChange={(e) => handleSliderChange(parseInt(e.target.value, 10))}
-          className="flex-1 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white/60"
+          className="sss-range flex-1"
         />
         <div className="flex items-center gap-2">
           <input

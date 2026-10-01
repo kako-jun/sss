@@ -298,11 +298,20 @@ fn check_allow_dir_with_home(
 /// ルート/ドライブ（`Z:\` や到達不能な共有）が無い場合も正常な未作成ではなくアクセス不能とする
 /// （Unix のルートは常に存在するため影響しない）。
 fn classify_missing(path: &Path, home_dir: Option<&Path>) -> AllowDirRejection {
+    classify_missing_with(path, home_dir, |root| root.exists())
+}
+
+/// [`classify_missing`] のコア実装。ルートの存在判定を注入できるのでテストで未マウント状況を再現できる。
+fn classify_missing_with(
+    path: &Path,
+    home_dir: Option<&Path>,
+    root_exists: impl Fn(&Path) -> bool,
+) -> AllowDirRejection {
     if !is_acceptable_share_directory(path, home_dir) {
         return AllowDirRejection::NotYetCreatedUnsafe;
     }
     match path.ancestors().last() {
-        Some(root) if !root.as_os_str().is_empty() && !root.exists() => {
+        Some(root) if !root.as_os_str().is_empty() && !root_exists(root) => {
             AllowDirRejection::Inaccessible
         }
         _ => AllowDirRejection::NotYetCreated,
@@ -315,7 +324,7 @@ fn refusal_log_line(path: &Path, reason: AllowDirRejection, debug: bool) -> Opti
     if reason.is_expected() {
         debug.then(|| {
             format!(
-                "[debug] asset scope directory not created yet (skipped): {}",
+                "[debug] asset scope directory does not exist (skipped): {}",
                 path.display()
             )
         })
@@ -916,6 +925,54 @@ mod tests {
             Err(AllowDirRejection::NotYetCreated)
         );
         assert!(!AllowDirRejection::NotYetCreatedUnsafe.is_expected());
+    }
+
+    #[test]
+    fn classify_missing_with_reports_inaccessible_when_root_is_absent() {
+        // 未マウントのドライブ/共有を注入で再現（Unix でも検証できる）
+        let home = Path::new("/home/x");
+        let p = Path::new("/mnt/removable/pics");
+        assert_eq!(
+            classify_missing_with(p, Some(home), |_| false),
+            AllowDirRejection::Inaccessible
+        );
+        assert_eq!(
+            classify_missing_with(p, Some(home), |_| true),
+            AllowDirRejection::NotYetCreated
+        );
+        // 危険判定はルート不在より優先される
+        assert_eq!(
+            classify_missing_with(Path::new("/home/x/.ssh/k"), Some(home), |_| false),
+            AllowDirRejection::NotYetCreatedUnsafe
+        );
+    }
+
+    #[test]
+    fn classify_missing_safe_arbitrary_path_is_not_yet_created() {
+        // Pictures 以外の安全な未作成パス（外付け等）は NotYetCreated、秘密領域配下は Unsafe
+        let home = Path::new("/home/x");
+        assert_eq!(
+            classify_missing_with(Path::new("/mnt/removable"), Some(home), |_| true),
+            AllowDirRejection::NotYetCreated
+        );
+        assert_eq!(
+            classify_missing_with(Path::new("/home/x/.ssh/x"), Some(home), |_| true),
+            AllowDirRejection::NotYetCreatedUnsafe
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn check_allow_dir_windows_unmounted_drive_is_inaccessible() {
+        let drive = ('D'..='Z')
+            .rev()
+            .find(|c| !Path::new(&format!("{c}:\\")).exists());
+        let Some(c) = drive else { return };
+        let p = PathBuf::from(format!("{c}:\\x"));
+        assert_eq!(
+            check_allow_dir_with_home(&p, Some(Path::new(r"C:\Users\kako"))),
+            Err(AllowDirRejection::Inaccessible)
+        );
     }
 
     #[test]
