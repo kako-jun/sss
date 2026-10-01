@@ -17,9 +17,9 @@ describe('formatCapturedDate (#114)', () => {
     });
 
     it('uses 24-hour time with no AM/PM, and keeps the minute zero-padded', () => {
-      expect(formatCapturedDate('2023-08-15 00:05:09', 'ja')).toBe('2023年8月15日 0:05');
+      expect(formatCapturedDate('2023-08-15 00:05:09', 'ja')).toBe('2023年8月15日 00:05');
       expect(formatCapturedDate('2023-08-15 23:59:59', 'ja')).toBe('2023年8月15日 23:59');
-      expect(formatCapturedDate('2023-08-15 09:07:00', 'ja')).toBe('2023年8月15日 9:07');
+      expect(formatCapturedDate('2023-08-15 09:07:00', 'ja')).toBe('2023年8月15日 09:07');
     });
   });
 
@@ -57,14 +57,14 @@ describe('formatCapturedDate (#114)', () => {
     });
 
     it('still shows the time for 00:00:xx with non-zero seconds', () => {
-      expect(formatCapturedDate('2023-08-15 00:00:30', 'ja')).toBe('2023年8月15日 0:00');
+      expect(formatCapturedDate('2023-08-15 00:00:30', 'ja')).toBe('2023年8月15日 00:00');
     });
   });
 
   describe('calendar edges', () => {
     it('handles year boundaries', () => {
       expect(formatCapturedDate('2023-12-31 23:59:59', 'ja')).toBe('2023年12月31日 23:59');
-      expect(formatCapturedDate('2024-01-01 00:00:01', 'ja')).toBe('2024年1月1日 0:00');
+      expect(formatCapturedDate('2024-01-01 00:00:01', 'ja')).toBe('2024年1月1日 00:00');
       expect(formatCapturedDate('2023-12-31 23:59:59', 'en')).toBe('Dec 31, 2023, 11:59 PM');
     });
 
@@ -109,7 +109,7 @@ describe('formatCapturedDate (#114)', () => {
         // 日付のみ（new Date('2023-08-15') は UTC 解釈）も、時刻付き（ローカル解釈）も、
         // 年跨ぎ直前直後も、どの TZ でも書かれたとおりに出る。
         expect(formatCapturedDate('2023-08-15', 'ja')).toBe('2023年8月15日');
-        expect(formatCapturedDate('2023-08-15T00:30:00', 'ja')).toBe('2023年8月15日 0:30');
+        expect(formatCapturedDate('2023-08-15T00:30:00', 'ja')).toBe('2023年8月15日 00:30');
         expect(formatCapturedDate('2023-08-15T23:30:00', 'ja')).toBe('2023年8月15日 23:30');
         expect(formatCapturedDate('2023-12-31T23:59:59', 'en')).toBe('Dec 31, 2023, 11:59 PM');
         expect(formatCapturedDate('2024-01-01T00:00:01Z', 'en')).toBe('Jan 1, 2024, 12:00 AM');

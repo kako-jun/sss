@@ -30,7 +30,8 @@ import { createPortal } from 'react-dom';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useT, useLocale } from '../lib/i18n';
 import { formatCapturedDate } from '../lib/formatCapturedDate';
-import { splitFileName } from '../lib/fileNameParts';
+import { splitFileName, isRtlName } from '../lib/fileNameParts';
+import { useFixedWidthVar } from '../hooks/useFixedWidthVar';
 import {
   resolveExcludeErrorMessage,
   resolveOpenInExplorerErrorMessage,
@@ -168,6 +169,9 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   // onMouseDownガード（コンテナ一括ではなくボタン単位にすることで、
   // ファイル名テキストのドラッグ選択を妨げないようにする）。
   const barContainerRef = useRef<HTMLDivElement>(null);
+  // #114: 情報クラスタの1行目（ファイル名）と2行目（撮影日 · 位置）。後半の実測幅を CSS 変数へ渡す。
+  const nameRowRef = useRef<HTMLElement>(null);
+  const metaRowRef = useRef<HTMLElement>(null);
   const guardButtonMouseDown = useMemo(() => createButtonFocusGuard(barContainerRef), []);
 
   // #66レビューshould: App.tsxのグローバルESCハンドラが「…」メニュー（または
@@ -374,6 +378,10 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   const capturedDate = formatCapturedDate(image?.exif?.dateTime, locale);
   // #114: ファイル名は前半だけが縮み、拡張子と末尾数文字は常に見える（中間省略）。
   const fileNameParts = splitFileName(fileName);
+  const fileNameRtl = isRtlName(fileName);
+  const positionText = `${currentPosition.toLocaleString()} / ${totalImages.toLocaleString()}`;
+  useFixedWidthVar(nameRowRef, [fileNameParts.tail]);
+  useFixedWidthVar(metaRowRef, [capturedDate, positionText]);
 
   const tileUrl = useMemo(() => {
     if (!hasGps || !image?.exif?.gpsLatitude || !image?.exif?.gpsLongitude) return null;
@@ -550,28 +558,50 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                 className="select-text min-w-0 flex-1 flex flex-col text-xs leading-4"
                 title={infoTooltip}
               >
-                <span data-overlay="filename" className="flex min-w-0 text-white/75">
-                  <span className="min-w-0 overflow-hidden text-ellipsis whitespace-pre">
+                {/* 1行目: ファイル名。flex を使わずインラインで組む（flex の子はブロック化されて
+                    選択・コピーに改行が入る）。前半=inline-block で縮み `…` で省略、後半=インライン
+                    （拡張子+末尾数文字）。見た目用の2要素は aria-hidden で、全文は aria-label が担う。 */}
+                <span
+                  ref={nameRowRef}
+                  data-overlay="filename"
+                  role="group"
+                  aria-label={fileName}
+                  className="block min-w-0 overflow-hidden whitespace-nowrap text-white/75"
+                >
+                  <span
+                    aria-hidden="true"
+                    dir={fileNameRtl ? 'auto' : undefined}
+                    className="inline-block align-bottom overflow-hidden text-ellipsis whitespace-pre"
+                    style={{ maxWidth: 'calc(100% - var(--fw, 0px))' }}
+                  >
                     {fileNameParts.head}
                   </span>
                   {fileNameParts.tail && (
-                    <span className="shrink-0 whitespace-pre">{fileNameParts.tail}</span>
+                    <span data-fixed aria-hidden="true" className="whitespace-pre">
+                      {fileNameParts.tail}
+                    </span>
                   )}
                 </span>
-                <span className="flex min-w-0 items-baseline gap-1.5">
+                {/* 2行目: 撮影日 · 位置。同じくインライン。縮むのは撮影日だけで、区切りと位置は
+                    後半（data-fixed）として縮まない。 */}
+                <span
+                  ref={metaRowRef}
+                  className="block min-w-0 overflow-hidden whitespace-nowrap text-white/60"
+                >
                   {capturedDate && (
-                    <>
-                      <span data-overlay="date" className="text-white/60 truncate min-w-0">
-                        {capturedDate}
-                      </span>
-                      <span className="text-white/20 shrink-0">·</span>
-                    </>
+                    <span
+                      data-overlay="date"
+                      className="inline-block align-bottom overflow-hidden text-ellipsis tabular-nums text-white/60"
+                      style={{ maxWidth: 'calc(100% - var(--fw, 0px))' }}
+                    >
+                      {capturedDate}
+                    </span>
                   )}
-                  <span
-                    data-overlay="position"
-                    className="text-white/60 font-mono shrink-0 tabular-nums"
-                  >
-                    {currentPosition.toLocaleString()} / {totalImages.toLocaleString()}
+                  <span data-fixed className="whitespace-pre">
+                    {capturedDate && <span className="text-white/20">{' · '}</span>}
+                    <span data-overlay="position" className="text-white/60 tabular-nums">
+                      {positionText}
+                    </span>
                   </span>
                 </span>
               </div>

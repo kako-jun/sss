@@ -69,7 +69,7 @@ function getFormatter(locale: Locale, withTime: boolean): Intl.DateTimeFormat {
     };
     const time: Intl.DateTimeFormatOptions = withTime
       ? locale === 'ja'
-        ? { hour: 'numeric', minute: '2-digit', hourCycle: 'h23' }
+        ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }
         : { hour: 'numeric', minute: '2-digit', hour12: true }
       : {};
     f = new Intl.DateTimeFormat(locale === 'ja' ? 'ja-JP' : 'en-US', { ...date, ...time });

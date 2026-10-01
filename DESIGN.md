@@ -501,10 +501,27 @@ line had date and position at `shrink-0`, so only the filename could shrink and 
 date + map it was squeezed to 0 characters at 480x420 (20 at 800-3840). Shrink order
 is now: the date (`truncate min-w-0`) first, the filename head next; the position
 never shrinks. The filename is split into a head (`overflow-hidden text-ellipsis`,
-shrinks) and a tail (last 4 stem characters + extension, `shrink-0`), so a long name
+shrinks) and a tail (last 4 stem graphemes + extension, never shrinks; split on grapheme
+cluster boundaries so combining marks / ZWJ emoji are not cut; RTL names are not split),
+so a long name
 reads as `Family_Trip_Okinawa_Chur… 23_0.jpg` — a middle ellipsis that always shows
 the extension. The two lines are 32px tall, under the 36px buttons, so the bar does
-not grow. Measured visible filename characters for a 60-char name with date + map:
+not grow. **Selection and copy must give the exact filename (#116)**. The two halves are plain
+inline content, not flex items: a flex/grid child is blockified and the selection
+serialiser puts a newline between the halves (`head\ntail`). Each line is a
+`block overflow-hidden whitespace-nowrap` row; the head is
+`inline-block; max-width: calc(100% - var(--fw))` and the tail (`data-fixed`) is
+inline, with `--fw` set from the tail's measured width by `useFixedWidthVar`
+(ResizeObserver). The separator `·` lives inside line 2 as inline text, so selecting
+the whole cluster never leaves a lone `·` line. The outer filename element carries
+`aria-label` with the full name and the visual halves are `aria-hidden`. Verified in a
+real browser for 10 kinds of names (dots, hidden file, Japanese, emoji, combining
+marks, Hebrew, no extension, 60+ chars) by range / drag / double- / triple-click /
+Ctrl+C. Rejected: a `copy` handler (drag `toString()` stays split) and an overlaid
+invisible full-text layer (selection highlight no longer matches the visible text).
+Japanese time uses a 2-digit hour (`00:30`) so the width does not jump with the hour.
+
+Measured visible filename characters for a 60-char name with date + map:
 0 → 33 at 480x420, 20 → 52 at 800/1280, 20 → 60 (whole name) at 1920/3840. The max
 width scales with the screen (`max-w-[max(36rem,40vw)]`: 576px up to 1440px wide,
 768px at 1920, 1536px at 4K). The captured date is locale-formatted (ja

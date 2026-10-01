@@ -838,32 +838,81 @@ describe('OverlayUI info cluster keeps the filename readable (#114)', () => {
     const info = container.querySelector('div[title]')!;
     expect(info.className).toContain('flex-col');
     const name = info.querySelector('[data-overlay="filename"]')!;
-    const meta = info.querySelector('[data-overlay="position"]')!.parentElement!;
+    const meta = info.querySelector('[data-overlay="position"]')!.closest('.block')!;
     // ファイル名と、日付・位置の行は兄弟（別の行）
     expect(name.parentElement).toBe(info);
     expect(meta.parentElement).toBe(info);
     expect(name).not.toBe(meta);
   });
 
-  it('shrinks only the date (position never shrinks) and truncates the filename head', () => {
+  it('shrinks only the date (position is the fixed part) and ellipsizes the filename head', () => {
     const { container } = render(
       <OverlayUI
         image={gpsImage('/p/Family_Trip_Okinawa_2023_08_15_0815.jpg')}
         {...requiredProps}
       />,
     );
-    const date = container.querySelector('[data-overlay="date"]')!;
+    const date = container.querySelector<HTMLElement>('[data-overlay="date"]')!;
     const pos = container.querySelector('[data-overlay="position"]')!;
-    expect(date.className).toContain('truncate');
-    expect(date.className).toContain('min-w-0');
-    expect(pos.className).toContain('shrink-0');
+    expect(date.className).toContain('text-ellipsis');
+    expect(date.className).toContain('overflow-hidden');
+    expect(date.style.maxWidth).toContain('var(--fw');
+    // 位置は data-fixed（縮まない側）の中
+    expect(pos.closest('[data-fixed]')).not.toBeNull();
     const name = container.querySelector('[data-overlay="filename"]')!;
-    const [head, tail] = Array.from(name.children);
+    const [head, tail] = Array.from(name.children) as HTMLElement[];
     expect(head.className).toContain('text-ellipsis');
-    expect(head.className).toContain('min-w-0');
-    expect(tail.className).toContain('shrink-0');
+    expect(head.style.maxWidth).toContain('var(--fw');
+    expect(tail.hasAttribute('data-fixed')).toBe(true);
     expect(head.textContent! + tail.textContent!).toBe('Family_Trip_Okinawa_2023_08_15_0815.jpg');
     expect(tail.textContent).toBe('0815.jpg');
+  });
+
+  // レビュー M1: flex/grid/block の子要素は選択・コピーのシリアライズで改行が入る。
+  // ファイル名・撮影日・位置の行の中身はインライン(inline-block 含む)だけで組む。
+  // （実ブラウザで selection.toString() === ファイル名 になることは e2e が検証する。）
+  it('builds each line from inline pieces only, so a selection never gets a newline inside the name (#116)', () => {
+    const { container } = render(
+      <OverlayUI
+        image={gpsImage('/p/Family_Trip_Okinawa_2023_08_15_0815.jpg')}
+        {...requiredProps}
+      />,
+    );
+    const rows = [
+      container.querySelector('[data-overlay="filename"]')!,
+      container.querySelector('[data-overlay="position"]')!.closest('.block')!,
+    ];
+    for (const row of rows) {
+      for (const el of Array.from(row.querySelectorAll('*'))) {
+        const classes = el.className.toString().split(/\s+/);
+        for (const bad of ['flex', 'inline-flex', 'grid', 'block', 'table', 'flex-col']) {
+          expect(classes, el.outerHTML).not.toContain(bad);
+        }
+      }
+    }
+  });
+
+  it('gives screen readers the whole filename in one piece (aria-label) and hides the visual halves', () => {
+    const { container } = render(
+      <OverlayUI
+        image={gpsImage('/p/Family_Trip_Okinawa_2023_08_15_0815.jpg')}
+        {...requiredProps}
+      />,
+    );
+    const name = container.querySelector('[data-overlay="filename"]')!;
+    expect(name.getAttribute('aria-label')).toBe('Family_Trip_Okinawa_2023_08_15_0815.jpg');
+    for (const half of Array.from(name.children)) {
+      expect(half.getAttribute('aria-hidden')).toBe('true');
+    }
+  });
+
+  it('does not split an RTL filename (dir=auto, no tail)', () => {
+    const rtl = 'שלום_עולם_תמונה_ארוכה_מאוד_2023.jpg';
+    const { container } = render(<OverlayUI image={gpsImage('/p/' + rtl)} {...requiredProps} />);
+    const name = container.querySelector('[data-overlay="filename"]')!;
+    expect(name.children).toHaveLength(1);
+    expect(name.children[0].getAttribute('dir')).toBe('auto');
+    expect(name.textContent).toBe(rtl);
   });
 
   it('keeps the colours (#113) and select-text (#116) on the info cluster', () => {

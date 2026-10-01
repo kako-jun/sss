@@ -70,3 +70,68 @@ describe('splitFileName (#114)', () => {
     }
   });
 });
+
+// #114 レビュー S1: 書記素クラスタの境界で割らない / RTL は分割しない。
+import { fallbackGraphemes, graphemes, isRtlName } from './fileNameParts';
+
+describe('splitFileName keeps grapheme clusters intact (#114)', () => {
+  const pad = 'a'.repeat(22);
+  const family = '👨‍👩‍👧';
+  const flags = '🇯🇵🇺🇸';
+
+  it('does not split a ZWJ family emoji at the head/tail boundary', () => {
+    const name = `${pad}${family}.jpg`;
+    const { head, tail } = splitFileName(name);
+    expect(head + tail).toBe(name);
+    expect(tail).toBe(`aaa${family}.jpg`);
+    // 先頭が ZWJ・異体字セレクタ・結合文字で始まる tail は不正
+    // eslint-disable-next-line no-misleading-character-class
+    expect(tail).not.toMatch(new RegExp('^[\\u200D\\uFE0F\\u0301]'));
+    expect(head).not.toMatch(/‍$/);
+  });
+
+  it('does not split a combining sequence (e + U+0301) at any offset', () => {
+    for (let n = 18; n < 26; n++) {
+      const name = 'a'.repeat(n) + 'é' + 'bcd.jpg';
+      const { head, tail } = splitFileName(name);
+      expect(head + tail).toBe(name);
+      expect(tail).not.toMatch(/^[̀-ͯ]/);
+      expect(head).not.toMatch(/e$/);
+    }
+  });
+
+  it('does not split flags (regional indicator pairs)', () => {
+    const name = `${pad}${flags}.png`;
+    const { head, tail } = splitFileName(name);
+    expect(head + tail).toBe(name);
+    expect(tail).toBe(`aa${flags}.png`);
+  });
+
+  it('keeps skin-tone emoji, Hangul and Thai clusters whole', () => {
+    for (const unit of ['👍🏽', '한글', 'ก็', 'กำ']) {
+      const name = `${pad}${unit}${unit}${unit}${unit}${unit}.jpg`;
+      const { head, tail } = splitFileName(name);
+      expect(head + tail).toBe(name);
+      const clusters = graphemes(name);
+      // 境界 head|tail が書記素の境界であること
+      expect(graphemes(head).join('') + graphemes(tail).join('')).toBe(name);
+      expect(clusters.join('')).toBe(name);
+      expect(graphemes(head).length + graphemes(tail).length).toBe(clusters.length);
+    }
+  });
+
+  it('fallback segmentation (no Intl.Segmenter) also keeps the sequences together', () => {
+    expect(fallbackGraphemes(`a${family}b`)).toEqual(['a', family, 'b']);
+    expect(fallbackGraphemes('aéb')).toEqual(['a', 'é', 'b']);
+    expect(fallbackGraphemes(`${flags}x`)).toEqual(['🇯🇵', '🇺🇸', 'x']);
+    expect(fallbackGraphemes('👍🏽')).toEqual(['👍🏽']);
+  });
+
+  it('does not split RTL names (visual order would reverse)', () => {
+    const name = 'שלום_עולם_תמונה_ארוכה_מאוד_2023.jpg';
+    expect(isRtlName(name)).toBe(true);
+    expect(splitFileName(name)).toEqual({ head: name, tail: '' });
+    expect(isRtlName('مرحبا_بالعالم_الجميل_جدا.png')).toBe(true);
+    expect(isRtlName('IMG_0001.jpg')).toBe(false);
+  });
+});

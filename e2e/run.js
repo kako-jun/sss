@@ -223,9 +223,34 @@ async function wakeFromIdle(page) {
  * （hover 時の強調や、MapPin のように別色で塗られた部分・アンチエイリアスを含む）を拾うため。
  * 文字・均一なアイコンでは両者が一致することを検算に使う。
  */
+/**
+ * 背景写真のフェードイン(約0.5秒)と操作バーのフェードイン(0.3秒)が終わるまで、実際の computed
+ * opacity で待つ(固定の待ち時間だと、負荷時に写真が白に届く前に撮ってコントラストが 1.4 になる)。
+ */
+async function waitForOverlayOpaque(page) {
+  await page.waitForFunction(
+    () => {
+      const eff = (el) => {
+        let o = 1;
+        for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+          o *= Number(getComputedStyle(n).opacity);
+        }
+        return o;
+      };
+      const bar = document.querySelector('.fixed.bottom-6');
+      const photos = [...document.querySelectorAll('img')].filter(
+        (i) => i.alt !== 'SSS Logo' && !i.closest('.fixed.bottom-6') && i.naturalWidth > 0,
+      );
+      return !!bar && eff(bar) === 1 && photos.length > 0 && photos.every((i) => eff(i) === 1);
+    },
+    null,
+    { timeout: 15000, polling: 50 },
+  );
+}
+
 async function measureOverlayContrast(page) {
   await wakeFromIdle(page);
-  await page.waitForTimeout(300);
+  await waitForOverlayOpaque(page);
   const targets = await page.evaluate(() => {
     const out = [];
     const effOpacity = (el) => {
@@ -279,6 +304,7 @@ async function measureOverlayContrast(page) {
       'svg,svg *{stroke:transparent!important;fill:transparent!important;filter:none!important}',
   });
   await page.waitForTimeout(400);
+  await waitForOverlayOpaque(page);
   const bgOnly = await page.screenshot({ type: 'png' });
 
   const results = await page.evaluate(
@@ -359,7 +385,31 @@ async function measureOverlayContrast(page) {
  */
 async function measureHairlineContrast(page) {
   await wakeFromIdle(page);
-  await page.waitForTimeout(1200);
+  // 固定の待ち時間ではなく条件で待つ(負荷時にフィルが 0 のまま/トランジション中の値を読んで
+  // fill/track が 1.01 になる不安定さがあった): フィルが 60px 以上かつ終端の手前に来るまで待ち、
+  // その時点で全アニメーション(進捗の CSS transition)を止めて、止めた状態の矩形と画素を測る。
+  // idle(3秒)になるとヘアラインもフェードアウトする(再生中)ので、待っている間もマウスを動かして
+  // idle にしない。条件: フィルが 60px 以上かつ終端の手前、かつ track(祖先含む)が完全に不透明。
+  const ready = () =>
+    page.evaluate(() => {
+      const track = document.querySelector('.fixed.bottom-0.left-0.right-0');
+      const fill = track && track.firstElementChild;
+      if (!track || !fill) return false;
+      let o = 1;
+      for (let n = track; n && n.nodeType === 1; n = n.parentElement) {
+        o *= Number(getComputedStyle(n).opacity);
+      }
+      const w = fill.getBoundingClientRect().width;
+      return o === 1 && w > 60 && w < track.getBoundingClientRect().width - 300;
+    });
+  const deadline = Date.now() + 20000;
+  for (let k = 0; !(await ready()); k++) {
+    if (Date.now() > deadline) throw new Error('ヘアラインが測れる状態にならなかった');
+    await page.mouse.move(640 + (k % 2), 400);
+    await page.waitForTimeout(50);
+  }
+  await page.evaluate(() => document.getAnimations().forEach((a) => a.pause()));
+  await page.waitForTimeout(100);
   const dsf = await page.evaluate(() => window.devicePixelRatio);
   const rects = await page.evaluate(() => {
     const track = document.querySelector('.fixed.bottom-0.left-0.right-0');
@@ -3835,6 +3885,14 @@ const scenarios = [
         const q = (o) => new URLSearchParams(o).toString();
         const cases = {
           short: q({ name: 'IMG_0001.jpg' }),
+          // 典型的なカメラのファイル名(25字)+日付+地図。480 幅でも全文が見え、_0815.jpg で終わる。
+          typical: q({
+            name: 'IMG_20230815_123456_0815.jpg',
+            date: '2023-08-15 12:34:56',
+            gps: '1',
+            pos: '5',
+            total: '9',
+          }),
           long: q({
             name: long,
             date: '2023-08-15T12:34:56',
@@ -3875,9 +3933,11 @@ const scenarios = [
             if (m.hScroll) fail.push('h-scroll');
             if (!m.barInViewport) fail.push('bar off-screen');
             if (m.barH > 60) fail.push(`bar height ${m.barH}`);
-            if (kind === 'short') {
-              if (m.visible !== m.total) fail.push(`short name clipped ${m.visible}/${m.total}`);
-              if (m.dateText !== null) fail.push('date shown without EXIF');
+            if (kind === 'short' || kind === 'typical') {
+              if (m.visible !== m.total) fail.push(`${kind} name clipped ${m.visible}/${m.total}`);
+              if (kind === 'short' && m.dateText !== null) fail.push('date shown without EXIF');
+              if (kind === 'typical' && !m.visibleText.endsWith('_0815.jpg'))
+                fail.push('typical tail');
             } else {
               if (m.visible < minChars) fail.push(`only ${m.visible} chars visible (<${minChars})`);
               if (!m.tailVisible || !m.visibleText.endsWith('.jpg')) fail.push('extension hidden');
@@ -3896,6 +3956,131 @@ const scenarios = [
       return { pass: bad.length === 0, detail: bad.length ? bad.join(' | ') : lines.join(' ') };
     },
   })),
+  {
+    // #114 レビュー M1 / #116: ファイル名は選択・コピーで元の文字列に完全一致する（head と tail の境に
+    // 改行が入らない。結合文字・絵文字・日本語・RTL・拡張子なし・ドットだけ・60字超も）。
+    // 方法: 要素の全選択 / ドラッグ選択 / トリプルクリック / ダブルクリック(単語。改行なし・部分一致) /
+    // Ctrl+C(実クリップボード)。情報クラスタ全体の選択でも区切り点が独立行にならない。
+    name: 'overlay file name selects and copies as the exact file name (#114, #116)',
+    hash: 'bar',
+    async run(page) {
+      await page.setViewportSize({ width: 800, height: 600 });
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+      const names = [
+        'Family_Trip_Okinawa_Churaumi_Aquarium_2023_08_15_0815.jpg',
+        'a.b.c.jpg',
+        '.hidden',
+        '沖縄旅行の写真_美ら海水族館_ジンベエザメ_001.jpg',
+        'photo_😀😀😀😀😀😀😀😀😀😀_end.jpg',
+        'aaaaaaaaaaaaaaaaaaaaaa👨‍👩‍👧.jpg',
+        'cafe\u0301_cafe\u0301_cafe\u0301_cafe\u0301_cafe\u0301.jpg',
+        'שלום_עולם_תמונה_ארוכה_מאוד_ושוב_2023.jpg',
+        'no_extension_file_name_that_is_very_long_indeed_yes',
+        'x'.repeat(70) + '.jpg',
+      ];
+      const bad = [];
+      const table = [];
+      for (const name of names) {
+        const q = new URLSearchParams({
+          name,
+          date: '2023-08-15 12:34:56',
+          gps: '1',
+          pos: '5',
+          total: '9',
+        }).toString();
+        await page.goto('about:blank');
+        await page.goto(`${BASE_URL}/#bar?${q}`);
+        await page.reload();
+        await page.waitForSelector('.fixed.bottom-6 [data-overlay="filename"]', { timeout: 15000 });
+        await page.waitForTimeout(500);
+        await page.mouse.move(400, 250);
+        await page.mouse.move(401, 251);
+        await page.waitForTimeout(450);
+        const got = {};
+        const sel = () => page.evaluate(() => window.getSelection().toString());
+        // ドラッグの始点・終点は文字そのものの範囲(Range)の内側に取る。RTL 行は文字が行の端と
+        // 揃わず、空白部分から始めると選択が空になるため。行の外にはみ出す部分は行幅で切る。
+        const box = () =>
+          page.evaluate(() => {
+            const row = document.querySelector('.fixed.bottom-6 [data-overlay="filename"]');
+            const rg = document.createRange();
+            rg.selectNodeContents(row);
+            const t = rg.getBoundingClientRect();
+            const r = row.getBoundingClientRect();
+            return { l: t.left, r: Math.min(t.right, r.right), y: r.top + r.height / 2 };
+          });
+        // 1. 要素全選択 / 情報クラスタ全体
+        got.range = await page.evaluate(() => {
+          const el = document.querySelector('.fixed.bottom-6 [data-overlay="filename"]');
+          const g = window.getSelection();
+          const rg = document.createRange();
+          rg.selectNodeContents(el);
+          g.removeAllRanges();
+          g.addRange(rg);
+          return g.toString();
+        });
+        got.cluster = await page.evaluate(() => {
+          const el = document.querySelector('.fixed.bottom-6 div[title]');
+          const g = window.getSelection();
+          const rg = document.createRange();
+          rg.selectNodeContents(el);
+          g.removeAllRanges();
+          g.addRange(rg);
+          return g.toString();
+        });
+        // 2. ドラッグ選択（行の左端から右端まで）
+        await page.evaluate(() => window.getSelection().removeAllRanges());
+        const b = await box();
+        await page.mouse.move(b.l + 1, b.y);
+        await page.mouse.down();
+        await page.mouse.move(b.r - 1, b.y, { steps: 8 });
+        await page.mouse.up();
+        got.drag = await sel();
+        // 3. トリプルクリック
+        await page.mouse.click(b.l + 20, b.y, { clickCount: 3 });
+        got.triple = await sel();
+        // 4. ダブルクリック（単語）
+        await page.mouse.click(b.l + 20, b.y, { clickCount: 2 });
+        got.double = await sel();
+        // 5. Ctrl+C（ドラッグ選択のあと実クリップボードを読む）。選択済み文字の上で押すと
+        // ドラッグ移動になるので、先に選択を外す。
+        await page.evaluate(() => window.getSelection().removeAllRanges());
+        await page.mouse.move(400, 250);
+        await page.mouse.move(b.l + 1, b.y);
+        await page.mouse.down();
+        await page.mouse.move(b.r - 1, b.y, { steps: 8 });
+        await page.mouse.up();
+        await page.keyboard.press('Control+c');
+        await page.waitForTimeout(150);
+        got.copy = await page.evaluate(() => navigator.clipboard.readText());
+        const ok = {
+          range: got.range === name,
+          cluster:
+            got.cluster === `${name}\n${got.cluster.split('\n')[1]}` &&
+            got.cluster.split('\n').length === 2 &&
+            /· 5 \/ 9$/.test(got.cluster),
+          drag: got.drag === name,
+          triple: got.triple.replace(/\n$/, '') === name,
+          double:
+            !got.double.includes('\n') &&
+            got.double.trim() !== '' &&
+            name.includes(got.double.trim()),
+          copy: got.copy === name,
+        };
+        table.push(
+          `${name.slice(0, 12)}…:${
+            Object.entries(ok)
+              .map(([k, v]) => (v ? '' : `!${k}`))
+              .join('') || 'ok'
+          }`,
+        );
+        for (const [k, v] of Object.entries(ok)) {
+          if (!v) bad.push(`${name.slice(0, 20)} ${k}=${JSON.stringify(got[k])}`);
+        }
+      }
+      return { pass: bad.length === 0, detail: bad.length ? bad.join(' | ') : table.join(' ') };
+    },
+  },
 ];
 
 /**
@@ -3952,7 +4137,7 @@ function measureOverlayName() {
     dateText: date ? date.textContent : null,
     dateClipped: date ? date.scrollWidth > date.clientWidth + 1 : false,
     posText: pos ? pos.textContent : null,
-    posClipped: pos ? pos.scrollWidth > pos.clientWidth + 1 : false,
+    posClipped: pos ? pos.getBoundingClientRect().right > infoRect.right + 0.5 : false,
     userSelect: getComputedStyle(name).userSelect,
     hScroll: document.documentElement.scrollWidth > innerWidth,
   };
