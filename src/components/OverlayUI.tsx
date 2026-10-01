@@ -457,10 +457,10 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
           「今フェードして隠すべきか」のboolean一つだけを見るヘルパーなので、
           バーとは別の条件（isIdle && !isPausedByUser）を渡して使い回す）。 */}
       <div
-        className={`fixed bottom-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden z-40 ${idleFadeClassName(isIdle && !isPausedByUser)}`}
+        className={`fixed bottom-0 left-0 right-0 h-0.5 bg-black/75 overflow-hidden z-40 ${idleFadeClassName(isIdle && !isPausedByUser)}`}
       >
         <div
-          className="h-full w-full bg-white/50 origin-left"
+          className="h-full w-full bg-white/80 origin-left"
           style={{
             transform: `scaleX(${Math.max(0, Math.min(100, progress)) / 100})`,
             transition:
@@ -513,7 +513,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
         >
-          <div className="flex items-center gap-1 bg-black/50 backdrop-blur-md rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl">
+          <div className="flex items-center gap-1 bg-black/75 backdrop-blur-md rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl">
             {/* 左: 情報クラスタ（GPSサムネ[任意] + ファイル名 · 撮影日 · 位置n/N） */}
             <div className="flex items-center gap-2 min-w-0 flex-1">
               {hasGps && (
@@ -548,11 +548,11 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                 {dateShort && (
                   <>
                     <span className="text-white/20 shrink-0">·</span>
-                    <span className="text-white/50 font-mono shrink-0">{dateShort}</span>
+                    <span className="text-white/60 font-mono shrink-0">{dateShort}</span>
                   </>
                 )}
                 <span className="text-white/20 shrink-0">·</span>
-                <span className="text-white/50 font-mono shrink-0 tabular-nums">
+                <span className="text-white/60 font-mono shrink-0 tabular-nums">
                   {currentPosition.toLocaleString()} / {totalImages.toLocaleString()}
                 </span>
               </div>

@@ -721,3 +721,39 @@ describe('OverlayUI undo toast (#78)', () => {
     }
   });
 });
+
+// #113: 明るい写真の上でも読めるよう、操作バーの背景は不透明寄り(bg-black/75)にし、
+// 撮影日・位置表示は text-white/60 以上にする。実効コントラスト比そのものは
+// 実ブラウザ e2e（overlay contrast ...）が測る。ここでは退行しやすいクラス指定をピン留めする。
+describe('OverlayUI bar keeps readable contrast over bright photos (#113)', () => {
+  it('uses an opaque-enough bar background and no faint (/50) secondary text', () => {
+    const image = makeImage({
+      exif: {
+        dateTime: '2024:05:01 12:00:00',
+        gpsLatitude: null,
+        gpsLongitude: null,
+      } as ImageInfo['exif'],
+    });
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const dateEl = screen.getByText('2024-05-01');
+    const posEl = screen.getByText('1 / 10');
+    const bar = dateEl.closest('.backdrop-blur-md')!;
+    expect(bar.className).toContain('bg-black/75');
+    expect(bar.className).not.toContain('bg-black/50');
+    for (const el of [dateEl, posEl]) {
+      expect(el.className).toContain('text-white/60');
+      expect(el.className).not.toContain('text-white/50');
+    }
+  });
+});
+
+describe('OverlayUI progress hairline stays visible over bright photos (#113)', () => {
+  it('uses a dark track and a bright fill instead of faint white-on-white', () => {
+    const { container } = render(<OverlayUI image={makeImage()} {...requiredProps} />);
+    const track = container.querySelector('.fixed.bottom-0.left-0.right-0')!;
+    expect(track.className).toContain('bg-black/75');
+    expect(track.className).not.toContain('bg-white/10');
+    expect(track.firstElementChild!.className).toContain('bg-white/80');
+  });
+});

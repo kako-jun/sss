@@ -199,6 +199,257 @@ async function wakeFromIdle(page) {
 }
 
 /**
+ * #113: 操作バー（ファイル名・撮影日・位置表示・各アイコン）と右上ピルのアイコンの
+ * 「実効コントラスト比」を実描画から測る。
+ *
+ * 1. 計測対象（要素の矩形・computed color・祖先の opacity 積）を集める。
+ * 2. 前景（文字・アイコン）を透明にしたスクリーンショットを撮る。ここに写る画素が、
+ *    背景写真 + backdrop-blur + バー背景が合成された「要素の背後の実際の色」になる。
+ * 3. 矩形内の各背景画素ごとに、前景色（computed color × 祖先 opacity）を
+ *    その画素へアルファブレンドした色との WCAG コントラスト比を求め、下位2%点を
+ *    その要素の代表値にする（高周波パターンでも最悪側を見る）。
+ * 4. 参考として、通常のスクリーンショットで矩形内の最も明るい画素（=文字/アイコンの
+ *    芯）と、背景の上位2%点との比（peakRatio）も出す。computed 由来の値と大きく
+ *    食い違わないことの検算用。
+ *
+ * 文字 = ファイル名・撮影日・位置表示。アイコン = バーの有効なボタンと右上ピルのアイコン。
+ * 無効ボタン（先頭写真での「前へ」）と装飾の区切り点（·）は WCAG の対象外なので測らない。
+ *
+ * 矩形は CSS px で取り、スクリーンショットの画素座標へは devicePixelRatio を掛けて変換する
+ * （DPR 1 で検証済み。DPR 2 以上は座標変換のみ入れてあり未検証）。
+ *
+ * peakRatio がアイコンで computed 由来の ratio より大きく乖離するのは意図どおり: ratio は
+ * アイコンの芯（stroke の色 = /60 の線）の実効色を測るが、peak は矩形内の最大輝度画素
+ * （hover 時の強調や、MapPin のように別色で塗られた部分・アンチエイリアスを含む）を拾うため。
+ * 文字・均一なアイコンでは両者が一致することを検算に使う。
+ */
+async function measureOverlayContrast(page) {
+  await wakeFromIdle(page);
+  await page.waitForTimeout(300);
+  const targets = await page.evaluate(() => {
+    const out = [];
+    const effOpacity = (el) => {
+      let o = 1;
+      for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+        o *= Number(getComputedStyle(n).opacity);
+      }
+      return o;
+    };
+    const add = (label, kind, el) => {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return;
+      out.push({
+        label,
+        kind,
+        rect: { x: r.left, y: r.top, w: r.width, h: r.height },
+        color: getComputedStyle(el).color,
+        opacity: effOpacity(el),
+      });
+    };
+    const bar = document.querySelector('.fixed.bottom-6 > div');
+    const info = bar && bar.querySelector('div[title]');
+    if (info) {
+      const spans = [...info.querySelectorAll('span')];
+      const name = spans[0];
+      if (name) add('filename', 'text', name);
+      const mono = spans.filter((s) => s.classList.contains('font-mono'));
+      const date = mono.find((s) => !s.classList.contains('tabular-nums'));
+      const pos = mono.find((s) => s.classList.contains('tabular-nums'));
+      if (date) add('date', 'text', date);
+      if (pos) add('position', 'text', pos);
+    }
+    if (bar) {
+      [...bar.querySelectorAll(':scope button')].forEach((b, i) => {
+        const svg = b.querySelector('svg');
+        if (svg && !b.disabled && b.closest('[role=menu]') === null) {
+          add(`bar-icon-${i}`, 'icon', b);
+        }
+      });
+    }
+    [...document.querySelectorAll('.fixed.top-4.right-4 button')].forEach((b, i) => {
+      if (b.querySelector('svg')) add(`pill-icon-${i}`, 'icon', b);
+    });
+    return out;
+  });
+  if (targets.length === 0) throw new Error('計測対象のオーバーレイ要素が見つからない');
+
+  // スクリーンショットは device pixel 単位なので、CSS px の矩形に DPR を掛けて画素座標にする。
+  const dsf = await page.evaluate(() => window.devicePixelRatio);
+  const withFg = await page.screenshot({ type: 'png' });
+  await page.addStyleTag({
+    content:
+      '*{color:transparent!important;text-shadow:none!important}' +
+      'svg,svg *{stroke:transparent!important;fill:transparent!important;filter:none!important}',
+  });
+  await page.waitForTimeout(400);
+  const bgOnly = await page.screenshot({ type: 'png' });
+
+  const results = await page.evaluate(
+    async ({ withFgB64, bgOnlyB64, targets, dsf }) => {
+      const load = (b64) =>
+        new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth;
+            c.height = img.naturalHeight;
+            const g = c.getContext('2d');
+            g.drawImage(img, 0, 0);
+            resolve(g);
+          };
+          img.onerror = reject;
+          img.src = `data:image/png;base64,${b64}`;
+        });
+      const gA = await load(withFgB64);
+      const gB = await load(bgOnlyB64);
+      const lin = (v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      };
+      const lum = (r, g, b) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      const ratio = (l1, l2) => (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      const pct = (arr, p) => {
+        const a = [...arr].sort((x, y) => x - y);
+        return a[Math.min(a.length - 1, Math.max(0, Math.floor(p * a.length)))];
+      };
+      return targets.map((t) => {
+        const m = t.color.match(/[\d.]+/g).map(Number);
+        const fgA = (m[3] === undefined ? 1 : m[3]) * t.opacity;
+        const x = Math.max(0, Math.floor(t.rect.x * dsf));
+        const y = Math.max(0, Math.floor(t.rect.y * dsf));
+        const w = Math.max(1, Math.ceil(t.rect.w * dsf));
+        const h = Math.max(1, Math.ceil(t.rect.h * dsf));
+        const a = gA.getImageData(x, y, w, h).data;
+        const b = gB.getImageData(x, y, w, h).data;
+        const ratios = [];
+        const bgLums = [];
+        let peak = 0;
+        for (let i = 0; i < b.length; i += 4) {
+          const br = b[i];
+          const bg = b[i + 1];
+          const bb = b[i + 2];
+          const er = m[0] * fgA + br * (1 - fgA);
+          const eg = m[1] * fgA + bg * (1 - fgA);
+          const eb = m[2] * fgA + bb * (1 - fgA);
+          const bl = lum(br, bg, bb);
+          bgLums.push(bl);
+          ratios.push(ratio(lum(er, eg, eb), bl));
+          peak = Math.max(peak, lum(a[i], a[i + 1], a[i + 2]));
+        }
+        return {
+          label: t.label,
+          kind: t.kind,
+          ratio: pct(ratios, 0.02),
+          peakRatio: ratio(peak, pct(bgLums, 0.98)),
+        };
+      });
+    },
+    {
+      withFgB64: withFg.toString('base64'),
+      bgOnlyB64: bgOnly.toString('base64'),
+      targets,
+      dsf,
+    },
+  );
+  return { results, withFg };
+}
+
+/**
+ * #113(S1): 画面下端の進捗ヘアライン（2px）のコントラストを実描画から測る。
+ * フィル（進んだ分）とトラック（残り）、トラックと写真、フィルと写真の各中央値の色から
+ * WCAG 比を出す。写真側はヘアラインの少し上（バーと重ならない行）を使う。
+ * 進捗は表示間隔(5秒)で 0→100% に動くので、起動 1.5 秒後（約30%）のフィル範囲を使う。
+ */
+async function measureHairlineContrast(page) {
+  await wakeFromIdle(page);
+  await page.waitForTimeout(1200);
+  const dsf = await page.evaluate(() => window.devicePixelRatio);
+  const rects = await page.evaluate(() => {
+    const track = document.querySelector('.fixed.bottom-0.left-0.right-0');
+    const fill = track && track.firstElementChild;
+    if (!track || !fill) return null;
+    const t = track.getBoundingClientRect();
+    const f = fill.getBoundingClientRect();
+    return {
+      track: { x: t.left, y: t.top, w: t.width, h: t.height },
+      fill: { x: f.left, y: f.top, w: f.width, h: f.height },
+    };
+  });
+  if (!rects) throw new Error('進捗ヘアラインが見つからない');
+  const shot = await page.screenshot({ type: 'png' });
+  return page.evaluate(
+    async ({ b64, rects, dsf }) => {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = reject;
+        i.src = `data:image/png;base64,${b64}`;
+      });
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const g = c.getContext('2d');
+      g.drawImage(img, 0, 0);
+      const lin = (v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      };
+      const lum = ([r, gg, b]) => 0.2126 * lin(r) + 0.7152 * lin(gg) + 0.0722 * lin(b);
+      const ratio = (a, b) => {
+        const l1 = lum(a);
+        const l2 = lum(b);
+        return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      };
+      const median = (x, y, w, h) => {
+        const d = g.getImageData(
+          Math.floor(x * dsf),
+          Math.floor(y * dsf),
+          Math.max(1, Math.floor(w * dsf)),
+          Math.max(1, Math.floor(h * dsf)),
+        ).data;
+        const ch = [[], [], []];
+        for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) ch[k].push(d[i + k]);
+        return ch.map((a) => a.sort((p, q) => p - q)[a.length >> 1]);
+      };
+      const { track, fill } = rects;
+      const midY = track.y;
+      const fillPx = median(fill.x + 4, midY, Math.max(1, fill.w - 40), track.h);
+      const trackPx = median(track.x + track.w - 120, midY, 100, track.h);
+      const photoPx = median(fill.x + 4, midY - 12, 200, 4);
+      return {
+        fillTrack: ratio(fillPx, trackPx),
+        trackPhoto: ratio(trackPx, photoPx),
+        fillPhoto: ratio(fillPx, photoPx),
+        fillW: fill.w,
+        trackW: track.w,
+        fillPx,
+        trackPx,
+        photoPx,
+      };
+    },
+    { b64: shot.toString('base64'), rects, dsf },
+  );
+}
+
+/** ヘアラインの合否: フィルがトラックから 3:1 で識別でき、ヘアライン全体が写真からも 3:1 で識別できる。 */
+function summarizeHairline(m) {
+  const visible = m.trackPhoto >= 3 || m.fillPhoto >= 3;
+  return {
+    pass: m.fillTrack >= 3 && visible && m.fillW > 50 && m.fillW < m.trackW - 200,
+    detail: `hairline fill/track=${m.fillTrack.toFixed(2)} track/photo=${m.trackPhoto.toFixed(2)} fill/photo=${m.fillPhoto.toFixed(2)} fill=${m.fillPx} track=${m.trackPx} photo=${m.photoPx}`,
+  };
+}
+
+/** #113: 計測結果から、文字 4.5:1 / アイコン 3:1 を満たすかと要約文字列を返す。 */
+function summarizeContrast(results) {
+  const fails = results.filter((r) => r.ratio < (r.kind === 'text' ? 4.5 : 3));
+  const fmt = results.map(
+    (r) => `${r.label}=${r.ratio.toFixed(2)}(peak ${r.peakRatio.toFixed(2)})`,
+  );
+  return { pass: fails.length === 0 && results.length > 0, detail: fmt.join(' ') };
+}
+
+/**
  * 本物のマウス操作でボタンをクリックする（Playwrightの`click()`は実ブラウザの
  * pointerdown/mousedown/mouseup/clickイベント一式を発火する）。#66レビュー
  * must2: JSの`.click()`と違い、実ブラウザの`:focus-visible`ヒューリスティックが
@@ -3498,6 +3749,63 @@ const scenarios = [
       return {
         pass,
         detail: `causeShown=${causeShown} loadErrorShown=${loadErrorShown} retryShown=${retryShown}`,
+      };
+    },
+  },
+  ...[
+    { name: 'ja', locale: 'ja-JP' },
+    { name: 'en', locale: 'en-US' },
+  ].flatMap((c) =>
+    ['white', 'mid', 'black'].map((kind) => ({
+      // #113: 白・中間灰・黒の写真の上で、操作バーの文字（ファイル名・撮影日・位置表示）は
+      // 実効コントラスト 4.5:1 以上、アイコン（バー・右上ピル）と進捗ヘアラインは 3:1 以上。
+      // 黒は修正前でも通る網羅用（退行検出の主役は白・中間灰）。
+      name: `overlay contrast on a ${kind} photo: text >= 4.5:1, icons >= 3:1 (${c.name}) (#113)`,
+      hash: `bg?kind=${kind}`,
+      locale: c.locale,
+      async run(page) {
+        const { results, withFg } = await measureOverlayContrast(page);
+        if (process.env.E2E_SHOT_DIR) {
+          fs.writeFileSync(`${process.env.E2E_SHOT_DIR}/contrast-${kind}-${c.name}.png`, withFg);
+        }
+        const text = summarizeContrast(results);
+        await page.reload();
+        const hair = summarizeHairline(await measureHairlineContrast(page));
+        return { pass: text.pass && hair.pass, detail: `${text.detail} | ${hair.detail}` };
+      },
+    })),
+  ),
+  {
+    // #113: 明灰・高彩度（赤/緑/青）・白黒1px縦縞・8px市松・高周波ノイズの写真でも同じ基準を満たす
+    // （backdrop-blur 越しの背景が最悪側に振れても足りること）。
+    name: 'overlay contrast on light, saturated, striped, checker and noisy photos (#113)',
+    hash: 'bg?kind=white',
+    async run(page) {
+      const bad = [];
+      const lines = [];
+      for (const kind of ['light', 'red', 'green', 'blue', 'stripe', 'checker', 'noise']) {
+        await page.goto('about:blank');
+        await page.goto(`${BASE_URL}/#bg?kind=${kind}`);
+        await page.reload();
+        await page.waitForTimeout(800);
+        const { results, withFg } = await measureOverlayContrast(page);
+        if (process.env.E2E_SHOT_DIR) {
+          fs.writeFileSync(`${process.env.E2E_SHOT_DIR}/contrast-${kind}-ja.png`, withFg);
+        }
+        const s = summarizeContrast(results);
+        if (!s.pass) bad.push(kind);
+        if (['light', 'red', 'green', 'blue'].includes(kind)) {
+          // ヘアラインは単色の写真だけ測る（縞・ノイズは写真側の中央値が意味を持たない）。
+          await page.reload();
+          const hair = summarizeHairline(await measureHairlineContrast(page));
+          if (!hair.pass) bad.push(`${kind}-hairline`);
+          s.detail += ` | ${hair.detail}`;
+        }
+        lines.push(`[${kind}] ${s.detail}`);
+      }
+      return {
+        pass: bad.length === 0,
+        detail: `fail=${bad.join(',') || 'none'} ${lines.join(' ')}`,
       };
     },
   },
