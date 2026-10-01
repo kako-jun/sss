@@ -636,7 +636,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 - **Release**: `.github/workflows/release.yml` — 手動 dispatch。`validate` ジョブで (1) dispatch 元ブランチが `main` であること (2) `version` 入力が `vX.Y.Z`（プレリリース識別子任意）の形式であること (3) 同名タグが未使用であること (4) 入力 version と `tauri.conf.json`/`Cargo.toml`/`package.json` の version 一致 (5) CHANGELOG.md に対応する `[version]` 節が存在すること (6) `npm test`/`cargo test` の通過、を順にチェックし、いずれか失敗で fail。通過後に3-OS matrix（macOS/Linux/Windows）で `tauri-action` がビルドし、release note は CHANGELOG.md の該当節へのリンク。**成果物は署名なし**（macOS Gatekeeper/Windows SmartScreen の回避手順は README の「未署名アプリの警告について」に記載）。Windows は `--bundles nsis`（`setup.exe`）のみ、macOS は universal（`.dmg`）、Linux は AppImage/deb/rpm を生成する。`tag v*` の push では起動しない（`workflow_dispatch` のみ。タグは `tauri-action` がリリース作成時に作る）
   - **リリース手順**: 1. `tauri.conf.json` / `src-tauri/Cargo.toml` / `package.json` の version を揃えて更新 2. CHANGELOG.md の `[Unreleased]` を `[X.Y.Z] - YYYY-MM-DD` に改名し、新しい空の `[Unreleased]` を上に用意 3. これらを含む PR を作成し main にマージ 4. GitHub Actions の `Release Build` を `workflow_dispatch` で実行し、`version` に `vX.Y.Z` を入力（main ブランチから実行すること） 5. `validate` → `build` の通過を確認し、GitHub Releases に3プラットフォーム分の成果物が揃ったことを確認する
 - **Pre-commit**: Husky（`.husky/pre-commit`）で `npx lint-staged`（`eslint --fix` + `prettier` for TS/JS、`prettier` for JSON/CSS/MD）と `cd src-tauri && cargo fmt` を実行
-- **CHANGELOG.md**: Keep a Changelog 形式。v1.0.0 以降の変更を記録。**コード変更を伴う PR は自分の変更を `[Unreleased]` セクションに追記する**（#70 以降の運用）
+- **CHANGELOG.md**: Keep a Changelog 形式。v1.1.0 以降の変更を記録。**コード変更を伴う PR は自分の変更を `[Unreleased]` セクションに追記する**（#70 以降の運用）
 
 ## TODO: 仕様変更・機能追加
 

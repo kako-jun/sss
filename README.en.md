@@ -24,15 +24,13 @@ A slideshow app that shows 100,000+ photos fairly.
 
 ### Prebuilt binaries (Releases)
 
-Download the file for your OS from [Releases](https://github.com/kako-jun/sss/releases) (the latest is currently v1.0.0).
+Download the file for your OS from [Releases](https://github.com/kako-jun/sss/releases) (the latest is v1.1.0).
 
 | OS      | File                                                            |
 | ------- | --------------------------------------------------------------- |
-| Windows | `sss_*_x64-setup.exe` (NSIS installer) / `sss_*_x64_en-US.msi`  |
+| Windows | `sss_*_x64-setup.exe` (NSIS installer)                          |
 | macOS   | `sss_*_universal.dmg` (Apple Silicon and Intel)                 |
 | Linux   | `sss_*_amd64.AppImage` / `sss_*_amd64.deb` / `sss-*.x86_64.rpm` |
-
-**v1.0.0 does not include later changes such as video slideshow playback, the Japanese/English UI, the reworked Stats tab, the Space / F / F11 / ? shortcuts, click/wheel on the photo, undo and window-state memory (see `[1.1.0]` in [CHANGELOG.md](CHANGELOG.md)).** To use the latest `main`, build from source (below). The current release workflow builds only the NSIS installer (`setup.exe`) for Windows (the v1.0.0 `.msi` came from an earlier build).
 
 #### About the unsigned app warning
 
