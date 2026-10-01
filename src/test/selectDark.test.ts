@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 /**
  * #102: select のポップアップはOS既定だと明るい背景になる。全 <select> が
@@ -18,72 +19,116 @@ function walk(dir: string): string[] {
   });
 }
 
-// ブロック/行コメントを除去する(コメントアウトされた select を拾わない)。
-// 文字列リテラル('...' "..." `...`)の中の `//` `/*` はコメント扱いせず保持する。
-// '...' "..." は改行で閉じる(JSX テキスト中のアポストロフィで後続行を巻き込まないため)。
-function stripComments(src: string): string {
-  let out = '';
-  let i = 0;
-  while (i < src.length) {
-    const c = src[i];
-    const n = src[i + 1];
-    if (c === '/' && n === '*') {
-      const end = src.indexOf('*/', i + 2);
-      i = end === -1 ? src.length : end + 2;
-    } else if (c === '/' && n === '/') {
-      const end = src.indexOf('\n', i);
-      i = end === -1 ? src.length : end;
-    } else if (c === '"' || c === "'" || c === '`') {
-      let j = i + 1;
-      while (j < src.length && src[j] !== c) {
-        if (src[j] === '\\') j++;
-        else if (src[j] === '\n' && c !== '`') break;
-        j++;
-      }
-      out += src.slice(i, j + 1);
-      i = j + 1;
-    } else {
-      out += c;
-      i++;
-    }
+/**
+ * TypeScript の構文木から <select> を列挙し、className に sss-select が
+ * 完全一致のトークンとして含まれるかを判定する。コメント・文字列・正規表現内の
+ * `<select` は構文木に現れないので誤検出しない(手書きスキャナは使わない)。
+ */
+function classTokens(node: ts.Node | undefined): string[] | null {
+  if (!node) return null;
+  if (ts.isStringLiteralLike(node)) return node.text.split(/\s+/);
+  if (ts.isTemplateExpression(node)) {
+    // 静的な断片だけを見る(`${}` の中身は無視。静的断片に sss-select があれば十分)。
+    const parts = [node.head.text, ...node.templateSpans.map((sp) => sp.literal.text)];
+    return parts.flatMap((t) => t.split(/\s+/));
   }
-  return out;
+  if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)) {
+    return classTokens(node.expression);
+  }
+  if (ts.isJsxExpression(node)) return classTokens(node.expression);
+  return null;
 }
 
-/** タグ文字列の className に、境界付きで sss-select があるか。 */
-function hasSssSelect(tag: string): boolean {
-  const m = tag.match(/className=(?:"([^"]*)"|'([^']*)'|\{`([^`]*)`\})/);
-  const value = m ? (m[1] ?? m[2] ?? m[3] ?? '') : '';
-  return value.split(/\s+/).includes('sss-select');
+/** 条件式は全分岐が sss-select を持つ場合のみ true。判定不能な動的式は false(安全側=offender)。 */
+function exprHasSssSelect(node: ts.Node | undefined): boolean {
+  if (!node) return false;
+  if (ts.isJsxExpression(node) || ts.isParenthesizedExpression(node) || ts.isAsExpression(node)) {
+    return exprHasSssSelect(node.expression);
+  }
+  if (ts.isConditionalExpression(node)) {
+    return exprHasSssSelect(node.whenTrue) && exprHasSssSelect(node.whenFalse);
+  }
+  const tokens = classTokens(node);
+  return tokens !== null && tokens.includes('sss-select');
 }
 
-function selectTags(src: string): string[] {
-  return [...stripComments(src).matchAll(/<select\b(?:=>|[^>])*>/g)].map((m) => m[0]);
+/** ソース中の各 <select> について sss-select を持つかを返す(パースエラーでも落ちない)。 */
+function scanSelects(src: string): boolean[] {
+  const sf = ts.createSourceFile('x.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const results: boolean[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+      ts.isIdentifier(node.tagName) &&
+      node.tagName.text === 'select'
+    ) {
+      const attr = node.attributes.properties.find(
+        (p): p is ts.JsxAttribute => ts.isJsxAttribute(p) && p.name.getText(sf) === 'className',
+      );
+      results.push(exprHasSssSelect(attr?.initializer));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return results;
 }
 
 describe('scan helpers (#102)', () => {
-  it('ignores commented-out selects', () => {
-    expect(selectTags('{/* <select className="x"> */}')).toEqual([]);
-    expect(selectTags('/* <select> */\n// <select>\n<div/>')).toEqual([]);
-    expect(selectTags('<select className="a" onChange={(e) => f(e)}>')).toHaveLength(1);
+  const count = (src: string) => scanSelects(src).length;
+
+  it('ignores selects in comments, strings, templates and regex literals', () => {
+    expect(count('{/* <select className="x"> */}')).toBe(0);
+    expect(count('/* <select> */\n// <select>\n<div/>')).toBe(0);
+    expect(count('const a = "<select>"; const b = \'<select>\';')).toBe(0);
+    expect(count('const a = `<select>`;')).toBe(0);
+    expect(count('const r = /<select>/g; const x = <div/>;')).toBe(0);
+    expect(count('const a = 1 /**/ + 2; /* <select> */')).toBe(0);
   });
 
-  it('does not treat // or /* inside string literals as comments', () => {
-    expect(selectTags('const a = "a//b"; <select className="x">')).toHaveLength(1);
-    expect(selectTags('const a = \'//\'; <select className="x">')).toHaveLength(1);
-    expect(selectTags('const a = `//`; <select className="x">')).toHaveLength(1);
-    expect(selectTags('const a = "/*"; <select className="x"> ; const b = "*/";')).toHaveLength(1);
-    expect(selectTags('a // c\n<select className="x">')).toHaveLength(1);
-    expect(selectTags('<p>don\'t</p>\n<select className="x">')).toHaveLength(1);
-    expect(selectTags('x = "a//b"; // <select>')).toEqual([]);
+  it('does not let strings, apostrophes or // confuse the scan', () => {
+    expect(count('const a = "a//b"; const x = <select className="x" />;')).toBe(1);
+    expect(count('const a = \'//\'; const x = <select className="x" />;')).toBe(1);
+    expect(count('const a = `//`; const x = <select className="x" />;')).toBe(1);
+    expect(count('const a = "/*"; const x = <select className="x" />; const b = "*/";')).toBe(1);
+    expect(count('const x = <div><p>don\'t</p> <select className="x" /> // x</div>;')).toBe(1);
+    expect(count('const x = <div>\n// not a comment <select className="x" />\n</div>;')).toBe(1);
   });
 
-  it('matches the class only at a token boundary', () => {
-    expect(hasSssSelect('<select className="sss-select px-2">')).toBe(true);
-    expect(hasSssSelect('<select className="px-2 sss-select">')).toBe(true);
-    expect(hasSssSelect('<select className="sss-select-foo">')).toBe(false);
-    expect(hasSssSelect('<select className="foo-sss-select">')).toBe(false);
-    expect(hasSssSelect('<select className="px-2">')).toBe(false);
+  it('survives unterminated block comments and syntax errors', () => {
+    expect(() => scanSelects('const x = <select className="a" />; /* oops')).not.toThrow();
+    expect(count('const x = <select className="a" />; /* <select>')).toBe(1);
+    expect(() => scanSelects('<select className="a"')).not.toThrow();
+  });
+
+  it('matches sss-select only as a whole token', () => {
+    const one = (cls: string) => scanSelects(`const x = <select className=${cls} />;`);
+    expect(one('"sss-select px-2"')).toEqual([true]);
+    expect(one('"px-2 sss-select"')).toEqual([true]);
+    expect(one("'sss-select'")).toEqual([true]);
+    expect(one('"sss-select-foo"')).toEqual([false]);
+    expect(one('"foo-sss-select"')).toEqual([false]);
+    expect(one('"px-2"')).toEqual([false]);
+    expect(scanSelects('const x = <select />;')).toEqual([false]);
+  });
+
+  it('handles expression, template, nested ${}, conditional and multiline classNames', () => {
+    const one = (cls: string) => scanSelects(`const x = <select className=${cls} />;`);
+    expect(one('{"sss-select a"}')).toEqual([true]);
+    expect(one('{`sss-select ${a}`}')).toEqual([true]);
+    expect(one('{`a ${b ? `${c}` : "d"} sss-select`}')).toEqual([true]);
+    expect(one('{`a ${b}-sss-select`}')).toEqual([false]);
+    expect(one('{c ? "sss-select a" : "sss-select b"}')).toEqual([true]);
+    expect(one('{c ? "sss-select a" : "b"}')).toEqual([false]);
+    // 判定不能な動的 className は安全側(offender)
+    expect(one('{cn("sss-select", x)}')).toEqual([false]);
+    expect(
+      scanSelects(
+        'const x = (\n<select\n  value={v}\n  className="a sss-select"\n  onChange={f}\n>\n</select>\n);',
+      ),
+    ).toEqual([true]);
+    expect(
+      scanSelects('const x = <select className="a">{[1].map((i) => <option key={i} />)}</select>;'),
+    ).toEqual([false]);
   });
 });
 
@@ -92,9 +137,9 @@ describe('select dark popup (#102)', () => {
     const offenders: string[] = [];
     let found = 0;
     for (const file of walk(SRC)) {
-      for (const tag of selectTags(readFileSync(file, 'utf8'))) {
+      for (const ok of scanSelects(readFileSync(file, 'utf8'))) {
         found++;
-        if (!hasSssSelect(tag)) offenders.push(file);
+        if (!ok) offenders.push(file);
       }
     }
     expect(found).toBeGreaterThan(0);
