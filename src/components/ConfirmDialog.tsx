@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../lib/i18n';
 import { useFocusTrap } from '../hooks/useFocusTrap';
@@ -38,11 +38,24 @@ function ConfirmDialogView() {
     getConfirmDialogRequest,
   );
   const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef, true);
-
+  const messageRef = useRef<HTMLDivElement>(null);
+  // 本文がスクロール領域からあふれていて、まだ下に続きがあるか（フェードの手がかり用）。
+  const [moreBelow, setMoreBelow] = useState(false);
   // 既定フォーカス: useFocusTrap が開いた直後（rAF）に最初のフォーカス可能要素へ移す。
   // キャンセルを DOM 上の先頭ボタンにしているので、既定でキャンセルにフォーカスが当たる
   // （ボタンの並びを変える時はこの前提と ConfirmDialog.test.tsx を合わせること）。
+  useFocusTrap(panelRef, true);
+
+  const updateMoreBelow = () => {
+    const el = messageRef.current;
+    if (!el) return;
+    setMoreBelow(el.scrollHeight - el.scrollTop - el.clientHeight > 2);
+  };
+  useEffect(() => {
+    updateMoreBelow();
+    window.addEventListener('resize', updateMoreBelow);
+    return () => window.removeEventListener('resize', updateMoreBelow);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -79,12 +92,24 @@ function ConfirmDialogView() {
         </h2>
         {/* 長い本文でも窓が低いとき（800x600, 360x300 等）ボタンが画面外へ出ないよう、
             本文だけをスクロールさせてボタン行は常に見せる。 */}
-        <p
-          id="confirm-dialog-message"
-          className="min-h-0 overflow-y-auto text-sm text-white/70 whitespace-pre-line leading-relaxed"
-        >
-          {request.message}
-        </p>
+        <div className="relative min-h-0 flex flex-col">
+          <div
+            ref={messageRef}
+            id="confirm-dialog-message"
+            onScroll={updateMoreBelow}
+            className="min-h-0 overflow-y-auto text-sm text-white/70 whitespace-pre-line leading-relaxed"
+          >
+            {request.message}
+          </div>
+          {/* 続きが下にあるときだけ出す、本文下端のフェード（「まだ読み切っていない」手がかり）。 */}
+          {moreBelow && (
+            <div
+              data-testid="confirm-dialog-more"
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-neutral-950 to-transparent"
+            />
+          )}
+        </div>
         <div className="mt-6 shrink-0 flex justify-end gap-3">
           <button
             type="button"

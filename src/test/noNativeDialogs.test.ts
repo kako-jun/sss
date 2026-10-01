@@ -161,6 +161,9 @@ describe('no native dialogs (#119)', () => {
       'const { confirm: c } = window;',
       'import { ask, message } from "@tauri-apps/plugin-dialog";',
       'await import("@tauri-apps/plugin-dialog");',
+      'const d = require("@tauri-apps/plugin-dialog");',
+      'frames.confirm("x")',
+      'export { ask } from "@tauri-apps/plugin-dialog";',
     ];
     for (const code of bad) {
       it(`flags: ${code}`, () => {

@@ -259,8 +259,8 @@ Fields below.
 In-app replacement for `window.confirm` (which Tauri turns into an always-truthy
 Promise — never use it). `role="alertdialog"`, `aria-modal="true"`. Same panel as
 other modals on a `bg-black/85 backdrop-blur-md` backdrop, portaled to `body`,
-narrower (`max-w-md`). Message only (no title, `text-sm text-white/70`,
-`whitespace-pre-line`); buttons right-aligned, Cancel first and focused by default:
+narrower (`max-w-md`). Message body (`text-sm text-white/70`, `whitespace-pre-line`) with no visible
+title — a `sr-only` `<h2>` ("確認" / "Confirm") is referenced via `aria-labelledby`; buttons right-aligned, Cancel first and focused by default:
 
 ```
 Panel:    bg-neutral-950 rounded-2xl border border-white/10 shadow-2xl p-7 max-w-md w-full mx-8
@@ -268,6 +268,11 @@ Cancel:   Buttons — Standard (bg-white/8 hover:bg-white/15 text-white/60 …)
 Confirm:  bg-red-950/60 hover:bg-red-900/60 text-red-400/70 hover:text-red-400/90 rounded-lg text-sm
           (the Settings "danger zone" button style; label names the action, never "OK")
 ```
+
+Long bodies: the panel is `flex flex-col max-h-[calc(100vh-2rem)]`; only the
+message scrolls (`min-h-0 overflow-y-auto`, with a bottom fade hint when more
+text is hidden) and the button row is `shrink-0`, so the buttons never leave
+the screen on short windows.
 
 Esc / backdrop click = Cancel. No emoji.
 
@@ -313,6 +318,14 @@ placeholder border on inactive tabs so nothing shifts on selection). Reasons:
   widths (`overflow-x-auto`, `flex-shrink-0`, `whitespace-nowrap` — #82): it
   wraps to horizontal scroll instead of breaking, and was confirmed not to
   regress at 720px before this pass even started.
+- The tablist itself must also be `shrink-0` (#109): it is a child of the modal's
+  `flex-col` body and `overflow-x-auto` gives it a zero min-height, so without
+  `shrink-0` a tall tab panel shrank the row (39px to 31px at 1280x800, 21px at
+  800x600, clipping the label descenders). Row height is verified constant across
+  all tabs and sizes in the real browser by the e2e scenario.
+- When the row scrolls horizontally (narrow widths), selecting a tab by click
+  also scrolls it into view (`scrollIntoView({inline:'nearest'})` in an effect on
+  the active tab); arrow keys already did via `focus()`. Verified at 360x640.
 - A sidebar redesign touches the tablist/tabpanel ARIA wiring, the focus trap's
   tab order, and every e2e selector keyed on `.overflow-x-auto` — a much larger
   surface of risk for a lateral (not clearly better) navigation pattern change.
@@ -360,6 +373,16 @@ so it always spans the whole photo regardless of the bar's own max-width.
 bg-black/90 rounded-xl shadow-2xl border border-white/10
 p-1.5 space-y-0.5 backdrop-blur-md
 ```
+
+The overlay "…" menu opens upward from the floating bar, so its nested Exclude
+submenu is anchored by its **bottom** edge (`absolute right-full bottom-0`), not
+`top-0`: it is opened from the last row of the parent menu, and growing downward
+from there would run past the viewport and over the bar (#110). Any new nested
+submenu opened from a bottom-anchored menu follows the same rule. At viewport
+width <= 430px there is no room left of the parent (parent right edge at ~231px + 4px gap + 192px submenu + 4px margin = 431px, so it does not fit below 431px), so
+the submenu instead stacks directly above the Exclude row, right-aligned with the
+parent (`max-[430px]:right-0 max-[430px]:bottom-full`). Verified in a real browser
+down to 320px wide.
 
 ### Hover-reveal Controls (#66)
 

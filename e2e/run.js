@@ -11,7 +11,8 @@
 // 実行方法: npm run e2e （リポジトリルートから）。
 // - CI には組み込まない（ローカル専用。system Chrome/Edge が要るため）。
 // - vite dev サーバーをこのスクリプトが起動し、終了時に必ず kill する
-//   （既に1420番ポートで別のdevサーバーが動いていると起動に失敗するので、
+//   （既定は1420番ポート、環境変数 E2E_PORT で変更可。そのポートで別のdevサーバーが
+//   動いていると起動に失敗するので、
 //   その場合は先に閉じてから実行すること）。
 // - Tauri IPC は e2e/init.js が window.__TAURI_INTERNALS__ をモックすることで
 //   vite dev 単体（Tauriランタイム無し）で App.tsx をそのまま動かす。
@@ -28,8 +29,7 @@ import net from 'node:net';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, '..');
-// 並行作業中の別 dev サーバーと衝突しないよう E2E_PORT で上書きできる（既定 1420）。
-const PORT = Number(process.env.E2E_PORT || 1420);
+const PORT = Number(process.env.E2E_PORT) || 1420;
 const BASE_URL = `http://localhost:${PORT}`;
 const INIT_SCRIPT = path.join(__dirname, 'init.js');
 
@@ -1092,6 +1092,26 @@ const scenarios = [
     },
   },
   {
+    // #109: 設定モーダルのタブ行（role=tablist）は overflow-x-auto の flex 子で
+    // 最小高が0になるため、タブ内容が長い（オプション等）と flex-shrink で
+    // 行ごと潰れていた（1280x800 で 39→31px、800x600 で 21px。ラベル下部が
+    // 切れる）。shrink-0 で潰れないことを、ja で 3 サイズ × 全 7 タブの
+    // getBoundingClientRect().height が一定であることで確認する。
+    name: 'Settings tablist height stays constant across all tabs and viewport sizes, ja (#109)',
+    hash: 'slides',
+    async run(page) {
+      return measureSettingsTablistHeights(page);
+    },
+  },
+  {
+    name: 'Settings tablist height stays constant across all tabs and viewport sizes, en (#109)',
+    hash: 'slides',
+    locale: 'en-US',
+    async run(page) {
+      return measureSettingsTablistHeights(page);
+    },
+  },
+  {
     // #66 問題1: 設定を開いている間のESCはモーダルを閉じるだけで、exit_appは
     // 呼ばない（以前はフェーズに関わらず常にexit_appを呼んでいた）。
     name: 'Escape closes the Settings modal instead of exiting the app while it is open (#66 問題1)',
@@ -2087,7 +2107,173 @@ const scenarios = [
       return confirmResetScenario(page, 'en', 'pick');
     },
   },
+  {
+    // #110: 「…」メニュー→「除外」サブメニューの3項目が、どの画面サイズでも
+    // viewport内に収まり、操作バーと交差しない（以前は top-0 で下へ伸びて
+    // 最後の項目が viewport を超え、バーに重なっていた）。
+    name: 'exclude submenu stays inside the viewport and clear of the bar (#110)',
+    hash: 'slides',
+    async run(page) {
+      await wakeFromIdle(page);
+      // 言語非依存: 「…」ボタンと除外トリガーは aria-haspopup="menu" で拾い、
+      // サブメニューは除外トリガーの直後の兄弟要素、親メニューはその祖先で辿る。
+      await page.locator('button[aria-haspopup="menu"]').first().click();
+      await page.waitForTimeout(300);
+      await page.locator('button[aria-haspopup="menu"]').nth(1).click();
+      await page.waitForTimeout(400);
+      const details = [];
+      let pass = true;
+      for (const [w, h] of [
+        [1920, 1080],
+        [1280, 800],
+        [800, 600],
+        [480, 800],
+        [431, 700],
+        [430, 700],
+        [360, 640],
+        [360, 300],
+        [320, 568],
+      ]) {
+        await page.setViewportSize({ width: w, height: h });
+        await page.waitForTimeout(300);
+        const m = await page.evaluate(() => {
+          const rect = (e) => e.getBoundingClientRect();
+          const triggers = [...document.querySelectorAll('button[aria-haspopup="menu"]')];
+          const dots = triggers[0];
+          const trigger = triggers[1];
+          const sub = trigger && trigger.nextElementSibling;
+          if (!sub || sub.children.length !== 3) return null;
+          const rs = [...sub.children].map(rect);
+          const parent = rect(trigger.parentElement.parentElement);
+          let bar = dots;
+          while (bar && getComputedStyle(bar).position !== 'fixed') bar = bar.parentElement;
+          const b = rect(bar);
+          const hits = (box) =>
+            rs.some(
+              (r) =>
+                r.bottom > box.top &&
+                r.top < box.bottom &&
+                r.right > box.left &&
+                r.left < box.right,
+            );
+          // 右上のボタン群（ピル）。表示中のものすべてと交差しないこと。
+          const pills = [...document.querySelectorAll('div.fixed.top-4.right-4')]
+            .map(rect)
+            .filter((p) => p.width > 0 && p.height > 0);
+          return {
+            top: Math.min(...rs.map((r) => r.top)),
+            bottom: Math.max(...rs.map((r) => r.bottom)),
+            left: Math.min(...rs.map((r) => r.left)),
+            right: Math.max(...rs.map((r) => r.right)),
+            barTop: b.top,
+            parentTop: parent.top,
+            parentBottom: parent.bottom,
+            parentLeft: parent.left,
+            subRight: rect(sub).right,
+            scrollable: sub.scrollHeight > sub.clientHeight,
+            hitsBar: hits(b),
+            hitsPill: pills.some(hits),
+            vh: innerHeight,
+            vw: innerWidth,
+          };
+        });
+        // 側方展開（親メニューの左）では、右端が親メニュー枠に食い込まない。
+        // 積み重ね展開（幅430px以下）では対象外。
+        const sideBySide = !!m && m.subRight <= m.parentLeft - 2;
+        const stacked = !!m && !sideBySide;
+        const ok =
+          !!m &&
+          m.top >= 0 &&
+          m.left >= 0 &&
+          m.bottom <= m.vh &&
+          m.right <= m.vw &&
+          !m.hitsBar &&
+          !m.hitsPill &&
+          // 縦スクロール不要（border 分の数pxでも溢れさせない）
+          !m.scrollable &&
+          // 親メニューの縦範囲から大きく外れない（下へ突き抜けない／上へ離れすぎない）
+          m.bottom <= m.parentBottom + 4 &&
+          m.top >= m.parentTop - 60 &&
+          (w <= 430 ? stacked || sideBySide : sideBySide);
+        if (!ok) pass = false;
+        details.push(
+          `${w}x${h}:${ok ? 'ok' : 'NG'}(${m ? `left=${Math.round(m.left)} right=${Math.round(m.right)} subRight=${Math.round(m.subRight)} top=${Math.round(m.top)} bottom=${Math.round(m.bottom)} parent=${Math.round(m.parentTop)}-${Math.round(m.parentBottom)} parentLeft=${Math.round(m.parentLeft)} barTop=${Math.round(m.barTop)} pill=${m.hitsPill} scrollable=${m.scrollable}` : 'items missing'})`,
+        );
+      }
+      return { pass, detail: details.join(' ') };
+    },
+  },
 ];
+
+/**
+ * #109: 設定モーダルのタブ行(role=tablist)の高さが、全タブ × 複数ウィンドウ
+ * サイズで一定であることを実描画の getBoundingClientRect で測る。
+ * 1920x1080 で測った基準高と、1280x800・800x600 の全タブが一致すること。
+ */
+async function measureSettingsTablistHeights(page) {
+  // 高負荷環境でも初回描画（設定ボタン）を待てるよう、固定待機ではなくセレクタで待つ。
+  await page.waitForSelector('svg.lucide-settings', { timeout: 30000 });
+  await page.waitForTimeout(400);
+  await openSettingsModal(page);
+  const tabIds = ['scan', 'options', 'exclude', 'pick', 'history', 'stats', 'info'];
+  const rows = {};
+  const notVisible = [];
+  let baseline = null;
+  let pass = true;
+  for (const [w, h] of [
+    [1920, 1080],
+    [1280, 800],
+    [800, 600],
+    [480, 800],
+    [360, 640],
+  ]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForTimeout(250);
+    const heights = [];
+    for (const id of tabIds) {
+      // 実マウスクリック。狭幅で完全に隠れているタブは、まず行を横スクロールして
+      // 端に少し見える状態にし（ユーザーが行をスワイプ/ホイールした状態）、見えている
+      // 部分の中心を page.mouse.click する。追従の effect が無いと、クリック後も
+      // タブが一部しか見えないままになり下の可視判定で FAIL する。
+      const target = await page.evaluate((i) => {
+        const rowEl = document.querySelector('[role="tablist"]');
+        const tabEl = document.getElementById(`tab-${i}`);
+        let row = rowEl.getBoundingClientRect();
+        let tab = tabEl.getBoundingClientRect();
+        if (tab.left >= row.right - 4) rowEl.scrollLeft += tab.left - (row.right - 20);
+        else if (tab.right <= row.left + 4) rowEl.scrollLeft -= row.left + 20 - tab.right;
+        row = rowEl.getBoundingClientRect();
+        tab = tabEl.getBoundingClientRect();
+        const l = Math.max(tab.left, row.left);
+        const r = Math.min(tab.right, row.right);
+        return { x: (l + r) / 2, y: tab.top + tab.height / 2 };
+      }, id);
+      await page.mouse.click(target.x, target.y);
+      await page.waitForTimeout(200);
+      const height = await page.evaluate(
+        () => document.querySelector('[role="tablist"]').getBoundingClientRect().height,
+      );
+      heights.push(height);
+      // 選択タブがタブ行の可視範囲に入っていること（狭幅の横スクロール追従）。
+      const visible = await page.evaluate((i) => {
+        const row = document.querySelector('[role="tablist"]').getBoundingClientRect();
+        const tab = document.getElementById(`tab-${i}`).getBoundingClientRect();
+        return tab.left >= row.left - 1 && tab.right <= row.right + 1;
+      }, id);
+      if (!visible) {
+        pass = false;
+        notVisible.push(`${w}x${h}:${id}`);
+      }
+      if (baseline === null) baseline = height;
+      if (Math.abs(height - baseline) >= 0.5) pass = false;
+    }
+    rows[`${w}x${h}`] = heights.map((x) => Math.round(x * 10) / 10);
+  }
+  return {
+    pass,
+    detail: `baseline=${baseline} ${JSON.stringify(rows)} notVisible=${JSON.stringify(notVisible)}`,
+  };
+}
 
 /**
  * #82レビュー2巡目 should1（回帰）/ 3巡目 should・nit: 設定タブ行の折返し・横
