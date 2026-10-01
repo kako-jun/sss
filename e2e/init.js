@@ -15,6 +15,11 @@
     '/p/broken.png': 'data:image/png;base64,AAAA',
     // #120: 0バイトの画像（中身が空のdata URL）。実ブラウザで本物のonErrorを起こす。
     '/p/empty.jpg': 'data:image/jpeg;base64,',
+    // #120: 壊れた動画（デコード不能なバイト列。<video>の本物のonErrorを起こす）。
+    '/p/broken.webm': 'data:video/webm;base64,AAAA',
+    // #120: 読み込みが永久に pending のまま（onLoad も onError も来ない）。e2e/run.js が
+    // この URL へのリクエストを応答しないようにする（page.route）。見張りが次へ進める。
+    '/p/pending.png': '/__e2e_pending.png',
   };
 
   const sc = (location.hash || '#slides').slice(1);
@@ -59,6 +64,14 @@
     // '/p/gone.png' は media に無い＝convertFileSrc が 'data:,' を返す（これも onError になる）。
     allbroken: ['/p/empty.jpg', '/p/broken.png', '/p/gone.png'],
     allbrokenen: ['/p/empty.jpg', '/p/broken.png', '/p/gone.png'],
+    // #120: 総数が大きい（12件）プレイリストで壊れたファイルが連続した場合。失敗セットは総数に
+    // 達していない（全件破損とは断定できない）ので「連続して読み込めませんでした」で止まる。
+    streakbroken: Array.from({ length: 12 }, (_, i) => `/p/gone${i}.png`),
+    streakbrokenen: Array.from({ length: 12 }, (_, i) => `/p/gone${i}.png`),
+    // #120: 動画の読み込み失敗（onError）も画像と同じ経路で次へ進む。
+    brokenvid: ['/p/broken.webm', '/p/b.png'],
+    // #120: 読み込みが pending のまま来ない画像を見張りが強制的にスキップする。
+    pending: ['/p/pending.png', '/p/b.png', '/p/a.png'],
     // #65レビュー2巡目S8: 動画のみを連続させ、退場中の古い動画要素が
     // play()で再生し直されないことを画像の待ち時間なしに検証する。
     vv: ['/p/v.webm', '/p/v2.webm'],
@@ -223,6 +236,8 @@
             window.__e2eCurrentPath = p;
             return { kind: 'found', data: info(p) };
           }
+          // #120: 'brokenrun' は応答を少し遅らせ、スキップ中トーストが目視/撮影できる長さ出るようにする。
+          if (sc === 'brokenrun') await new Promise((r) => setTimeout(r, 250));
           const s = seqs[sc] || seqs.slides;
           idx = (idx + 1) % s.length;
           // e2e/run.js が「今どの論理パスが表示されているか」を、DOMのsrc

@@ -791,6 +791,11 @@ const scenarios = [
         });
         if (!toastSeen && (await isVisible(page, '読み込めない写真をスキップしています'))) {
           toastSeen = true;
+          if (process.env.E2E_SHOT_DIR) {
+            // 成功までの短い間しか出ないので、フェード分だけ待って即撮る。
+            await page.waitForTimeout(120);
+            await page.screenshot({ path: `${process.env.E2E_SHOT_DIR}/toast-ja.png` });
+          }
         }
         if (st && st.w > 0) {
           reachedMs = Date.now() - started;
@@ -826,9 +831,9 @@ const scenarios = [
       button: 'Open Settings',
     },
   ].map((c) => ({
-    // #120: 全件が壊れている場合は無限ループ・CPU空転にならず、上限(連続10件)で
-    // 停止して案内（設定を開く導線つき）を出し、その後 get_next_image を叩き続けない。
-    name: `all images broken: stops at the cap and shows guidance, no endless loop (${c.name}) (#120)`,
+    // #120: 全件が壊れている（失敗セットが再生リスト総数に達した）場合は無限ループ・CPU空転に
+    // ならず、すぐ停止して案内（続ける/設定を開く導線つき）を出し、その後 get_next_image を叩き続けない。
+    name: `all images broken: stops once every photo failed and shows guidance, no endless loop (${c.name}) (#120)`,
     hash: c.hash,
     locale: c.locale,
     async run(page) {
@@ -856,11 +861,141 @@ const scenarios = [
         await page.screenshot({ path: `${process.env.E2E_SHOT_DIR}/allbroken-${c.name}.png` });
       }
       return {
-        pass: shown && buttonShown && stillShown && nextsAtStop <= 12 && nextsLater === nextsAtStop,
+        pass: shown && buttonShown && stillShown && nextsAtStop <= 4 && nextsLater === nextsAtStop,
         detail: `shown=${shown} button=${buttonShown} stillShown=${stillShown} nextsAtStop=${nextsAtStop} nextsLater=${nextsLater}`,
       };
     },
   })),
+  ...[
+    {
+      name: 'ja',
+      hash: 'streakbroken',
+      locale: 'ja-JP',
+      title: '連続して読み込めませんでした',
+      all: '読み込める画像がありません',
+      cont: '続ける',
+      settings: '設定を開く',
+    },
+    {
+      name: 'en',
+      hash: 'streakbrokenen',
+      locale: 'en-US',
+      title: 'Several photos in a row failed to load',
+      all: 'No photos could be loaded',
+      cont: 'Continue',
+      settings: 'Open Settings',
+    },
+  ].map((c) => ({
+    // #120: 総数が大きいプレイリストで壊れたファイルが連続10件続いた場合は、「全件破損」と
+    // 断定せず「連続して読み込めませんでした」で止まり、「続ける」「設定を開く」の2ボタンを出す。
+    // 「続ける」で失敗セットを空にして次の写真を試し直す。
+    name: `10 broken in a row in a large playlist: non-final stop with Continue and Settings (${c.name}) (#120)`,
+    hash: c.hash,
+    locale: c.locale,
+    async run(page) {
+      const deadline = Date.now() + 15000;
+      let shown = false;
+      while (Date.now() < deadline) {
+        if (await isVisible(page, c.title)) {
+          shown = true;
+          break;
+        }
+        await page.waitForTimeout(150);
+      }
+      const hasButton = (label) =>
+        page.evaluate(
+          (l) =>
+            [...document.querySelectorAll('button')].some(
+              (b) => b.textContent.trim().includes(l) && getComputedStyle(b).display !== 'none',
+            ),
+          label,
+        );
+      const continueShown = await hasButton(c.cont);
+      const settingsShown = await hasButton(c.settings);
+      const notFinal = !(await isVisible(page, c.all));
+      const nextsAtStop = await countCalls(page, 'get_next_image');
+      if (process.env.E2E_SHOT_DIR) {
+        await page.screenshot({ path: `${process.env.E2E_SHOT_DIR}/streak-${c.name}.png` });
+      }
+      // 「続ける」で再開する（カードが閉じ、get_next_image が再び呼ばれる）。
+      await page.evaluate((l) => {
+        [...document.querySelectorAll('button')]
+          .find((b) => b.textContent.trim().includes(l))
+          .click();
+      }, c.cont);
+      await page.waitForTimeout(800);
+      const nextsAfterContinue = await countCalls(page, 'get_next_image');
+      return {
+        pass:
+          shown &&
+          continueShown &&
+          settingsShown &&
+          notFinal &&
+          nextsAtStop >= 10 &&
+          nextsAtStop <= 11 &&
+          nextsAfterContinue > nextsAtStop,
+        detail: `shown=${shown} continue=${continueShown} settings=${settingsShown} notFinal=${notFinal} nextsAtStop=${nextsAtStop} nextsAfterContinue=${nextsAfterContinue}`,
+      };
+    },
+  })),
+  {
+    // #120: 動画の読み込み失敗（本物の <video> onError）も画像と同じく undo → 次へ進む。
+    name: 'a broken video fires a real onError, calls undo, and advances (#120)',
+    hash: 'brokenvid',
+    async run(page) {
+      const deadline = Date.now() + 8000;
+      let pass = false;
+      let lastDetail = '';
+      while (Date.now() < deadline) {
+        const undoCalls = await countCalls(page, 'undo_display_count');
+        const nexts = await countCalls(page, 'get_next_image');
+        lastDetail = `undoCalls=${undoCalls} nexts=${nexts}`;
+        if (undoCalls >= 1 && nexts >= 2) {
+          pass = true;
+          break;
+        }
+        await page.waitForTimeout(200);
+      }
+      return { pass, detail: lastDetail };
+    },
+  },
+  {
+    // #120: onLoad も onError も来ない（読み込みが永久に pending の）画像で黒画面のまま止まらない。
+    // 見張りが max(表示間隔, 下限) 後に失敗として次へ進め、console.warn に原因診断を残す。
+    name: 'a never-settling image is force-skipped by the watchdog with a diagnostic warning (#120)',
+    hash: 'pending',
+    async setup(page) {
+      // 応答しない（fulfill も abort もしない）＝ img は pending のまま。
+      await page.route('**/__e2e_pending.png', () => {});
+    },
+    async run(page) {
+      const warns = [];
+      page.on('console', (m) => {
+        if (m.type() === 'warning') warns.push(m.text());
+      });
+      const started = Date.now();
+      let reachedMs = null;
+      while (Date.now() - started < 16000) {
+        const loaded = await page.evaluate(() =>
+          [...document.querySelectorAll('img')].some(
+            (el) => el.alt !== 'SSS Logo' && el.getAttribute('src') && el.naturalWidth > 0,
+          ),
+        );
+        if (loaded) {
+          reachedMs = Date.now() - started;
+          break;
+        }
+        await page.waitForTimeout(100);
+      }
+      const undoCalls = await countCalls(page, 'undo_display_count');
+      const warned = warns.some((w) => w.includes('media watchdog'));
+      // 見張りは表示間隔（5〜10秒）後。それより早く進んだなら別の経路で進んでいる＝見張りの検証にならない。
+      return {
+        pass: reachedMs !== null && reachedMs >= 4500 && warned && undoCalls >= 1,
+        detail: `reachedMs=${reachedMs} warned=${warned} undoCalls=${undoCalls}`,
+      };
+    },
+  },
   {
     // #65レビュー2巡目S8(must): 動画→動画の遷移で、退場中の古い動画要素が
     // play()で先頭から再生し直されない（＝短い動画でonEndedが二重発火して
@@ -2640,6 +2775,10 @@ async function main() {
   console.log(`[e2e] vite dev サーバーを起動中 (port ${PORT})...`);
   const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
     cwd: projectRoot,
+    // #120: 見張り(media watchdog)の待ち時間の下限(既定10秒)を短縮する。待ち時間は
+    // max(表示間隔, 下限) で、e2e の表示間隔は5秒（ただし起動直後の最初の画像は設定の読み込み前で
+    // 既定の10秒）なので、下限を下げても実効は5〜10秒。
+    env: { ...process.env, VITE_MEDIA_WATCHDOG_MIN_MS: '1000' },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   });
@@ -2690,6 +2829,8 @@ async function main() {
         page.on('console', (m) => {
           if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
         });
+        // #120: goto 前に仕込みが要るシナリオ（応答しないリクエスト等）用。
+        if (scenario.setup) await scenario.setup(page);
         await page.goto(`${BASE_URL}/#${scenario.hash}`);
         // #66: 複数ページを同じbrowserで使い回す中、直前のシナリオがフォーカス
         // トラップ（モーダルを開いてフォーカスを奪う）を使うと、後続シナリオの

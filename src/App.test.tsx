@@ -178,8 +178,28 @@ describe('App empty-state notice display (#65 問題1・9: ようこそ/空/接�
     });
   });
 
-  it('shows the no-readable-images guidance with a settings button when every photo fails to render (#120)', async () => {
-    useRestoredStartupPath();
+  // #120: 描画失敗(onError)を実DOMで発火させる。待ちは固定sleepでなく「前と違う写真の
+  // <img>が出るまで」をwaitForで待つ（退場アニメーション500msの長さに依存しない）。
+  async function failPhotos(container: HTMLElement, count: number) {
+    let lastSrc: string | null = null;
+    for (let i = 0; i < count; i++) {
+      let photo: HTMLImageElement | null = null;
+      await waitFor(
+        () => {
+          photo =
+            (Array.from(container.querySelectorAll('img')).find(
+              (el) => el.getAttribute('alt') === '' && el.getAttribute('src') !== lastSrc,
+            ) as HTMLImageElement | undefined) ?? null;
+          expect(photo).not.toBeNull();
+        },
+        { timeout: 3000 },
+      );
+      lastSrc = photo!.getAttribute('src');
+      fireEvent.error(photo!);
+    }
+  }
+
+  function mockBrokenPlaylist(total: number) {
     let n = 0;
     getNextImage.mockImplementation(async () => ({
       kind: 'found',
@@ -196,30 +216,45 @@ describe('App empty-state notice display (#65 問題1・9: ようこそ/空/接�
       },
     }));
     undoDisplayCount.mockResolvedValue(undefined);
-    const { container } = render(<App />);
+    getPlaylistInfo.mockResolvedValue([1, total, false]);
+  }
 
-    // 壊れた画像のonErrorを実ブラウザの代わりに手で発火し続ける（上限で止まるはず）。
-    for (let i = 0; i < 15; i++) {
-      await waitFor(() => {
-        const photo = Array.from(container.querySelectorAll('img')).find(
-          (el) => el.getAttribute('alt') === '' && el.getAttribute('src'),
-        );
-        if (!photo && !screen.queryByText('読み込める画像がありません')) throw new Error('wait');
-      });
-      if (screen.queryByText('読み込める画像がありません')) break;
-      const photo = Array.from(container.querySelectorAll('img')).find(
-        (el) => el.getAttribute('alt') === '' && el.getAttribute('src'),
-      )!;
-      fireEvent.error(photo);
-      await new Promise((r) => setTimeout(r, 700)); // 退場アニメーション(500ms)待ち
-    }
+  it('says "no readable images" only when the failed set covers the whole playlist (#120)', async () => {
+    useRestoredStartupPath();
+    mockBrokenPlaylist(3);
+    const { container } = render(<App />);
+    await failPhotos(container, 3);
 
     await waitFor(() => {
       expect(screen.getByText('読み込める画像がありません')).toBeTruthy();
     });
     expect(screen.getByText('設定を開く')).toBeTruthy();
+    expect(screen.getByText('続ける')).toBeTruthy();
+  });
+
+  it('after 10 failures in a large playlist it stops with a non-final message, Continue and Open Settings (#120)', async () => {
+    useRestoredStartupPath();
+    mockBrokenPlaylist(5000);
+    const { container } = render(<App />);
+    await failPhotos(container, 10);
+
+    await waitFor(() => {
+      expect(screen.getByText('連続して読み込めませんでした')).toBeTruthy();
+    });
+    expect(screen.queryByText('読み込める画像がありません')).toBeNull();
+    expect(screen.getByText('設定を開く')).toBeTruthy();
     // 無限ループしていない: 10件目で止まる。
     expect(getNextImage.mock.calls.length).toBeLessThanOrEqual(11);
+
+    // 「続ける」で次の写真を試し直す（失敗セットは空になる）。
+    const before = getNextImage.mock.calls.length;
+    fireEvent.click(screen.getByText('続ける'));
+    await waitFor(() => {
+      expect(getNextImage.mock.calls.length).toBeGreaterThan(before);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('連続して読み込めませんでした')).toBeNull();
+    });
   }, 30000);
 
   it('shows a generic error notice with the rejection message on unexpected rejection', async () => {

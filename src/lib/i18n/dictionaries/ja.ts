@@ -52,7 +52,12 @@ export const ja = {
   // #120: 連続して全ての写真が描画に失敗した（破損・0バイトのファイル）。
   noReadableImagesTitle: '読み込める画像がありません',
   noReadableImagesSubtitle:
-    'ファイルが壊れているか空かもしれません。設定でフォルダを確認し、再スキャンしてください。',
+    'すべてのファイルが壊れているか、空かもしれません。\n設定でフォルダを確認し、再スキャンしてください。',
+  // 全件とは断定できないが、連続して読み込めなかったので止めた状態。
+  mediaFailureStreakTitle: '連続して読み込めませんでした',
+  mediaFailureStreakSubtitle:
+    'ファイルが壊れているか、空かもしれません。\n「続ける」で次の写真を試します。',
+  continueSlideshow: '続ける',
   mediaSkipToast: '読み込めない写真をスキップしています（{count}件連続）',
   startupDirectoryRejected: '前回のフォルダに接続できませんでした: {reason}',
 
