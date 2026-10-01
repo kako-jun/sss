@@ -165,14 +165,21 @@ describe('ConfirmDialogHost (#119)', () => {
     const cancel = screen.getByText('キャンセル');
     expect(document.activeElement).toBe(cancel);
 
-    fireEvent.keyDown(cancel, { key: 'ArrowDown' });
+    // fireEvent は defaultPrevented だと false を返す。スクロール系キーは必ず preventDefault する。
+    expect(fireEvent.keyDown(cancel, { key: 'ArrowDown' })).toBe(false);
     expect(scroller.scrollTop).toBe(24);
-    fireEvent.keyDown(cancel, { key: 'PageDown' });
+    expect(fireEvent.keyDown(cancel, { key: 'PageDown' })).toBe(false);
     expect(scroller.scrollTop).toBe(24 + 76);
-    fireEvent.keyDown(cancel, { key: 'End' });
+    expect(fireEvent.keyDown(cancel, { key: 'End' })).toBe(false);
     expect(scroller.scrollTop).toBe(500);
-    fireEvent.keyDown(cancel, { key: 'Home' });
+    expect(fireEvent.keyDown(cancel, { key: 'PageUp' })).toBe(false);
+    expect(fireEvent.keyDown(cancel, { key: 'ArrowUp' })).toBe(false);
+    expect(fireEvent.keyDown(cancel, { key: 'Home' })).toBe(false);
     expect(scroller.scrollTop).toBe(0);
+    // スクロールと無関係なキー（Tab/Enter/Space）は奪わない
+    for (const key of ['Tab', 'Enter', ' ']) {
+      expect(fireEvent.keyDown(cancel, { key })).toBe(true);
+    }
     // フォーカスはキャンセルのまま・ダイアログは閉じない（IPC 相当の解決も起きない）
     expect(document.activeElement).toBe(cancel);
     expect(screen.getByRole('alertdialog')).toBeTruthy();
@@ -184,9 +191,41 @@ describe('ConfirmDialogHost (#119)', () => {
   it('does not hijack arrow keys when the body does not overflow', async () => {
     render(<ConfirmDialogHost />);
     const p = open('短い\n\n警告');
-    const ev = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
-    screen.getByText('キャンセル').dispatchEvent(ev);
-    expect(ev.defaultPrevented).toBe(false);
+    for (const key of ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End']) {
+      expect(fireEvent.keyDown(screen.getByText('キャンセル'), { key })).toBe(true);
+    }
+    fireEvent.click(screen.getByText('キャンセル'));
+    await p;
+  });
+
+  it('ignores empty paragraphs (a message ending in \\n\\n still pins the real last paragraph)', async () => {
+    render(<ConfirmDialogHost />);
+    const p = open('本文\n\n警告\n\n');
+    expect(screen.getByTestId('confirm-dialog-final').textContent).toBe('警告');
+    fireEvent.click(screen.getByText('キャンセル'));
+    await p;
+    const q = open('\n\n本文のみ\n\n');
+    expect(screen.queryByTestId('confirm-dialog-final')).toBeNull();
+    expect(screen.getByRole('alertdialog').querySelector('.overflow-y-auto')?.textContent).toBe(
+      '本文のみ',
+    );
+    fireEvent.click(screen.getByText('キャンセル'));
+    await q;
+  });
+
+  it('shows a scroll hint only while more text is below', async () => {
+    render(<ConfirmDialogHost />);
+    const p = open('長い\n\n警告');
+    expect(screen.queryByText('矢印キーで続きを表示')).toBeNull();
+    const scroller = screen
+      .getByRole('alertdialog')
+      .querySelector('.overflow-y-auto') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 500 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 100 });
+    fireEvent.scroll(scroller);
+    expect(screen.getByText('矢印キーで続きを表示')).toBeTruthy();
+    fireEvent.keyDown(screen.getByText('キャンセル'), { key: 'End' });
+    expect(screen.queryByText('矢印キーで続きを表示')).toBeNull();
     fireEvent.click(screen.getByText('キャンセル'));
     await p;
   });

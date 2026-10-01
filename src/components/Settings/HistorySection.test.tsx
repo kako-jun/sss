@@ -163,3 +163,47 @@ describe('HistorySection exclude failure message (#92)', () => {
     expect(await screen.findByText('エラー: 除外失敗')).toBeTruthy();
   });
 });
+
+// #111: フォルダ/撮影日除外は再スキャンが要る。履歴タブでも無告知にしない
+// （ファイル単位の除外は即反映なので案内を出さない）。
+describe('HistorySection rescan hint (#111)', () => {
+  const images: RecentImage[] = [
+    { path: '/photos/a.jpg', displayCount: 3, lastDisplayed: '2026-01-01T00:00:00Z' },
+  ];
+  const outcome = (needsRescan: boolean, pattern: string) => ({
+    pattern,
+    needsRescan,
+    ruleType: 'glob',
+    ruleAdded: true,
+    removedPaths: [],
+  });
+
+  it('shows the needs-rescan hint and notifies the parent when the exclusion needs a rescan', async () => {
+    getRecentImages.mockResolvedValue(images);
+    excludeImage.mockResolvedValue(outcome(true, '/photos/{**,*}'));
+    const onRuleChanged = vi.fn();
+    render(<HistorySection onRuleChanged={onRuleChanged} />);
+
+    await waitFor(() => expect(screen.getByTitle('除外')).toBeTruthy());
+    fireEvent.click(screen.getByTitle('除外'));
+    fireEvent.click(screen.getByText('このフォルダを除外'));
+
+    expect(await screen.findByText(/除外パターン追加: .*再スキャン/)).toBeTruthy();
+    expect(onRuleChanged).toHaveBeenCalledWith({ kind: 'added', pattern: '/photos/{**,*}' });
+  });
+
+  it('shows no hint for a file exclusion (applied immediately)', async () => {
+    getRecentImages.mockResolvedValue(images);
+    excludeImage.mockResolvedValue(outcome(false, '/photos/a.jpg'));
+    const onRuleChanged = vi.fn();
+    render(<HistorySection onRuleChanged={onRuleChanged} />);
+
+    await waitFor(() => expect(screen.getByTitle('除外')).toBeTruthy());
+    fireEvent.click(screen.getByTitle('除外'));
+    fireEvent.click(screen.getByText('この写真を除外'));
+
+    await waitFor(() => expect(screen.queryByTitle('除外')).toBeNull());
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(onRuleChanged).not.toHaveBeenCalled();
+  });
+});

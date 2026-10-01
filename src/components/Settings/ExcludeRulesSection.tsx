@@ -1,10 +1,19 @@
-import { X, Plus } from 'lucide-react';
+import { X, Plus, RefreshCw } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getIgnorePatterns, removeIgnorePattern, addIgnorePattern } from '../../lib/tauri';
 import type { IgnoreRule } from '../../types';
-import { useT, resolveAddPatternErrorMessage } from '../../lib/i18n';
+import { useT, resolveAddPatternErrorMessage, resolveScanErrorMessage } from '../../lib/i18n';
+import type { ExcludeRescanController } from './useExcludeRescan';
 
-export function ExcludeRulesSection() {
+interface ExcludeRulesSectionProps {
+  /**
+   * #111: 再スキャン案内と再スキャンの進行状態。状態は親（Settings）が持つ
+   * （タブを往復しても二重実行や完了表示の取りこぼしが起きないよう、このセクションの unmount で失わない）。
+   */
+  rescan?: ExcludeRescanController;
+}
+
+export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
   const t = useT();
   const [rules, setRules] = useState<IgnoreRule[]>([]);
   const [newPattern, setNewPattern] = useState('');
@@ -13,6 +22,19 @@ export function ExcludeRulesSection() {
   // レンダーのたびに現在のロケールへ変換する（言語切替中の新旧混在防止）。
   const [addError, setAddError] = useState<string | null>(null);
   const addErrorMessage = addError === null ? null : resolveAddPatternErrorMessage(addError);
+  // #111: 失敗は生コード/辞書キーで保持され、描画のたびに現在のロケールへ解決する（#82should1）。
+  const rescanError = rescan?.error ?? null;
+  const rescanErrorMessage =
+    rescanError === null
+      ? null
+      : rescanError.kind === 'key'
+        ? t(rescanError.key)
+        : resolveScanErrorMessage(rescanError.raw, '');
+  const notice = rescan?.notice ?? null;
+  const rescanning = rescan?.rescanning ?? false;
+  // フォルダタブのスキャン等、除外ルールの再スキャン以外が実行中
+  const otherScanRunning = (rescan?.busy ?? false) && !rescanning;
+  const rescanTotal = rescan?.total ?? null;
 
   useEffect(() => {
     getIgnorePatterns()
@@ -30,6 +52,7 @@ export function ExcludeRulesSection() {
     try {
       await removeIgnorePattern(pattern, ruleType);
       setRules((prev) => prev.filter((r) => !(r.pattern === pattern && r.ruleType === ruleType)));
+      rescan?.noteChange({ kind: 'removed', pattern });
     } catch (err) {
       console.error('Failed to remove ignore pattern:', err);
     }
@@ -48,6 +71,7 @@ export function ExcludeRulesSection() {
       setRules((prev) => [...prev, { pattern: trimmed, ruleType: 'glob' }]);
       setNewPattern('');
       setAddError(null);
+      rescan?.noteChange({ kind: 'added', pattern: trimmed });
     } catch (err) {
       // #61レビュー S2: 不正なglob（閉じていない `{` 等）はバックエンドがErrを返す
       // ようになった。従来はconsole.errorに流すだけで画面上は何も起きなかったので、
@@ -77,6 +101,43 @@ export function ExcludeRulesSection() {
         <h3 className="text-sm font-medium text-white/70">{t('excludeRulesTitle')}</h3>
         <p className="text-xs text-white/50 mt-1">{t('excludeRulesDescription')}</p>
       </div>
+
+      {(notice !== null || rescanning || rescanTotal !== null || rescanErrorMessage) && (
+        <div
+          role="status"
+          className="space-y-2 p-3 bg-black/30 rounded-lg text-sm"
+          data-testid="exclude-rescan-notice"
+        >
+          {notice !== null && (
+            <p className="text-white/60">
+              {notice.kind === 'added'
+                ? t('excludeRuleAddedNeedsRescan', { pattern: notice.pattern })
+                : notice.kind === 'removed'
+                  ? t('excludeRuleRemovedNeedsRescan', { pattern: notice.pattern })
+                  : t('excludeRulesChangedNeedsRescan')}
+            </p>
+          )}
+          {rescanTotal !== null && notice === null && (
+            <p className="text-white/60">
+              {t('excludeRescanDone', { count: rescanTotal.toLocaleString() })}
+            </p>
+          )}
+          {otherScanRunning && notice !== null && (
+            <p className="text-white/50">{t('excludeRescanOtherScanRunning')}</p>
+          )}
+          {rescanErrorMessage && <p className="text-red-400/70">{rescanErrorMessage}</p>}
+          {(notice !== null || rescanning) && (
+            <button
+              onClick={rescan?.rescan}
+              disabled={rescanning || otherScanRunning}
+              className="flex items-center gap-2 px-3 py-1.5 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded-lg transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-4 h-4 ${rescanning ? 'animate-spin' : ''}`} />
+              {rescanning ? t('excludeRescanning') : t('excludeRescanNow')}
+            </button>
+          )}
+        </div>
+      )}
 
       {rules.length === 0 ? (
         <div className="text-white/50 text-sm">{t('noExcludeRules')}</div>

@@ -8,6 +8,7 @@ import { VideoSection } from './VideoSection';
 import { ShareDirectorySection } from './ShareDirectorySection';
 import { LanguageSection } from './LanguageSection';
 import { ExcludeRulesSection } from './ExcludeRulesSection';
+import type { ExcludeRescanController } from './useExcludeRescan';
 import { PickSection } from './PickSection';
 import { HistorySection } from './HistorySection';
 import { GraphSection } from './GraphSection';
@@ -21,6 +22,11 @@ interface SettingsProps {
   isOpen: boolean;
   onClose: () => void;
   onScanComplete: () => void;
+  /**
+   * #111: 除外ルール変更後の再スキャン案内・実行状態。Settings は開くたびに再マウントされるため、
+   * 状態は App が保持して渡す（閉じて開き直しても案内・実行中・結果が残る）。
+   */
+  excludeRescan: ExcludeRescanController;
   onIntervalChange?: (interval: number) => void;
   /** #68: 動画の音声ON/OFFが変わったときに、再生中のスライドショーへ即時反映するための通知。 */
   onVideoAudioChange?: (enabled: boolean) => void;
@@ -52,6 +58,7 @@ export function Settings({
   isOpen,
   onClose,
   onScanComplete,
+  excludeRescan,
   onIntervalChange,
   onVideoAudioChange,
   onVideoMaxDurationChange,
@@ -62,6 +69,11 @@ export function Settings({
   const [statsKey, setStatsKey] = useState(0); // 統計グラフの強制再マウント用
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
+  // #111: 閉じるとき、見終えた完了/失敗の表示は消す（次に開いたとき古い結果が残らない）
+  const { clearResult } = excludeRescan;
+  useEffect(() => {
+    if (!isOpen) clearResult();
+  }, [isOpen, clearResult]);
   // #66 問題9(a11y): 設定モーダルは role=dialog/aria-modal無し・フォーカストラップ
   // 無しだった（Tabで背後の写真オーバーレイへフォーカスが漏れる）。
   useFocusTrap(panelRef, isOpen, openedViaMouse);
@@ -79,6 +91,9 @@ export function Settings({
 
   const selectTab = (id: TabType) => {
     setActiveTab(id);
+    // #111: 除外ルールタブを離れるとき、見終えた完了/失敗の表示は消す（反映待ちと実行中は残す。
+    // 離れている間に完了したものは消えず、戻ったときに見られる）
+    if (activeTab === 'exclude' && id !== 'exclude') excludeRescan.clearResult();
     if (id === 'stats') setStatsKey((prev) => prev + 1); // タブを開くたびにkeyを変更して再マウント
   };
 
@@ -216,7 +231,7 @@ export function Settings({
         <div className="flex-1 overflow-y-auto">
           {activeTab === 'scan' && (
             <div role="tabpanel" id="tabpanel-scan" aria-labelledby="tab-scan" tabIndex={0}>
-              <ScanSection onScanComplete={onScanComplete} />
+              <ScanSection onScanComplete={onScanComplete} guard={excludeRescan} />
             </div>
           )}
           {activeTab === 'options' && (
@@ -245,7 +260,7 @@ export function Settings({
               tabIndex={0}
               className="space-y-8"
             >
-              <ExcludeRulesSection />
+              <ExcludeRulesSection rescan={excludeRescan} />
             </div>
           )}
           {activeTab === 'pick' && (
@@ -267,7 +282,7 @@ export function Settings({
               tabIndex={0}
               className="space-y-8"
             >
-              <HistorySection />
+              <HistorySection onRuleChanged={excludeRescan.noteChange} />
             </div>
           )}
           {activeTab === 'stats' && (

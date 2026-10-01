@@ -30,6 +30,11 @@ export function ConfirmDialogHost() {
   return createPortal(<ConfirmDialogView key={request.id} />, document.body);
 }
 
+// ↑↓ 1回のスクロール量。本文は text-sm(14px) × leading-relaxed(1.625) ≒ 22.75px/行なので
+// 約1行ぶん。PageUp/Down は表示領域からこの量だけ重ねて送る（読み飛ばし防止）。
+const LINE_SCROLL_PX = 24;
+const PAGE_OVERLAP_PX = 24;
+
 function ConfirmDialogView() {
   const t = useT();
   const request = useSyncExternalStore(
@@ -47,10 +52,13 @@ function ConfirmDialogView() {
   useFocusTrap(panelRef, true);
 
   // 段落（\n\n 区切り）が2つ以上なら最終段落をスクロール外に固定する。1つだけなら全文が本文。
-  const paragraphs = request ? request.message.split('\n\n') : [''];
+  // 空段落（末尾の \n\n など）は除外する。除外しないと最終段落が空文字になり警告が固定されない。
+  const paragraphs = (request ? request.message.split('\n\n') : ['']).filter(
+    (p) => p.trim() !== '',
+  );
   const finalParagraph = paragraphs.length > 1 ? paragraphs[paragraphs.length - 1] : null;
   const body =
-    finalParagraph === null ? (request?.message ?? '') : paragraphs.slice(0, -1).join('\n\n');
+    finalParagraph === null ? (paragraphs[0] ?? '') : paragraphs.slice(0, -1).join('\n\n');
 
   // 本文があふれる場合のみ、↑↓/PageUp/PageDown/Home/End で本文をスクロールする
   // （本文を tabIndex=0 にするとフォーカス順で既定フォーカス＝キャンセルを奪うため、
@@ -58,8 +66,8 @@ function ConfirmDialogView() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const el = messageRef.current;
     if (!el || el.scrollHeight <= el.clientHeight) return;
-    const page = Math.max(el.clientHeight - 24, 24);
-    const line = 24;
+    const page = Math.max(el.clientHeight - PAGE_OVERLAP_PX, LINE_SCROLL_PX);
+    const line = LINE_SCROLL_PX;
     switch (e.key) {
       case 'ArrowDown':
         el.scrollTop += line;
@@ -149,11 +157,17 @@ function ConfirmDialogView() {
             </div>
             {/* 続きが下にあるときだけ出す、本文下端のフェード（「まだ読み切っていない」手がかり）。 */}
             {moreBelow && (
-              <div
-                data-testid="confirm-dialog-more"
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-neutral-950 via-neutral-950/80 to-transparent"
-              />
+              <>
+                <div
+                  data-testid="confirm-dialog-more"
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-neutral-950 via-neutral-950/80 to-transparent"
+                />
+                {/* スクロールの手がかり（読み上げにも含める）。 */}
+                <span className="pointer-events-none absolute bottom-0 right-0 text-xs text-white/50">
+                  {t('confirmDialogMoreHint')}
+                </span>
+              </>
             )}
           </div>
           {finalParagraph !== null && (

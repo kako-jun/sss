@@ -19,6 +19,7 @@ export const en = {
   closeTooltip: 'Close',
   cancelButton: 'Cancel',
   confirmDialogTitle: 'Confirm',
+  confirmDialogMoreHint: 'Arrow keys: scroll for more',
 
   // === Keyboard shortcuts (#66) ===
   shortcutsButtonTooltip: 'Keyboard shortcuts (?)',
@@ -168,6 +169,15 @@ export const en = {
   errorInvalidPattern: 'Invalid pattern: {detail}',
   errorAddIgnoreRuleFailed: 'Failed to add the exclude rule',
   addPatternFailedGeneric: 'Failed to add the pattern',
+  excludeRuleAddedNeedsRescan: 'Exclude rule added: {pattern}. Rescan to apply the change',
+  excludeRuleRemovedNeedsRescan:
+    'Exclude rule removed: {pattern}. Rescan to bring the previously excluded photos and videos back into the slideshow',
+  excludeRulesChangedNeedsRescan: 'Exclude rules changed. Rescan to apply the changes',
+  excludeRescanNow: 'Rescan now',
+  excludeRescanOtherScanRunning: 'Please wait until the folder scan finishes',
+  excludeRescanning: 'Rescanning...',
+  excludeRescanDone:
+    'Rescanned. The exclude rules are now applied ({count} items in the slideshow now)',
 
   // === Settings: Picks ===
   pickListTitle: 'Picked Photos',

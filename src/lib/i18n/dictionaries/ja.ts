@@ -19,6 +19,7 @@ export const ja = {
   closeTooltip: '閉じる',
   cancelButton: 'キャンセル',
   confirmDialogTitle: '確認',
+  confirmDialogMoreHint: '矢印キーで続きを表示',
 
   // === キーボードショートカット一覧（#66） ===
   shortcutsButtonTooltip: 'ショートカット一覧 (?)',
@@ -168,6 +169,15 @@ export const ja = {
   errorInvalidPattern: '無効なパターンです: {detail}',
   errorAddIgnoreRuleFailed: '除外ルールの追加に失敗しました',
   addPatternFailedGeneric: 'パターンの追加に失敗しました',
+  excludeRuleAddedNeedsRescan:
+    '除外ルールを追加しました: {pattern}。反映するには再スキャンが必要です',
+  excludeRuleRemovedNeedsRescan:
+    '除外ルールを解除しました: {pattern}。再スキャンすると、除外されていた写真・動画がスライドショーに戻ります',
+  excludeRulesChangedNeedsRescan: '除外ルールを変更しました。反映するには再スキャンが必要です',
+  excludeRescanNow: '今すぐ再スキャン',
+  excludeRescanOtherScanRunning: 'フォルダのスキャンが終わるまでお待ちください',
+  excludeRescanning: '再スキャン中...',
+  excludeRescanDone: '再スキャンしました。除外ルールを反映しました（現在の対象は{count}件）',
 
   // === 設定画面: ピック ===
   pickListTitle: 'ピック一覧',

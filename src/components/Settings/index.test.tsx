@@ -15,12 +15,35 @@ vi.mock('./GraphSection', () => ({ GraphSection: () => null }));
 vi.mock('./InfoSection', () => ({ InfoSection: () => null }));
 
 import { Settings } from './index';
+import type { ExcludeRescanController } from './useExcludeRescan';
+
+// #111: 再スキャン状態は App が持って渡す。ここではタブ行しか見ないため何もしない値で足りる。
+const excludeRescan: ExcludeRescanController = {
+  notice: null,
+  rescanning: false,
+  busy: false,
+  total: null,
+  error: null,
+  noteChange: () => {},
+  begin: () => 0,
+  end: () => {},
+  clearUpTo: () => {},
+  clearResult: () => {},
+  rescan: async () => {},
+};
 
 describe('Settings tablist (#109)', () => {
   it('is shrink-0 so it never collapses inside the flex-col modal body', () => {
     // 実描画での高さ一定の検証は e2e（Settings tablist height stays constant ...）が正本。
     // jsdom はレイアウトしないため、潰れ防止クラス（role=tablist 経由で取得）が落ちていないことだけを確認する。
-    render(<Settings isOpen onClose={() => {}} onScanComplete={() => {}} />);
+    render(
+      <Settings
+        isOpen
+        onClose={() => {}}
+        onScanComplete={() => {}}
+        excludeRescan={excludeRescan}
+      />,
+    );
     const tablist = screen.getByRole('tablist');
     expect(tablist.className).toContain('shrink-0');
   });
@@ -38,7 +61,14 @@ describe('Settings tablist (#109)', () => {
     });
 
     it('calls scrollIntoView({inline:nearest, block:nearest}) on open and when the tab changes', () => {
-      render(<Settings isOpen onClose={() => {}} onScanComplete={() => {}} />);
+      render(
+        <Settings
+          isOpen
+          onClose={() => {}}
+          onScanComplete={() => {}}
+          excludeRescan={excludeRescan}
+        />,
+      );
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy).toHaveBeenLastCalledWith({ inline: 'nearest', block: 'nearest' });
       fireEvent.click(screen.getAllByRole('tab', { selected: false })[0]);
@@ -47,7 +77,14 @@ describe('Settings tablist (#109)', () => {
     });
 
     it('does not call scrollIntoView while closed', () => {
-      render(<Settings isOpen={false} onClose={() => {}} onScanComplete={() => {}} />);
+      render(
+        <Settings
+          isOpen={false}
+          onClose={() => {}}
+          onScanComplete={() => {}}
+          excludeRescan={excludeRescan}
+        />,
+      );
       expect(spy).not.toHaveBeenCalled();
     });
   });

@@ -184,6 +184,15 @@ rounded-lg px-2 py-1 text-xs transition-colors
 The padding enlarges the click target; offset it with margins (`mt-5 -mb-1` in place
 of the former `mt-6`) so the card's vertical rhythm is unchanged.
 
+### Inline Notice with Action (#111)
+
+A short status/notice block inside a Settings tab that carries one Standard button
+(e.g. "exclude rules changed — rescan to apply" + "Rescan now"). Use the Panels &
+Cards surface (`p-3 bg-black/30 rounded-lg`), body text `text-white/60 text-sm`,
+errors `text-red-400/70`. The button is **Standard** (the tab already has its own
+Primary button), shows `animate-spin` on its icon and is disabled while running.
+Give the block `role="status"`; there is at most one such block per tab.
+
 ### Input Fields
 
 ```
@@ -259,8 +268,9 @@ Fields below.
 In-app replacement for `window.confirm` (which Tauri turns into an always-truthy
 Promise — never use it). `role="alertdialog"`, `aria-modal="true"`. Same panel as
 other modals on a `bg-black/85 backdrop-blur-md` backdrop, portaled to `body`,
-narrower (`max-w-md`). Message body (`text-sm text-white/70`, `whitespace-pre-line`) with no visible
-title — a `sr-only` `<h2>` ("確認" / "Confirm") is referenced via `aria-labelledby`; buttons right-aligned, Cancel first and focused by default:
+narrower (`max-w-md`). Message body (`text-sm text-white/70`,
+`whitespace-pre-line`), no visible title — a `sr-only` `<h2>`
+("確認" / "Confirm") is referenced via `aria-labelledby`;
 
 ```
 Panel:    bg-neutral-950 rounded-2xl border border-white/10 shadow-2xl p-7 max-w-md w-full mx-8
@@ -275,7 +285,12 @@ above the button row** (`shrink-0`) so the destructive warning ("This cannot be
 undone…") is always readable without scrolling, even on a 360x300 window. Only
 the earlier paragraphs scroll (`min-h-0 overflow-y-auto`), with a stronger bottom
 fade (`h-14 from-neutral-950 via-neutral-950/80 to-transparent`) shown only while
-more text is hidden. A single-paragraph message is all scroll area (no pinned part).
+more text is hidden, plus a quiet `text-xs text-white/50` hint at its bottom-right
+("矢印キーで続きを表示" / "Arrow keys: scroll for more"; text, no icon or emoji,
+and part of the accessible text so screen-reader users hear it too). On very
+short windows (360x300) only 1–2 lines of the body are visible; that is accepted
+because the warning and buttons are pinned and the fade + hint + key scrolling
+make the rest reachable. A single-paragraph message is all scroll area (no pinned part).
 
 Keyboard access to the scrolling body: **key handler, not `tabIndex=0`.** While the
 body overflows, ↑/↓ (24px), PageUp/PageDown, Home/End on the dialog scroll it;

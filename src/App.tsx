@@ -37,6 +37,7 @@ import {
   hasModifierKey,
   createButtonFocusGuard,
 } from './lib/keyboardShortcuts';
+import { useExcludeRescan } from './components/Settings/useExcludeRescan';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 import { ConfirmDialogHost } from './components/ConfirmDialog';
 import { isConfirmDialogOpen } from './lib/confirmDialog';
@@ -560,6 +561,10 @@ function App() {
     await updatePlaylistInfo();
   };
 
+  // #111: 除外ルール変更後の再スキャン案内・実行状態。Settings は openSettings のたびに
+  // key で再マウントされるため、閉じて開き直しても残るよう App が保持する。
+  const excludeRescan = useExcludeRescan(handleScanComplete);
+
   const handleIntervalChange = (newInterval: number) => {
     setDisplayInterval(clampDisplayInterval(newInterval));
   };
@@ -911,6 +916,7 @@ function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onScanComplete={handleScanComplete}
+        excludeRescan={excludeRescan}
         onIntervalChange={handleIntervalChange}
         onVideoAudioChange={setVideoAudioEnabled}
         onVideoMaxDurationChange={handleVideoMaxDurationChange}
