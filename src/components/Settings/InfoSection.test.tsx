@@ -86,7 +86,7 @@ describe('InfoSection GitHub link (openUrl)', () => {
   });
 });
 
-// #64: 「設定を初期化」ボタンの 確認→実行 の流れ、および失敗時に日本語メッセージを
+// #64: 「すべてのデータを初期化」ボタンの 確認→実行 の流れ、および失敗時に日本語メッセージを
 // 表示することを固定する。成功時は backend（reset_all_data）が最後にアプリの
 // プロセス自体を再起動するため、フロント側は resetAllData() を呼ぶだけで以降は
 // 何もしない（window.location.reload() 等は呼ばない。プロセスごと終了して
@@ -99,10 +99,10 @@ describe('InfoSection reset button (resetAllData)', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(<InfoSection />);
-    fireEvent.click(screen.getByText('設定を初期化'));
+    fireEvent.click(screen.getByText('すべてのデータを初期化'));
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。完了後アプリが再起動します。',
+      'すべてのデータ（設定、除外ルール、プレイリスト、ピック一覧、表示履歴）を完全に削除して初期化しますか？ピック先フォルダのファイルは削除されません。\n\nこの操作は取り消せません。完了後アプリが再起動します。',
     );
     expect(resetAllData).not.toHaveBeenCalled();
 
@@ -117,7 +117,9 @@ describe('InfoSection reset button (resetAllData)', () => {
     resetAllData.mockResolvedValue(undefined);
 
     render(<InfoSection />);
-    const button = screen.getByText('設定を初期化').closest('button') as HTMLButtonElement;
+    const button = screen
+      .getByText('すべてのデータを初期化')
+      .closest('button') as HTMLButtonElement;
     fireEvent.click(button);
 
     // 実行中はボタンが無効化される（重複クリック防止）
@@ -144,7 +146,7 @@ describe('InfoSection reset button (resetAllData)', () => {
     resetAllData.mockRejectedValue('scanInProgress');
 
     render(<InfoSection />);
-    fireEvent.click(screen.getByText('設定を初期化'));
+    fireEvent.click(screen.getByText('すべてのデータを初期化'));
 
     // このリポには @testing-library/jest-dom が導入されていないため toBeInTheDocument() 等は
     // 使わず、getBy*（見つからなければ throw）を waitFor 内で呼ぶだけで存在確認とする
@@ -154,7 +156,9 @@ describe('InfoSection reset button (resetAllData)', () => {
     });
 
     // ボタンが再度クリックできる状態（disabled解除）に戻ること
-    const button = screen.getByText('設定を初期化').closest('button') as HTMLButtonElement;
+    const button = screen
+      .getByText('すべてのデータを初期化')
+      .closest('button') as HTMLButtonElement;
     expect(button.disabled).toBe(false);
 
     consoleError.mockRestore();
@@ -169,7 +173,7 @@ describe('InfoSection reset button (resetAllData)', () => {
     resetAllData.mockRejectedValue('scanInProgress');
 
     render(<InfoSection />);
-    fireEvent.click(screen.getByText('設定を初期化'));
+    fireEvent.click(screen.getByText('すべてのデータを初期化'));
 
     await waitFor(() => {
       expect(screen.getByText('エラー: スキャン実行中です。完了までお待ちください。')).toBeTruthy();

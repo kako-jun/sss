@@ -197,15 +197,15 @@
 
 `components/Settings/index.tsx` が7タブを持つ（`TabType`: `scan`/`options`/`exclude`/`pick`/`history`/`stats`/`info`）。開くとスライドショーは一時停止し、閉じると再開する。ようこそ画面のボタンは `scan` タブで開く。
 
-| タブ（ja / en）            | 内容（コンポーネント）                                                                                                                                                                                           |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| フォルダ / Folder          | 「選択」（Rust側ダイアログで選んで即スキャン、#93）・「スキャン」（前回フォルダの再スキャン）・スキャン結果（ファイル数・新規・削除・処理時間・読み取りエラー）（`ScanSection`）。スキャン後も設定画面は閉じない |
-| オプション / Options       | 表示間隔5〜60秒（`IntervalSection`）・EXIF回転（`SettingsSection`、`apply_exif_rotation`）・動画の音声/最大再生時間（`VideoSection`）・ピック先（`ShareDirectorySection`）・言語（`LanguageSection`）            |
-| 除外ルール / Exclude Rules | ルール一覧・解除・手動追加（`ExcludeRulesSection`）                                                                                                                                                              |
-| ピック / Picks             | ピック済みメディアのサムネイル一覧・削除（`PickSection`）                                                                                                                                                        |
-| 履歴 / History             | 最近表示した100件のサムネイル一覧・除外（`HistorySection`）                                                                                                                                                      |
-| 統計グラフ / Stats         | 表示回数ヒストグラム・表ビュー・表示回数リセット（`GraphSection`）                                                                                                                                               |
-| 情報 / Info                | バージョン・GitHubリンク・全データ初期化（`InfoSection`）                                                                                                                                                        |
+| タブ（ja / en）            | 内容（コンポーネント）                                                                                                                                                                                                                                      |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| フォルダ / Folder          | 「選択」（Rust側ダイアログで選んで即スキャン、#93）・「スキャン」（前回フォルダの再スキャン）・スキャン結果（ファイル数・新規・削除・処理時間・読み取りエラー）（`ScanSection`）。スキャン後も設定画面は閉じない                                            |
+| オプション / Options       | 表示間隔5〜60秒（`IntervalSection`）・EXIF回転（`SettingsSection`、`apply_exif_rotation`）・動画の音声/最大再生時間（`VideoSection`）・ピック先（`ShareDirectorySection`）・言語（`LanguageSection`）                                                       |
+| 除外ルール / Exclude Rules | ルール一覧・解除・手動追加（`ExcludeRulesSection`）                                                                                                                                                                                                         |
+| ピック / Picks             | ピック済みメディアのサムネイル一覧・削除（`PickSection`）                                                                                                                                                                                                   |
+| 履歴 / History             | 最近表示した100件のサムネイル一覧・除外（`HistorySection`）                                                                                                                                                                                                 |
+| 統計グラフ / Stats         | 表示回数ヒストグラム・表ビュー・表示回数リセット（`GraphSection`）                                                                                                                                                                                          |
+| 情報 / Info                | バージョン・GitHubリンク・全データ初期化（ボタン名は ja「すべてのデータを初期化」/ en "Reset All Data"。確認ダイアログも同じ破壊範囲＝設定・除外ルール・プレイリスト・ピック一覧・表示履歴を示し、ピック先フォルダの実ファイルは残ると明記。`InfoSection`） |
 
 保存キー（`app_settings`）: `last_directory_path` / `display_interval`（ms） / `apply_exif_rotation` / `share_directory_path` / `language` / `video_audio_enabled` / `video_max_duration_sec` / `sssignore_migrated`。
 

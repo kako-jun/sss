@@ -152,7 +152,7 @@ export const en = {
   videoMaxDurationUnlimited: 'Unlimited',
   videoMaxDurationSeconds: '{count}s',
   videoMaxDurationMinutes: '{count} min',
-  pickDestinationTitle: 'Picks Folder',
+  pickDestinationTitle: 'Pick Destination Folder',
 
   // === Settings: Exclude Rules ===
   excludeRulesTitle: 'Exclude Rules',
@@ -172,7 +172,7 @@ export const en = {
   noPickedPhotos: 'No picked photos yet',
   deleteTooltip: 'Delete',
   confirmDeletePickedPhoto:
-    "Delete this copy from your picks folder? The original photo isn't affected.",
+    "Delete this copy from the pick destination folder? The original photo isn't affected.",
 
   // === Settings: History ===
   recentHistoryTitle: 'Recently Shown (last 100)',
@@ -213,7 +213,7 @@ export const en = {
   resetSettingsButton: 'Reset All Data',
   resettingSettingsLabel: 'Resetting...',
   confirmResetAllData:
-    'Permanently delete all settings, playlist state, and display history?\n\nThis cannot be undone. The app will restart when finished.',
+    'Permanently delete all data (settings, exclude rules, playlist, pick list, and display history)? Files in the pick destination folder are not deleted.\n\nThis cannot be undone. The app will restart when finished.',
   resettingMessage: 'Resetting. The app will restart when finished.',
   resetErrorPrefix: 'Error: {detail}',
   errorDbResetFailed: 'Failed to reset the database',
