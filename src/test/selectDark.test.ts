@@ -18,13 +18,40 @@ function walk(dir: string): string[] {
   });
 }
 
-// JSX/ブロック/行コメントを除去する(コメントアウトされた select を拾わない)。
-export function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+// ブロック/行コメントを除去する(コメントアウトされた select を拾わない)。
+// 文字列リテラル('...' "..." `...`)の中の `//` `/*` はコメント扱いせず保持する。
+// '...' "..." は改行で閉じる(JSX テキスト中のアポストロフィで後続行を巻き込まないため)。
+function stripComments(src: string): string {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const n = src[i + 1];
+    if (c === '/' && n === '*') {
+      const end = src.indexOf('*/', i + 2);
+      i = end === -1 ? src.length : end + 2;
+    } else if (c === '/' && n === '/') {
+      const end = src.indexOf('\n', i);
+      i = end === -1 ? src.length : end;
+    } else if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < src.length && src[j] !== c) {
+        if (src[j] === '\\') j++;
+        else if (src[j] === '\n' && c !== '`') break;
+        j++;
+      }
+      out += src.slice(i, j + 1);
+      i = j + 1;
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
 }
 
 /** タグ文字列の className に、境界付きで sss-select があるか。 */
-export function hasSssSelect(tag: string): boolean {
+function hasSssSelect(tag: string): boolean {
   const m = tag.match(/className=(?:"([^"]*)"|'([^']*)'|\{`([^`]*)`\})/);
   const value = m ? (m[1] ?? m[2] ?? m[3] ?? '') : '';
   return value.split(/\s+/).includes('sss-select');
@@ -39,6 +66,16 @@ describe('scan helpers (#102)', () => {
     expect(selectTags('{/* <select className="x"> */}')).toEqual([]);
     expect(selectTags('/* <select> */\n// <select>\n<div/>')).toEqual([]);
     expect(selectTags('<select className="a" onChange={(e) => f(e)}>')).toHaveLength(1);
+  });
+
+  it('does not treat // or /* inside string literals as comments', () => {
+    expect(selectTags('const a = "a//b"; <select className="x">')).toHaveLength(1);
+    expect(selectTags('const a = \'//\'; <select className="x">')).toHaveLength(1);
+    expect(selectTags('const a = `//`; <select className="x">')).toHaveLength(1);
+    expect(selectTags('const a = "/*"; <select className="x"> ; const b = "*/";')).toHaveLength(1);
+    expect(selectTags('a // c\n<select className="x">')).toHaveLength(1);
+    expect(selectTags('<p>don\'t</p>\n<select className="x">')).toHaveLength(1);
+    expect(selectTags('x = "a//b"; // <select>')).toEqual([]);
   });
 
   it('matches the class only at a token boundary', () => {
