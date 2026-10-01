@@ -747,3 +747,13 @@ describe('OverlayUI bar keeps readable contrast over bright photos (#113)', () =
     }
   });
 });
+
+describe('OverlayUI progress hairline stays visible over bright photos (#113)', () => {
+  it('uses a dark track and a bright fill instead of faint white-on-white', () => {
+    const { container } = render(<OverlayUI image={makeImage()} {...requiredProps} />);
+    const track = container.querySelector('.fixed.bottom-0.left-0.right-0')!;
+    expect(track.className).toContain('bg-black/75');
+    expect(track.className).not.toContain('bg-white/10');
+    expect(track.firstElementChild!.className).toContain('bg-white/80');
+  });
+});

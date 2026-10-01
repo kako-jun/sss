@@ -24,8 +24,8 @@ import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import http from 'node:http';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -214,6 +214,14 @@ async function wakeFromIdle(page) {
  *
  * 文字 = ファイル名・撮影日・位置表示。アイコン = バーの有効なボタンと右上ピルのアイコン。
  * 無効ボタン（先頭写真での「前へ」）と装飾の区切り点（·）は WCAG の対象外なので測らない。
+ *
+ * 矩形は CSS px で取り、スクリーンショットの画素座標へは devicePixelRatio を掛けて変換する
+ * （DPR 1 で検証済み。DPR 2 以上は座標変換のみ入れてあり未検証）。
+ *
+ * peakRatio がアイコンで computed 由来の ratio より大きく乖離するのは意図どおり: ratio は
+ * アイコンの芯（stroke の色 = /60 の線）の実効色を測るが、peak は矩形内の最大輝度画素
+ * （hover 時の強調や、MapPin のように別色で塗られた部分・アンチエイリアスを含む）を拾うため。
+ * 文字・均一なアイコンでは両者が一致することを検算に使う。
  */
 async function measureOverlayContrast(page) {
   await wakeFromIdle(page);
@@ -265,6 +273,8 @@ async function measureOverlayContrast(page) {
   });
   if (targets.length === 0) throw new Error('計測対象のオーバーレイ要素が見つからない');
 
+  // スクリーンショットは device pixel 単位なので、CSS px の矩形に DPR を掛けて画素座標にする。
+  const dsf = await page.evaluate(() => window.devicePixelRatio);
   const withFg = await page.screenshot({ type: 'png' });
   await page.addStyleTag({
     content:
@@ -275,7 +285,7 @@ async function measureOverlayContrast(page) {
   const bgOnly = await page.screenshot({ type: 'png' });
 
   const results = await page.evaluate(
-    async ({ withFgB64, bgOnlyB64, targets }) => {
+    async ({ withFgB64, bgOnlyB64, targets, dsf }) => {
       const load = (b64) =>
         new Promise((resolve, reject) => {
           const img = new Image();
@@ -305,10 +315,10 @@ async function measureOverlayContrast(page) {
       return targets.map((t) => {
         const m = t.color.match(/[\d.]+/g).map(Number);
         const fgA = (m[3] === undefined ? 1 : m[3]) * t.opacity;
-        const x = Math.max(0, Math.floor(t.rect.x));
-        const y = Math.max(0, Math.floor(t.rect.y));
-        const w = Math.max(1, Math.ceil(t.rect.w));
-        const h = Math.max(1, Math.ceil(t.rect.h));
+        const x = Math.max(0, Math.floor(t.rect.x * dsf));
+        const y = Math.max(0, Math.floor(t.rect.y * dsf));
+        const w = Math.max(1, Math.ceil(t.rect.w * dsf));
+        const h = Math.max(1, Math.ceil(t.rect.h * dsf));
         const a = gA.getImageData(x, y, w, h).data;
         const b = gB.getImageData(x, y, w, h).data;
         const ratios = [];
@@ -334,9 +344,100 @@ async function measureOverlayContrast(page) {
         };
       });
     },
-    { withFgB64: withFg.toString('base64'), bgOnlyB64: bgOnly.toString('base64'), targets },
+    {
+      withFgB64: withFg.toString('base64'),
+      bgOnlyB64: bgOnly.toString('base64'),
+      targets,
+      dsf,
+    },
   );
   return { results, withFg };
+}
+
+/**
+ * #113(S1): 画面下端の進捗ヘアライン（2px）のコントラストを実描画から測る。
+ * フィル（進んだ分）とトラック（残り）、トラックと写真、フィルと写真の各中央値の色から
+ * WCAG 比を出す。写真側はヘアラインの少し上（バーと重ならない行）を使う。
+ * 進捗は表示間隔(5秒)で 0→100% に動くので、起動 1.5 秒後（約30%）のフィル範囲を使う。
+ */
+async function measureHairlineContrast(page) {
+  await wakeFromIdle(page);
+  await page.waitForTimeout(1200);
+  const dsf = await page.evaluate(() => window.devicePixelRatio);
+  const rects = await page.evaluate(() => {
+    const track = document.querySelector('.fixed.bottom-0.left-0.right-0');
+    const fill = track && track.firstElementChild;
+    if (!track || !fill) return null;
+    const t = track.getBoundingClientRect();
+    const f = fill.getBoundingClientRect();
+    return {
+      track: { x: t.left, y: t.top, w: t.width, h: t.height },
+      fill: { x: f.left, y: f.top, w: f.width, h: f.height },
+    };
+  });
+  if (!rects) throw new Error('進捗ヘアラインが見つからない');
+  const shot = await page.screenshot({ type: 'png' });
+  return page.evaluate(
+    async ({ b64, rects, dsf }) => {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = reject;
+        i.src = `data:image/png;base64,${b64}`;
+      });
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const g = c.getContext('2d');
+      g.drawImage(img, 0, 0);
+      const lin = (v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      };
+      const lum = ([r, gg, b]) => 0.2126 * lin(r) + 0.7152 * lin(gg) + 0.0722 * lin(b);
+      const ratio = (a, b) => {
+        const l1 = lum(a);
+        const l2 = lum(b);
+        return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      };
+      const median = (x, y, w, h) => {
+        const d = g.getImageData(
+          Math.floor(x * dsf),
+          Math.floor(y * dsf),
+          Math.max(1, Math.floor(w * dsf)),
+          Math.max(1, Math.floor(h * dsf)),
+        ).data;
+        const ch = [[], [], []];
+        for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) ch[k].push(d[i + k]);
+        return ch.map((a) => a.sort((p, q) => p - q)[a.length >> 1]);
+      };
+      const { track, fill } = rects;
+      const midY = track.y;
+      const fillPx = median(fill.x + 4, midY, Math.max(1, fill.w - 40), track.h);
+      const trackPx = median(track.x + track.w - 120, midY, 100, track.h);
+      const photoPx = median(fill.x + 4, midY - 12, 200, 4);
+      return {
+        fillTrack: ratio(fillPx, trackPx),
+        trackPhoto: ratio(trackPx, photoPx),
+        fillPhoto: ratio(fillPx, photoPx),
+        fillW: fill.w,
+        trackW: track.w,
+        fillPx,
+        trackPx,
+        photoPx,
+      };
+    },
+    { b64: shot.toString('base64'), rects, dsf },
+  );
+}
+
+/** ヘアラインの合否: フィルがトラックから 3:1 で識別でき、ヘアライン全体が写真からも 3:1 で識別できる。 */
+function summarizeHairline(m) {
+  const visible = m.trackPhoto >= 3 || m.fillPhoto >= 3;
+  return {
+    pass: m.fillTrack >= 3 && visible && m.fillW > 50 && m.fillW < m.trackW - 200,
+    detail: `hairline fill/track=${m.fillTrack.toFixed(2)} track/photo=${m.trackPhoto.toFixed(2)} fill/photo=${m.fillPhoto.toFixed(2)} fill=${m.fillPx} track=${m.trackPx} photo=${m.photoPx}`,
+  };
 }
 
 /** #113: 計測結果から、文字 4.5:1 / アイコン 3:1 を満たすかと要約文字列を返す。 */
@@ -3030,6 +3131,403 @@ const scenarios = [
     },
   },
   {
+    // #116: Ctrl+A で画面全体が選択（青ハイライト）されない。body は user-select:none で、
+    // 透明な隠しツールチップ等の文言も選択されない。設定モーダル・ショートカット一覧でも同様。
+    name: 'Ctrl+A selects nothing outside inputs: body is user-select none (#116)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings', { timeout: 15000 });
+      await wakeFromIdle(page);
+      const sel = () => page.evaluate(() => window.getSelection().toString());
+      const bodyStyle = await page.evaluate(() => {
+        const s = getComputedStyle(document.body);
+        return { us: s.userSelect, wus: s.webkitUserSelect };
+      });
+      const textLen = await page.evaluate(() => document.body.innerText.length);
+      const detail = [`body=${JSON.stringify(bodyStyle)} innerText=${textLen}`];
+      let pass = bodyStyle.us === 'none' && textLen > 0;
+      const check = async (label) => {
+        await page.keyboard.press('Control+a');
+        await page.waitForTimeout(100);
+        const s = await sel();
+        detail.push(`${label}:selection="${s.slice(0, 20)}"`);
+        if (s !== '') pass = false;
+      };
+      await check('slideshow');
+      await openSettingsModal(page);
+      await check('settings');
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      await page.keyboard.press('Shift+/');
+      await page.waitForTimeout(300);
+      await check('shortcuts');
+      return { pass, detail: detail.join(' ') };
+    },
+  },
+  {
+    // #116レビュー: オーバーレイのファイル名は #66 が意図的に選択可能にしていた。body の
+    // user-select:none を継承して選択できなくなる回帰を、実ブラウザの computed style と
+    // 実際のドラッグ選択で確認する（jsdom は user-select を計算しないので vitest では検出できない）。
+    name: 'overlay file name stays selectable (computed user-select text, drag selects it) (#116)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings', { timeout: 15000 });
+      await wakeFromIdle(page);
+      const info = await page.evaluate(() => {
+        const bar = document.querySelector('button[aria-haspopup="menu"]').closest('.fixed');
+        const span = [...bar.querySelectorAll('span.truncate')].find((e) => e.textContent.trim());
+        if (!span) return null;
+        const r = span.getBoundingClientRect();
+        return {
+          text: span.textContent.trim(),
+          us: getComputedStyle(span).userSelect,
+          x0: r.left + 1,
+          x1: r.right - 1,
+          y: r.top + r.height / 2,
+        };
+      });
+      if (!info) return { pass: false, detail: 'ファイル名の span が見つからない' };
+      await page.mouse.move(info.x0, info.y);
+      await page.mouse.down();
+      await page.mouse.move(info.x1, info.y, { steps: 6 });
+      await page.mouse.up();
+      const selected = (await page.evaluate(() => window.getSelection().toString())).trim();
+      return {
+        pass: info.us === 'text' && selected === info.text,
+        detail: `userSelect=${info.us} fileName="${info.text}" dragSelected="${selected}"`,
+      };
+    },
+  },
+  {
+    // #116: 右クリックの既定メニュー（WebView の「再読み込み/検証」等）は入力欄以外で
+    // preventDefault される。入力欄（input/textarea）では抑止しない（コピー/貼り付けのため）。
+    name: 'contextmenu is default-prevented except inside text inputs (#116)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings', { timeout: 15000 });
+      await wakeFromIdle(page);
+      await page.evaluate(() => {
+        window.__ctx = [];
+        window.addEventListener('contextmenu', (e) => {
+          const t = e.target;
+          window.__ctx.push({ tag: t.tagName, prevented: e.defaultPrevented });
+        });
+      });
+      await page.mouse.click(640, 300, { button: 'right' });
+      await openSettingsModal(page);
+      // 除外ルールタブの追加用テキスト入力で右クリックする。
+      const box = await page.evaluate(() => {
+        const tabs = [...document.querySelectorAll('[role="tab"]')];
+        tabs[2].click();
+        return null;
+      });
+      void box;
+      await page.waitForTimeout(400);
+      const inputBox = await page.evaluate(() => {
+        const el = document.querySelector('[role="dialog"] input[type="text"]:not([readonly])');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      if (!inputBox) return { pass: false, detail: '入力欄が見つからない' };
+      await page.mouse.click(inputBox.x, inputBox.y, { button: 'right' });
+      // 設定モーダルのテキスト（入力欄以外）。
+      const headBox = await page.evaluate(() => {
+        const el = document.querySelector('[role="dialog"] h2');
+        const r = el.getBoundingClientRect();
+        return { x: r.left + 4, y: r.top + r.height / 2 };
+      });
+      await page.mouse.click(headBox.x, headBox.y, { button: 'right' });
+      const log = await page.evaluate(() => window.__ctx);
+      const photo = log[0];
+      const input = log.find((l) => l.tag === 'INPUT');
+      const heading = log[log.length - 1];
+      const pass =
+        log.length === 3 &&
+        photo.prevented === true &&
+        !!input &&
+        input.prevented === false &&
+        heading.prevented === true;
+      return { pass, detail: JSON.stringify(log) };
+    },
+  },
+  {
+    // #116: 入力欄では Ctrl+A（全選択）/コピー/貼り付けが通常どおり使える。user-select:none を
+    // 継承して入力できなくなる事故（WebKit）が無いことの確認も兼ねる。
+    name: 'text inputs still select, type and paste normally despite user-select none (#116)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings', { timeout: 15000 });
+      await openSettingsModal(page);
+      await page.evaluate(() => document.querySelectorAll('[role="tab"]')[2].click());
+      await page.waitForTimeout(400);
+      const input = page.locator('[role="dialog"] input[type="text"]:not([readonly])').first();
+      await input.click();
+      await page.keyboard.type('hello world');
+      await page.keyboard.press('Control+a');
+      const sel = await input.evaluate((el) => ({
+        sel: el.value.slice(el.selectionStart, el.selectionEnd),
+        us: getComputedStyle(el).userSelect,
+      }));
+      // 選択 → 上書き（貼り付け相当）。クリップボード権限に依存せず insertText で確認。
+      await page.keyboard.insertText('pasted');
+      const after = await input.inputValue();
+      // パス表示（readonly input）も選択できる。
+      await page.evaluate(() => document.querySelectorAll('[role="tab"]')[0].click());
+      await page.waitForTimeout(400);
+      const ro = page.locator('[role="dialog"] input[readonly]').first();
+      await ro.click();
+      await page.keyboard.press('Control+a');
+      const roSel = await ro.evaluate((el) => el.value.slice(el.selectionStart, el.selectionEnd));
+      const pass =
+        sel.sel === 'hello world' && sel.us === 'text' && after === 'pasted' && roSel.length > 0;
+      return {
+        pass,
+        detail: `selected="${sel.sel}" us=${sel.us} afterPaste="${after}" readonlySel="${roSel}"`,
+      };
+    },
+  },
+  {
+    // #116: 選択が有用な箇所（確認モーダルの本文）は user-select:text で、選択してコピーできる。
+    name: 'confirm dialog body stays selectable while the page is not (#116)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings', { timeout: 15000 });
+      await openSettingsModal(page);
+      await page.evaluate(() => {
+        const tabs = [...document.querySelectorAll('[role="tab"]')];
+        tabs[tabs.length - 1].click();
+      });
+      await page.waitForSelector('svg.lucide-rotate-ccw', { timeout: 8000 });
+      await page.evaluate(() =>
+        document.querySelector('svg.lucide-rotate-ccw').closest('button').click(),
+      );
+      await page.waitForSelector('[role="alertdialog"]', { timeout: 2000 });
+      await page.waitForTimeout(300);
+      const us = await page.evaluate(() => {
+        return getComputedStyle(document.querySelector('[data-testid="confirm-dialog-final"]'))
+          .userSelect;
+      });
+      // 本文を実際に範囲選択（トリプルクリック）して文字列が取れる。
+      const pt = await page.evaluate(() => {
+        const el = document.querySelector('[data-testid="confirm-dialog-final"]');
+        const r = el.getBoundingClientRect();
+        return { x: r.left + 20, y: r.top + 8 };
+      });
+      await page.mouse.click(pt.x, pt.y, { clickCount: 3 });
+      const selected = await page.evaluate(() => window.getSelection().toString());
+      await page.keyboard.press('Control+a');
+      const all = await page.evaluate(() => window.getSelection().toString());
+      // 入力欄の外の Ctrl+A は抑止されるので、選択は三連クリックのまま変わらない。
+      const pass = us === 'text' && selected.length > 0 && all === selected;
+      return {
+        pass,
+        detail: `bodyUserSelect=${us} tripleClick="${selected.slice(0, 24)}" afterCtrlA="${all.slice(0, 24)}"`,
+      };
+    },
+  },
+  {
+    // #116: WebView 既定のショートカット（再読み込み/devtools/印刷/保存/検索/ソース表示/ズーム）は
+    // preventDefault される。アプリ自前・確認モーダルのキー（Tab/Enter）や Ctrl+A/C/V は触らない。
+    // 実機(WebView2)での F5/右クリック/ズームの挙動は PR の「実機確認項目」。
+    name: 'browser shortcuts are default-prevented, app and edit keys are not (#116)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings', { timeout: 15000 });
+      await page.evaluate(() => {
+        window.__keys = [];
+        window.addEventListener('keydown', (e) => {
+          if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+          window.__keys.push({
+            k: e.key + (e.ctrlKey ? '+Ctrl' : ''),
+            prevented: e.defaultPrevented,
+          });
+        });
+        window.__wheel = [];
+        window.addEventListener('wheel', (e) => window.__wheel.push(e.defaultPrevented), {
+          passive: true,
+        });
+      });
+      const blocked = [
+        'F5',
+        'F12',
+        'Control+r',
+        'Control+Shift+i',
+        'Control+p',
+        'Control+s',
+        'Control+u',
+        'Control+f',
+        'Control+g',
+        'Control+Minus',
+        'Control+Equal',
+        'Control+0',
+      ];
+      const free = ['Tab', 'Enter', 'Control+c', 'Control+v'];
+      for (const k of [...blocked, ...free]) {
+        await page.keyboard.press(k);
+      }
+      // Ctrl+ホイール（ズーム/ピンチ）と通常ホイール。
+      await page.evaluate(() => {
+        document.body.dispatchEvent(
+          new WheelEvent('wheel', { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true }),
+        );
+        document.body.dispatchEvent(
+          new WheelEvent('wheel', { deltaY: 1, bubbles: true, cancelable: true }),
+        );
+      });
+      const keys = await page.evaluate(() => window.__keys);
+      const wheel = await page.evaluate(() => window.__wheel);
+      const bad = [];
+      keys.slice(0, blocked.length).forEach((e, i) => {
+        if (!e.prevented) bad.push(`not-blocked:${blocked[i]}`);
+      });
+      keys.slice(blocked.length).forEach((e, i) => {
+        if (e.prevented) bad.push(`wrongly-blocked:${free[i]}`);
+      });
+      if (keys.length !== blocked.length + free.length) bad.push(`keys=${keys.length}`);
+      if (wheel[0] !== true || wheel[1] !== false) bad.push(`wheel=${JSON.stringify(wheel)}`);
+      return {
+        pass: bad.length === 0,
+        detail: bad.length
+          ? bad.join(' ')
+          : `${blocked.length} blocked, ${free.length} free, wheel ok`,
+      };
+    },
+  },
+  // #116: 最小ウィンドウサイズ（tauri.conf.json の minWidth/minHeight）で、設定の全タブ・
+  // 確認モーダル・ようこそ画面・オーバーレイ・「…」メニューが崩れない（ボタン切れ・
+  // 横スクロール・画面外はみ出し無し、フォルダタブの主要操作が折り返しの下に隠れない）。値は設定ファイルから読むので、下げると本テストが検出する。
+  ...['ja', 'en'].map((lang) => ({
+    name: `layout holds at the minimum window size from tauri.conf.json, ${lang} (#116)`,
+    hash: 'thumbs',
+    locale: lang === 'ja' ? 'ja-JP' : 'en-US',
+    async run(page) {
+      const win = JSON.parse(
+        fs.readFileSync(path.join(projectRoot, 'src-tauri/tauri.conf.json'), 'utf8'),
+      ).app.windows[0];
+      const { minWidth: w, minHeight: h } = win;
+      if (!w || !h) return { pass: false, detail: 'minWidth/minHeight 未設定' };
+      await page.setViewportSize({ width: w, height: h });
+      await page.waitForSelector('svg.lucide-settings', { timeout: 30000 });
+      await page.waitForTimeout(500);
+      const problems = [];
+      const check = async (label) => {
+        const p = await page.evaluate(detectLayoutProblems);
+        for (const x of p) problems.push(`${label}: ${x}`);
+      };
+      await openSettingsModal(page);
+      const tabCount = await page.evaluate(() => document.querySelectorAll('[role="tab"]').length);
+      for (let i = 0; i < tabCount; i++) {
+        await page.evaluate((n) => document.querySelectorAll('[role="tab"]')[n].click(), i);
+        await page.waitForTimeout(300);
+        await check(`tab${i}`);
+        if (i === 0) {
+          // フォルダタブの主要操作（パス欄と「選択」ボタン）が、本文をスクロールしなくても
+          // 本文スクロール領域の中に見えていること（高さを下げすぎるとここが折り返しの下に隠れる）。
+          const vis = await page.evaluate(() => {
+            const c = document.querySelector('div.flex-1.overflow-y-auto').getBoundingClientRect();
+            const inView = (e) => {
+              if (!e) return false;
+              const r = e.getBoundingClientRect();
+              return r.top >= c.top - 1 && r.bottom <= c.bottom + 1;
+            };
+            const input = document.querySelector('[role="dialog"] input[readonly]');
+            const select = input && input.parentElement.querySelector('button');
+            return { input: inView(input), select: inView(select) };
+          });
+          if (!vis.input) problems.push('folder tab: path field hidden below the fold');
+          if (!vis.select) problems.push('folder tab: Select button hidden below the fold');
+        }
+        if (i === 2) {
+          // 除外ルールタブはスクロール無しで全体（追加欄と追加ボタンの下端まで）が収まること。
+          const fits = await page.evaluate(() => {
+            const c = document.querySelector('div.flex-1.overflow-y-auto');
+            const input = document.querySelector(
+              '[role="dialog"] input[type="text"]:not([readonly])',
+            );
+            const r = input.getBoundingClientRect();
+            const cr = c.getBoundingClientRect();
+            return {
+              inside: r.top >= cr.top - 1 && r.bottom <= cr.bottom + 1,
+              noScroll: c.scrollHeight <= c.clientHeight + 1,
+            };
+          });
+          if (!fits.inside) problems.push('exclude tab: add field clipped at the bottom');
+          if (!fits.noScroll) problems.push('exclude tab: needs scrolling');
+        }
+        await page.evaluate(() => {
+          const c = document.querySelector('div.flex-1.overflow-y-auto');
+          if (c) c.scrollTop = c.scrollHeight;
+        });
+        await page.waitForTimeout(100);
+        await check(`tab${i}-bottom`);
+        // 最下部までスクロールしたとき、一番下の入力欄/ボタンが本文領域の中に完全に見えること。
+        const lastClipped = await page.evaluate(() => {
+          const c = document.querySelector('div.flex-1.overflow-y-auto');
+          const cr = c.getBoundingClientRect();
+          const els = [...c.querySelectorAll('input,button,select,textarea')].filter((e) => {
+            const r = e.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+          });
+          if (!els.length) return null;
+          const last = els.reduce((a, b) =>
+            a.getBoundingClientRect().bottom >= b.getBoundingClientRect().bottom ? a : b,
+          );
+          const r = last.getBoundingClientRect();
+          return r.bottom > cr.bottom + 1 || r.top < cr.top - 1
+            ? `${last.tagName}:${(last.textContent || last.placeholder || '').trim().slice(0, 12)}`
+            : null;
+        });
+        if (lastClipped) problems.push(`tab${i}-bottom: last control clipped ${lastClipped}`);
+        await page.evaluate(() => {
+          const c = document.querySelector('div.flex-1.overflow-y-auto');
+          if (c) c.scrollTop = 0;
+        });
+      }
+      // 確認モーダル（情報タブの全データ初期化）。
+      await page.evaluate(() => {
+        const t = [...document.querySelectorAll('[role="tab"]')];
+        t[t.length - 1].click();
+      });
+      await page.waitForSelector('svg.lucide-rotate-ccw', { timeout: 8000 });
+      await page.evaluate(() =>
+        document.querySelector('svg.lucide-rotate-ccw').closest('button').click(),
+      );
+      await page.waitForSelector('[role="alertdialog"]', { timeout: 2000 });
+      await page.waitForTimeout(300);
+      await check('confirm');
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      await page.keyboard.press('Escape'); // 設定を閉じる
+      await page.waitForTimeout(300);
+      // ショートカット一覧・オーバーレイ・「…」メニューと除外サブメニュー。
+      await page.keyboard.press('Shift+/');
+      await page.waitForTimeout(400);
+      await check('shortcuts');
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      await wakeFromIdle(page);
+      await check('overlay');
+      await page.evaluate(() =>
+        document.querySelectorAll('button[aria-haspopup="menu"]')[0].click(),
+      );
+      await page.waitForTimeout(300);
+      await check('menu');
+      await page.evaluate(() =>
+        document.querySelectorAll('button[aria-haspopup="menu"]')[1].click(),
+      );
+      await page.waitForTimeout(400);
+      // 除外サブメニュー（幅430px以下では積み重ね展開のため、はみ出しだけ見る）。
+      await check('exclude-submenu');
+      return {
+        pass: problems.length === 0,
+        detail: problems.length
+          ? problems.slice(0, 6).join(' | ')
+          : `${w}x${h}: no layout problems`,
+      };
+    },
+  })),
+  {
     // #115: 取得失敗（get_ignore_patterns/get_picked_images/get_recent_images/get_display_stats を
     // reject）は、「〜はありません」の空状態でなく「読み込みに失敗しました」のエラー状態と再試行ボタンになる。
     name: 'load failures show an error state with retry, not the empty message (#115)',
@@ -3260,7 +3758,8 @@ const scenarios = [
   ].flatMap((c) =>
     ['white', 'mid', 'black'].map((kind) => ({
       // #113: 白・中間灰・黒の写真の上で、操作バーの文字（ファイル名・撮影日・位置表示）は
-      // 実効コントラスト 4.5:1 以上、アイコン（バー・右上ピル）は 3:1 以上。
+      // 実効コントラスト 4.5:1 以上、アイコン（バー・右上ピル）と進捗ヘアラインは 3:1 以上。
+      // 黒は修正前でも通る網羅用（退行検出の主役は白・中間灰）。
       name: `overlay contrast on a ${kind} photo: text >= 4.5:1, icons >= 3:1 (${c.name}) (#113)`,
       hash: `bg?kind=${kind}`,
       locale: c.locale,
@@ -3269,7 +3768,10 @@ const scenarios = [
         if (process.env.E2E_SHOT_DIR) {
           fs.writeFileSync(`${process.env.E2E_SHOT_DIR}/contrast-${kind}-${c.name}.png`, withFg);
         }
-        return summarizeContrast(results);
+        const text = summarizeContrast(results);
+        await page.reload();
+        const hair = summarizeHairline(await measureHairlineContrast(page));
+        return { pass: text.pass && hair.pass, detail: `${text.detail} | ${hair.detail}` };
       },
     })),
   ),
@@ -3292,6 +3794,13 @@ const scenarios = [
         }
         const s = summarizeContrast(results);
         if (!s.pass) bad.push(kind);
+        if (['light', 'red', 'green', 'blue'].includes(kind)) {
+          // ヘアラインは単色の写真だけ測る（縞・ノイズは写真側の中央値が意味を持たない）。
+          await page.reload();
+          const hair = summarizeHairline(await measureHairlineContrast(page));
+          if (!hair.pass) bad.push(`${kind}-hairline`);
+          s.detail += ` | ${hair.detail}`;
+        }
         lines.push(`[${kind}] ${s.detail}`);
       }
       return {
@@ -3301,6 +3810,79 @@ const scenarios = [
     },
   },
 ];
+
+/**
+ * #116: 現在の画面で「ボタン切れ・横スクロール・画面外はみ出し・ボタン同士の重なり」を探す。
+ * page.evaluate に関数ごと渡すので、ブラウザ側で完結させる（外側の変数は参照しない）。
+ * 空配列なら問題無し。設定のタブ行（role=tablist）は横スクロールが仕様なので対象外。
+ */
+function detectLayoutProblems() {
+  const out = [];
+  const vw = innerWidth;
+  if (document.documentElement.scrollWidth > vw + 1) {
+    out.push(`document h-scroll ${document.documentElement.scrollWidth}>${vw}`);
+  }
+  const root = document.querySelector('[role="alertdialog"],[role="dialog"]') || document.body;
+  const label = (e) =>
+    `${e.tagName}:${(e.textContent || e.value || e.title || '').trim().slice(0, 14)}`;
+  const vis = [
+    ...root.querySelectorAll('button,input,select,textarea,label,h1,h2,h3,p,span,a'),
+  ].filter((e) => {
+    const r = e.getBoundingClientRect();
+    const s = getComputedStyle(e);
+    return (
+      r.width > 0 &&
+      r.height > 0 &&
+      s.visibility !== 'hidden' &&
+      s.display !== 'none' &&
+      Number(s.opacity) > 0.05 &&
+      !e.closest('[role="tablist"]')
+    );
+  });
+  for (const e of vis) {
+    // 実際の文字の範囲（ボタン枠でなく文字そのもの）が、祖先のクリップ枠や画面からはみ出していないこと。
+    const range = document.createRange();
+    range.selectNodeContents(e);
+    const rr = range.getBoundingClientRect();
+    const r = rr.width > 0 ? rr : e.getBoundingClientRect();
+    if (r.right > vw + 1 || r.left < -1) out.push(`off-screen ${label(e)}`);
+    for (let a = e.parentElement; a && a !== document.body; a = a.parentElement) {
+      if (getComputedStyle(a).overflowX === 'visible') continue;
+      const A = a.getBoundingClientRect();
+      if (r.right > A.right + 1 || r.left < A.left - 1) out.push(`clipped ${label(e)}`);
+      break;
+    }
+    if (['BUTTON', 'LABEL', 'SELECT'].includes(e.tagName) && e.scrollWidth > e.clientWidth + 1) {
+      out.push(`text overflow ${label(e)} ${e.scrollWidth}>${e.clientWidth}`);
+    }
+  }
+  for (const e of root.querySelectorAll('*')) {
+    const s = getComputedStyle(e);
+    if (
+      (s.overflowX === 'auto' || s.overflowX === 'scroll') &&
+      e.scrollWidth > e.clientWidth + 1 &&
+      !e.matches('[role="tablist"]')
+    ) {
+      out.push(
+        `h-scroll ${e.tagName}.${String(e.className).slice(0, 24)} ${e.scrollWidth}>${e.clientWidth}`,
+      );
+    }
+  }
+  const btns = vis.filter((e) => ['BUTTON', 'INPUT', 'SELECT'].includes(e.tagName));
+  for (let i = 0; i < btns.length; i++) {
+    for (let j = i + 1; j < btns.length; j++) {
+      const a = btns[i];
+      const b = btns[j];
+      if (a.contains(b) || b.contains(a)) continue;
+      const A = a.getBoundingClientRect();
+      const B = b.getBoundingClientRect();
+      const ox = Math.min(A.right, B.right) - Math.max(A.left, B.left);
+      const oy = Math.min(A.bottom, B.bottom) - Math.max(A.top, B.top);
+      if (ox > 2 && oy > 2) out.push(`overlap ${label(a)} | ${label(b)}`);
+    }
+  }
+  return out;
+}
 
 /**
  * #109: 設定モーダルのタブ行(role=tablist)の高さが、全タブ × 複数ウィンドウ
@@ -3483,7 +4065,12 @@ async function main() {
     // #120: 見張り(media watchdog)の待ち時間の下限(既定10秒)を短縮する。待ち時間は
     // max(表示間隔, 下限) で、e2e の表示間隔は5秒（ただし起動直後の最初の画像は設定の読み込み前で
     // 既定の10秒）なので、下限を下げても実効は5〜10秒。
-    env: { ...process.env, VITE_MEDIA_WATCHDOG_MIN_MS: '1000' },
+    env: {
+      ...process.env,
+      VITE_MEDIA_WATCHDOG_MIN_MS: '1000',
+      // #116: dev サーバーでも本番と同じ右クリック/ブラウザ系ショートカット抑止を有効にする。
+      VITE_FORCE_WEBVIEW_GUARDS: 'true',
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   });

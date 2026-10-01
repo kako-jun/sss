@@ -926,7 +926,7 @@ function App() {
             )}
             {directoryErrorMessage && (
               <div
-                className="text-red-400/80 font-mono text-xs mb-6 truncate max-w-full mx-auto"
+                className="select-text text-red-400/80 font-mono text-xs mb-6 truncate max-w-full mx-auto"
                 title={directoryErrorMessage}
               >
                 {directoryErrorMessage}

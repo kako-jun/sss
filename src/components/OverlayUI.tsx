@@ -457,10 +457,10 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
           「今フェードして隠すべきか」のboolean一つだけを見るヘルパーなので、
           バーとは別の条件（isIdle && !isPausedByUser）を渡して使い回す）。 */}
       <div
-        className={`fixed bottom-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden z-40 ${idleFadeClassName(isIdle && !isPausedByUser)}`}
+        className={`fixed bottom-0 left-0 right-0 h-0.5 bg-black/75 overflow-hidden z-40 ${idleFadeClassName(isIdle && !isPausedByUser)}`}
       >
         <div
-          className="h-full w-full bg-white/50 origin-left"
+          className="h-full w-full bg-white/80 origin-left"
           style={{
             transform: `scaleX(${Math.max(0, Math.min(100, progress)) / 100})`,
             transition:
@@ -541,7 +541,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
               )}
 
               <div
-                className="min-w-0 flex-1 flex items-baseline gap-1.5 text-xs"
+                className="select-text min-w-0 flex-1 flex items-baseline gap-1.5 text-xs"
                 title={infoTooltip}
               >
                 <span className="text-white/75 truncate min-w-0">{fileName}</span>

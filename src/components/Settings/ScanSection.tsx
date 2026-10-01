@@ -169,7 +169,7 @@ export function ScanSection({ onScanComplete, guard }: ScanSectionProps) {
       </button>
 
       {errorMessage && (
-        <div role="alert" className="text-sm text-red-400/70">
+        <div role="alert" className="select-text text-sm text-red-400/70">
           {errorMessage}
         </div>
       )}
@@ -220,7 +220,7 @@ export function ScanSection({ onScanComplete, guard }: ScanSectionProps) {
                 <span className="text-white/50 text-xs"> {t('keptAsUnknownNote')}</span>
               </div>
               {scanProgress.errorExamples.length > 0 && (
-                <ul className="text-xs text-white/50 font-mono space-y-0.5">
+                <ul className="select-text text-xs text-white/50 font-mono space-y-0.5">
                   {scanProgress.errorExamples.map((example, index) => (
                     <li key={`${index}-${example}`} className="truncate">
                       {example}
