@@ -50,6 +50,16 @@ export const ja = {
   directoryUnreachableSubtitle: '接続を確認するか、設定から別のフォルダを選んでください',
   rootUnavailable: 'フォルダに接続できません。再接続をお待ちください...',
   loadFailedGaveUp: '複数の写真の読み込みに失敗しました。フォルダの状態を確認してください。',
+  // #120: 連続して全ての写真が描画に失敗した（破損・0バイトのファイル）。
+  noReadableImagesTitle: '読み込める画像がありません',
+  noReadableImagesSubtitle:
+    'すべてのファイルが壊れているか、空かもしれません。\n設定でフォルダを確認し、再スキャンしてください。',
+  // 全件とは断定できないが、連続して読み込めなかったので止めた状態。
+  mediaFailureStreakTitle: '連続して読み込めませんでした',
+  mediaFailureStreakSubtitle:
+    'ファイルが壊れているか、空かもしれません。\n「続ける」で次の写真を試します。',
+  continueSlideshow: '続ける',
+  mediaSkipToast: '読み込めない写真をスキップしています（{count}件連続）',
   startupDirectoryRejected: '前回のフォルダに接続できませんでした: {reason}',
 
   // === 起動シーケンスの状態表示（src/lib/startup.ts） ===

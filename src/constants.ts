@@ -80,3 +80,13 @@ export const IDLE_FADE_VISIBLE = 'opacity-100 pointer-events-auto';
 export function idleFadeClassName(isIdle: boolean): string {
   return `${IDLE_FADE_BASE} ${isIdle ? IDLE_FADE_HIDDEN : IDLE_FADE_VISIBLE}`;
 }
+
+/**
+ * 画像/動画の読込完了も失敗も来ない時に、強制的に次へ進むまでの待ち時間（ミリ秒、#120）。
+ * `max(表示間隔, 下限)`。下限は既定10秒で、e2e だけが `VITE_MEDIA_WATCHDOG_MIN_MS`
+ * （vite の環境変数）で短縮できる（実時間で見張りを検証するため）。
+ */
+export function mediaWatchdogMs(intervalMs: number): number {
+  const floor = Number(import.meta.env.VITE_MEDIA_WATCHDOG_MIN_MS) || 10_000;
+  return Math.max(intervalMs, floor);
+}
