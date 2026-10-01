@@ -10,7 +10,7 @@
 
 Windows・Linux・macOSのすべてで同じ操作感を提供します。ファイルマネージャーとの連携もOS別に実装されています（Windows: エクスプローラー、macOS: Finder、Linux: nautilus / dolphin / xdg-open）。
 
-配布物（[Releases](https://github.com/kako-jun/sss/releases)）にはコード署名をしていないため、初回起動時に Windows SmartScreen / macOS Gatekeeper の警告が出ます。回避手順は README を参照してください。現在の最新リリース v1.0.0 には、動画のスライドショー再生（v1.0.0 では動画ファイルがスキャン対象に含まれない不具合がありました）・多言語対応・UI刷新などのその後の変更は含まれていません（`main` のソースビルドで利用できます。変更履歴は CHANGELOG.md の `[1.1.0]`）。
+配布物（[Releases](https://github.com/kako-jun/sss/releases)）にはコード署名をしていないため、初回起動時に Windows SmartScreen / macOS Gatekeeper の警告が出ます。回避手順は README を参照してください。
 
 ## 対応ファイル形式
 
