@@ -295,7 +295,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
 
     try {
       const destPath = await pickImage(image.path);
-      // #78: コピーしたファイルだけを消す（ピックフォルダ内の検証はバックエンド側）。
+      // #78: コピーしたファイルだけを消す（ピック先フォルダ内の検証はバックエンド側）。
       showUndoToast(t('pickCopyDone', { path: destPath }), async () => {
         await deletePickedImage(destPath);
         return t('undoPickDone');
