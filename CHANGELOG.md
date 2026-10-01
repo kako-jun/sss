@@ -7,6 +7,10 @@ Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+### Fixed
+
+- スライドショー背景のSSSロゴが不透明（100%）で目立って表示される不具合を修正。`opacity-2` が Tailwind の既定スケールに無く CSS が生成されていなかったため、`tailwind.config.js` の `theme.extend.opacity` に `2: '0.02'` を追加した。他に未登録の非5刻み opacity クラスは無いことを全件確認済み (#99)
+
 ## [1.1.0] - 2026-10-01
 
 ### Added
