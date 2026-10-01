@@ -541,7 +541,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
               )}
 
               <div
-                className="min-w-0 flex-1 flex items-baseline gap-1.5 text-xs"
+                className="select-text min-w-0 flex-1 flex items-baseline gap-1.5 text-xs"
                 title={infoTooltip}
               >
                 <span className="text-white/75 truncate min-w-0">{fileName}</span>

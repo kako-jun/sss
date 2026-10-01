@@ -694,13 +694,13 @@ uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
 - Keep the page non-selectable by default (`body { user-select: none }`, #116) so
   Ctrl+A never paints the whole screen blue; opt back in with `user-select: text`
   (Tailwind `select-text`) only where copying is useful — inputs/textareas (global
-  CSS rule), error messages, file paths, and the confirm modal body
-- Keep the window usable down to the minimum size (`minWidth` 480 / `minHeight` 360 in
-  `tauri.conf.json`, #116): no clipped buttons, no horizontal scroll (the settings
-  tab row is the one designed exception), no overlap
-
-### Don't
-
+  CSS rule), the overlay file name/date/position, the version, stats numbers, error
+  messages, and the confirm modal body
+- Keep the window usable down to the minimum size (`minWidth` 480 / `minHeight` 400 in
+  `tauri.conf.json`, #116): no clipped buttons, no horizontal scroll in the settings body,
+  no overlap, and the Folder tab's path field + "Select" button visible without scrolling
+  (the settings tab row scrolling horizontally is the one designed exception; 360px of
+  height is already cramped)
 - Add colorful accent colors. Red-400/80 is only for errors/destructive actions
 - Use thick borders or strong box-shadows
 - Create large, dramatic buttons or hover effects

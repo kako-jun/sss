@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // #116: ウィンドウの最小サイズ。これ未満に縮めると設定の「フォルダ」タブの「選択」ボタンが
-// 切れる等、レイアウトが崩れる（実測: 幅 460px 以下で英語の設定タブが横スクロールになる）。
+// 切れる等、レイアウトが崩れる（実測の根拠は CLAUDE.md の「ウィンドウの最小サイズ」）。
 // 値を下げる/消す変更は、e2e の "layout holds at the minimum window size" で崩れが無いことを
 // 確認してから行う。
 
@@ -14,9 +14,9 @@ const conf = JSON.parse(readFileSync(join(ROOT, 'src-tauri/tauri.conf.json'), 'u
 };
 
 describe('window minimum size (#116)', () => {
-  it('メインウィンドウに minWidth >= 480 / minHeight >= 360 が設定されている', () => {
+  it('メインウィンドウに minWidth >= 480 / minHeight >= 400 が設定されている', () => {
     const w = conf.app.windows[0];
     expect(w.minWidth).toBeGreaterThanOrEqual(480);
-    expect(w.minHeight).toBeGreaterThanOrEqual(360);
+    expect(w.minHeight).toBeGreaterThanOrEqual(400);
   });
 });

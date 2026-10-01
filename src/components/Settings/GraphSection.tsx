@@ -115,7 +115,7 @@ export function GraphSection() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="select-text grid grid-cols-3 gap-2">
         <div className="bg-black/40 rounded-lg p-3">
           <div className="text-xs text-white/50">{t('statViewedLabel')}</div>
           <div className="mt-1 font-mono text-white/80">
@@ -185,7 +185,7 @@ export function GraphSection() {
                   <th className="py-1 text-right font-normal">{t('tableColumnShare')}</th>
                 </tr>
               </thead>
-              <tbody className="font-mono">
+              <tbody className="select-text font-mono">
                 {displayStats.bins.map((bin) => (
                   <tr key={bin.count}>
                     <td className="py-0.5 text-left">{bin.count}</td>

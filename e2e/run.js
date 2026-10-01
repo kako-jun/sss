@@ -2914,6 +2914,40 @@ const scenarios = [
     },
   },
   {
+    // #116レビュー: オーバーレイのファイル名は #66 が意図的に選択可能にしていた。body の
+    // user-select:none を継承して選択できなくなる回帰を、実ブラウザの computed style と
+    // 実際のドラッグ選択で確認する（jsdom は user-select を計算しないので vitest では検出できない）。
+    name: 'overlay file name stays selectable (computed user-select text, drag selects it) (#116)',
+    hash: 'slides',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings', { timeout: 15000 });
+      await wakeFromIdle(page);
+      const info = await page.evaluate(() => {
+        const bar = document.querySelector('button[aria-haspopup="menu"]').closest('.fixed');
+        const span = [...bar.querySelectorAll('span.truncate')].find((e) => e.textContent.trim());
+        if (!span) return null;
+        const r = span.getBoundingClientRect();
+        return {
+          text: span.textContent.trim(),
+          us: getComputedStyle(span).userSelect,
+          x0: r.left + 1,
+          x1: r.right - 1,
+          y: r.top + r.height / 2,
+        };
+      });
+      if (!info) return { pass: false, detail: 'ファイル名の span が見つからない' };
+      await page.mouse.move(info.x0, info.y);
+      await page.mouse.down();
+      await page.mouse.move(info.x1, info.y, { steps: 6 });
+      await page.mouse.up();
+      const selected = (await page.evaluate(() => window.getSelection().toString())).trim();
+      return {
+        pass: info.us === 'text' && selected === info.text,
+        detail: `userSelect=${info.us} fileName="${info.text}" dragSelected="${selected}"`,
+      };
+    },
+  },
+  {
     // #116: 右クリックの既定メニュー（WebView の「再読み込み/検証」等）は入力欄以外で
     // preventDefault される。入力欄（input/textarea）では抑止しない（コピー/貼り付けのため）。
     name: 'contextmenu is default-prevented except inside text inputs (#116)',
@@ -3033,14 +3067,11 @@ const scenarios = [
       const selected = await page.evaluate(() => window.getSelection().toString());
       await page.keyboard.press('Control+a');
       const all = await page.evaluate(() => window.getSelection().toString());
-      // Ctrl+A で取れるのは確認モーダルの本文だけ（背後の設定モーダルや写真画面の文言は含まない）。
-      const dialogTextLen = await page.evaluate(
-        () => document.querySelector('#confirm-dialog-message').innerText.length,
-      );
-      const pass = us === 'text' && selected.length > 0 && all.length <= dialogTextLen + 4;
+      // 入力欄の外の Ctrl+A は抑止されるので、選択は三連クリックのまま変わらない。
+      const pass = us === 'text' && selected.length > 0 && all === selected;
       return {
         pass,
-        detail: `bodyUserSelect=${us} tripleClick="${selected.slice(0, 24)}" ctrlA=${all.length}chars dialogText=${dialogTextLen}chars`,
+        detail: `bodyUserSelect=${us} tripleClick="${selected.slice(0, 24)}" afterCtrlA="${all.slice(0, 24)}"`,
       };
     },
   },
@@ -3080,7 +3111,7 @@ const scenarios = [
         'Control+Equal',
         'Control+0',
       ];
-      const free = ['Tab', 'Enter', 'Control+a', 'Control+c', 'Control+v'];
+      const free = ['Tab', 'Enter', 'Control+c', 'Control+v'];
       for (const k of [...blocked, ...free]) {
         await page.keyboard.press(k);
       }

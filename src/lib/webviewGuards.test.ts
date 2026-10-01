@@ -37,6 +37,8 @@ describe('isBlockedBrowserShortcut', () => {
     ['r', { metaKey: true }],
     ['I', { ctrlKey: true, shiftKey: true }],
     ['J', { ctrlKey: true, shiftKey: true }],
+    ['C', { ctrlKey: true, shiftKey: true }],
+    ['i', { metaKey: true, shiftKey: true }],
     ['u', { ctrlKey: true }],
     ['p', { ctrlKey: true }],
     ['s', { ctrlKey: true }],
@@ -53,6 +55,22 @@ describe('isBlockedBrowserShortcut', () => {
     expect(isBlockedBrowserShortcut(key({ key: k, ...mods }))).toBe(true);
   });
 
+  it('テンキーのズーム(+/-/0)は key が数字・記号でなくても code で抑止する', () => {
+    // NumLock オフ等では key が 'Insert' 等になる。
+    for (const code of ['NumpadAdd', 'NumpadSubtract', 'Numpad0']) {
+      expect(isBlockedBrowserShortcut(key({ key: 'Unidentified', code, ctrlKey: true }))).toBe(
+        true,
+      );
+    }
+    expect(isBlockedBrowserShortcut(key({ key: 'Unidentified', code: 'Numpad0' }))).toBe(false);
+  });
+
+  it('key が undefined の合成イベント(autofill 等)で例外を投げない', () => {
+    const e = key({ key: 'a', ctrlKey: true });
+    Object.defineProperty(e, 'key', { value: undefined });
+    expect(isBlockedBrowserShortcut(e)).toBe(false);
+  });
+
   it.each([
     // アプリ自前のショートカット（#66）と確認モーダルのキー（#119）は触らない。
     ['f', {}],
@@ -66,6 +84,8 @@ describe('isBlockedBrowserShortcut', () => {
     ['Tab', {}],
     ['Tab', { shiftKey: true }],
     ['Enter', {}],
+    ['F6', {}],
+    ['ArrowLeft', { ctrlKey: true }],
     // 入力欄の Ctrl+A/C/V/X/Z は通常どおり使える。
     ['a', { ctrlKey: true }],
     ['c', { ctrlKey: true }],
@@ -124,6 +144,16 @@ describe('installWebviewGuards', () => {
     fire(document.body, key({ key: 'F5' }));
     document.removeEventListener('keydown', spy);
     expect(reached).toBe(9);
+  });
+
+  it('本番: Ctrl+A は入力欄の外でだけ抑止する', () => {
+    cleanup = installWebviewGuards(document, { dev: false });
+    const input = document.createElement('input');
+    document.body.append(input);
+    expect(fire(document.body, key({ key: 'a', ctrlKey: true }))).toBe(true);
+    expect(fire(document.body, key({ key: 'A', metaKey: true }))).toBe(true);
+    expect(fire(input, key({ key: 'a', ctrlKey: true }))).toBe(false);
+    expect(fire(document.body, key({ key: 'a' }))).toBe(false);
   });
 
   it('本番: Ctrl+ホイール（ズーム/ピンチ）は preventDefault、通常のホイールは触らない', () => {
