@@ -5,6 +5,7 @@ import { Check } from 'lucide-react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import { useT, useLocale } from '../../lib/i18n';
+import { confirmDialog } from '../../lib/confirmDialog';
 import { EVEN_SPREAD_MAX, percentOf, spreadOf } from '../../lib/displayCountChart';
 import { CHART_HEIGHT, buildDisplayCountOptions } from './displayCountPlot';
 
@@ -36,7 +37,11 @@ export function GraphSection() {
   }, [loadStats]);
 
   const handleReset = async () => {
-    if (!window.confirm(t('confirmResetDisplayCounts'))) return;
+    const ok = await confirmDialog({
+      message: t('confirmResetDisplayCounts'),
+      confirmLabel: t('resetDisplayCountsButton'),
+    });
+    if (!ok) return;
 
     setIsResetting(true);
     try {

@@ -102,6 +102,7 @@ vi.mock('./components/Settings', () => ({
 
 import App from './App';
 import { setLanguageSetting } from './lib/i18n/store';
+import { confirmDialog } from './lib/confirmDialog';
 
 beforeEach(() => {
   getSetting.mockReset().mockResolvedValue(null);
@@ -1188,6 +1189,65 @@ describe('App window mode toggle: re-sync failures are logged (#103)', () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+});
+
+// #119: 確認モーダル表示中は、App のグローバルキーボードショートカット（矢印・F・Space・?）を
+// 無効化し、ESC は設定を閉じたり exit_app を呼んだりせずモーダルのキャンセルにだけ作用する。
+describe('App keyboard shortcuts are disabled while the confirm dialog is open (#119)', () => {
+  async function openConfirm() {
+    getLastDirectoryPath.mockResolvedValue('/photos');
+    restorePlaylist.mockResolvedValue(true);
+    getNextImage.mockResolvedValue(foundImage('/a.jpg'));
+    render(<App />);
+    await waitFor(() => {
+      expect(findPhotoImg()).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(win.isFullscreen).toHaveBeenCalled();
+    });
+    let result!: Promise<boolean>;
+    act(() => {
+      result = confirmDialog({ message: 'm', confirmLabel: '実行' });
+    });
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    // Promise をそのまま return すると await で解決待ちになるので包む。
+    return { result };
+  }
+
+  it('ignores ArrowRight / F / Space / ? while open, and Escape only cancels the dialog', async () => {
+    const { result } = await openConfirm();
+    const nextCalls = getNextImage.mock.calls.length;
+    const invokeCalls = invoke.mock.calls.length;
+
+    fireEvent.keyDown(document, { key: 'ArrowRight' });
+    fireEvent.keyDown(document, { key: 'f' });
+    fireEvent.keyDown(document.body, { key: ' ' });
+    fireEvent.keyDown(document, { key: '?' });
+    await act(async () => {});
+
+    expect(getNextImage.mock.calls.length).toBe(nextCalls);
+    expect(win.setFullscreen).not.toHaveBeenCalled();
+    expect(screen.getByTitle('一時停止')).toBeTruthy(); // Space で一時停止していない
+    expect(screen.queryByText('キーボードショートカット')).toBeNull(); // ? で開いていない
+    expect(invoke.mock.calls.length).toBe(invokeCalls);
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await expect(result).resolves.toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith('exit_app');
+  });
+
+  it('Escape cancels the dialog without closing the Settings modal', async () => {
+    const { result } = await openConfirm();
+    fireEvent.click(screen.getByTitle('設定'));
+    expect(screen.getByTestId('settings-stub')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await expect(result).resolves.toBe(false);
+
+    expect(screen.getByTestId('settings-stub')).toBeTruthy();
+    expect(invoke).not.toHaveBeenCalledWith('exit_app');
   });
 });
 

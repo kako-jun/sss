@@ -221,6 +221,226 @@ async function getOverlayBarWrapperOpacity(page) {
   });
 }
 
+/**
+ * #119: 「すべてのデータを初期化」は window.confirm ではなくアプリ内モーダル
+ * （role=alertdialog）で確認し、OK を押した時だけ reset_all_data を呼ぶ。
+ * キャンセル/ESC/背景クリックでは IPC が一切呼ばれず、ESC が設定を閉じたり
+ * exit_app を呼んだりしないことをログで確認する。E2E_SHOT_DIR を指定すると
+ * 800/1280/480 幅のスクリーンショットも保存する。
+ */
+const CONFIRM_KINDS = {
+  // 設定 > 情報 > すべてのデータを初期化
+  info: { tab: -1, cmd: 'reset_all_data', trigger: 'svg.lucide-rotate-ccw' },
+  // 設定 > 統計グラフ > 表示回数をリセット（赤い文字ボタン）
+  stats: { tab: 5, cmd: 'reset_all_display_counts', trigger: 'button[class*="text-red-400/60"]' },
+  // 設定 > ピック > サムネイルの削除ボタン（先頭）
+  pick: {
+    tab: 3,
+    cmd: 'delete_picked_image',
+    trigger: 'button[title="削除"], button[title="Delete"]',
+  },
+};
+
+async function confirmResetScenario(page, lang, kind = 'info') {
+  const spec = CONFIRM_KINDS[kind];
+  // vite 初回の依存最適化で再読込が入ることがあるので、設定ボタンが出るまで待つ。
+  await page.waitForSelector('svg.lucide-settings', { timeout: 15000 });
+  await page.waitForTimeout(600);
+  await openSettingsModal(page);
+  await page.evaluate((tabIndex) => {
+    const tabs = [...document.querySelectorAll('[role="tab"]')];
+    tabs[tabIndex < 0 ? tabs.length + tabIndex : tabIndex].click();
+  }, spec.tab);
+  await page.waitForSelector(spec.trigger, { timeout: 8000 });
+  await page.waitForTimeout(300);
+  const openDialog = async () => {
+    await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const btn = el && el.closest('button');
+      if (!btn) throw new Error('トリガーのボタンが見つからない');
+      btn.click();
+    }, spec.trigger);
+    await page.waitForSelector('[role="alertdialog"]', { timeout: 2000 });
+    // useFocusTrap のフォーカス移動は rAF 遅延なので、ダイアログ内へ移るまで待つ（負荷時の揺れ対策）。
+    await page.waitForFunction(
+      () => document.querySelector('[role="alertdialog"]')?.contains(document.activeElement),
+      null,
+      { timeout: 3000 },
+    );
+  };
+  const dialogState = () =>
+    page.evaluate(() => {
+      const d = document.querySelector('[role="alertdialog"]');
+      return d
+        ? {
+            modal: d.getAttribute('aria-modal'),
+            display: getComputedStyle(d).display,
+            focus: document.activeElement ? document.activeElement.textContent : null,
+            text: d.textContent,
+          }
+        : null;
+    });
+  const resets = () => countCalls(page, spec.cmd);
+  const detail = [];
+
+  await openDialog();
+  const st = await dialogState();
+  detail.push('dialog=' + JSON.stringify(st));
+  const defaultFocusIsCancel = st && st.focus === (lang === 'ja' ? 'キャンセル' : 'Cancel');
+
+  const shotDir = process.env.E2E_SHOT_DIR;
+  const fits = [];
+  let fitOk = true;
+  {
+    for (const [w, h] of [
+      [800, 600],
+      [1280, 800],
+      [480, 700],
+      [800, 400],
+      [360, 300],
+    ]) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.waitForTimeout(300);
+      if (shotDir) {
+        await page.screenshot({
+          path: path.join(shotDir, `confirm-${kind}-${lang}-${w}x${h}.png`),
+        });
+      }
+      // 最終段落（警告）とボタンが viewport 内に完全に収まっている（スクロール不要で見える）こと。
+      const fit = await page.evaluate(() => {
+        const inView = (el) => {
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return (
+            r.top >= 0 &&
+            r.left >= 0 &&
+            r.bottom <= innerHeight &&
+            r.right <= innerWidth &&
+            r.height > 0
+          );
+        };
+        const d = document.querySelector('[role="alertdialog"]');
+        const btns = [...d.querySelectorAll('button')];
+        const final = d.querySelector('[data-testid="confirm-dialog-final"]');
+        // ヒント行（「矢印キーで続きを表示」）が本文スクロール領域・最終段落・ボタンと矩形交差しないこと。
+        const hint = d.querySelector('[data-testid="confirm-dialog-hint"]');
+        const scroller = d.querySelector('.overflow-y-auto');
+        const hit = (a, b) => {
+          const p = a.getBoundingClientRect();
+          const q = b.getBoundingClientRect();
+          return p.left < q.right && p.right > q.left && p.top < q.bottom && p.bottom > q.top;
+        };
+        const hintOverlaps = hint
+          ? [scroller, final, ...btns].filter(Boolean).some((el) => hit(hint, el))
+          : false;
+        return {
+          hintOverlaps,
+          hintShown: hint ? hint.textContent.trim() !== '' : false,
+          final: final ? inView(final) : 'none',
+          buttons: btns.every(inView),
+          panel: inView(d),
+          // 視覚順: キャンセル(DOM先頭)が左、破壊ボタン(DOM末尾)が右（CSS order での入替を検出）。
+          cancelLeftOfOk:
+            btns[0].getBoundingClientRect().left <
+            btns[btns.length - 1].getBoundingClientRect().left,
+        };
+      });
+      fits.push(`${w}x${h}:${JSON.stringify(fit)}`);
+      if (
+        !fit.buttons ||
+        fit.final === false ||
+        !fit.panel ||
+        !fit.cancelLeftOfOk ||
+        fit.hintOverlaps
+      )
+        fitOk = false;
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.waitForTimeout(200);
+  }
+
+  // 1) キャンセルボタン
+  await page.click('[role="alertdialog"] button:first-of-type');
+  await page.waitForTimeout(250);
+  const afterCancel = { resets: await resets(), open: !!(await dialogState()) };
+  // 2) ESC（設定は閉じず exit_app も呼ばれない）
+  await openDialog();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  const afterEsc = {
+    resets: await resets(),
+    open: !!(await dialogState()),
+    settingsStillOpen: (await page.$('[role="dialog"]')) !== null,
+    exits: await countCalls(page, 'exit_app'),
+  };
+  // 3) 背景クリック（パネルの外）
+  await openDialog();
+  await page.mouse.click(4, 4);
+  await page.waitForTimeout(250);
+  const afterBackdrop = { resets: await resets(), open: !!(await dialogState()) };
+  // 3b) 既定フォーカス（キャンセル）で Enter / Space → 閉じるだけで破壊的 IPC は 0 回
+  await openDialog();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(250);
+  const afterEnter = { resets: await resets(), open: !!(await dialogState()) };
+  await openDialog();
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(250);
+  const afterSpace = { resets: await resets(), open: !!(await dialogState()) };
+  // 3c) スクロール系キー・Tab/Shift+Tab 周回では閉じず、IPC も 0 回、フォーカスはダイアログ内
+  await openDialog();
+  for (const k of ['PageDown', 'End', 'ArrowDown', 'ArrowUp', 'PageUp', 'Home']) {
+    await page.keyboard.press(k);
+  }
+  for (const k of ['Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab']) {
+    await page.keyboard.press(k);
+  }
+  await page.waitForTimeout(250);
+  const afterKeys = {
+    resets: await resets(),
+    open: !!(await dialogState()),
+    focusInside: await page.evaluate(
+      () => !!document.querySelector('[role="alertdialog"]')?.contains(document.activeElement),
+    ),
+  };
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  // 4) OK でのみ実行
+  await openDialog();
+  await page.click('[role="alertdialog"] button:last-of-type');
+  await page.waitForTimeout(400);
+  const afterOk = { resets: await resets(), open: !!(await dialogState()) };
+
+  detail.push('fit=' + fits.join(' '));
+  const pass =
+    fitOk &&
+    st !== null &&
+    st.modal === 'true' &&
+    st.display !== 'none' &&
+    defaultFocusIsCancel &&
+    afterCancel.resets === 0 &&
+    !afterCancel.open &&
+    afterEsc.resets === 0 &&
+    !afterEsc.open &&
+    afterEsc.settingsStillOpen &&
+    afterEsc.exits === 0 &&
+    afterBackdrop.resets === 0 &&
+    !afterBackdrop.open &&
+    afterEnter.resets === 0 &&
+    !afterEnter.open &&
+    afterSpace.resets === 0 &&
+    !afterSpace.open &&
+    afterKeys.resets === 0 &&
+    afterKeys.open &&
+    afterKeys.focusInside &&
+    afterOk.resets === 1 &&
+    !afterOk.open;
+  detail.push(
+    `defaultFocusIsCancel=${defaultFocusIsCancel} cancel=${JSON.stringify(afterCancel)} esc=${JSON.stringify(afterEsc)} backdrop=${JSON.stringify(afterBackdrop)} enter=${JSON.stringify(afterEnter)} space=${JSON.stringify(afterSpace)} keys=${JSON.stringify(afterKeys)} ok=${JSON.stringify(afterOk)}`,
+  );
+  return { pass, detail: detail.join(' | ') };
+}
+
 const scenarios = [
   {
     // #65レビューM1(must): 画像→動画→動画→画像と回すあいだ、動画が
@@ -2097,6 +2317,51 @@ const scenarios = [
         pass,
         detail: `pausedAfterClick=${pausedAfterClick} playingAfterSecond=${playingAfterSecond} pausedAfterDouble=${pausedAfterDouble} overlayStillPlaying=${overlayStillPlaying} overlayNext=${nextAfterOverlay - beforeOverlayClick} wheelNext=${nextAfter - nextBefore} wheelPrev=${prevAfter - prevBefore}`,
       };
+    },
+  },
+  {
+    name: 'reset-all-data uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (ja) (#119)',
+    hash: 'statszero',
+    async run(page) {
+      return confirmResetScenario(page, 'ja', 'info');
+    },
+  },
+  {
+    name: 'reset-all-data uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (en) (#119)',
+    hash: 'statszero',
+    locale: 'en-US',
+    async run(page) {
+      return confirmResetScenario(page, 'en', 'info');
+    },
+  },
+  {
+    name: 'display-count reset uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (ja) (#119)',
+    hash: 'statszero',
+    async run(page) {
+      return confirmResetScenario(page, 'ja', 'stats');
+    },
+  },
+  {
+    name: 'display-count reset uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (en) (#119)',
+    hash: 'statszero',
+    locale: 'en-US',
+    async run(page) {
+      return confirmResetScenario(page, 'en', 'stats');
+    },
+  },
+  {
+    name: 'picked-photo delete uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (ja) (#119)',
+    hash: 'thumbs',
+    async run(page) {
+      return confirmResetScenario(page, 'ja', 'pick');
+    },
+  },
+  {
+    name: 'picked-photo delete uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (en) (#119)',
+    hash: 'thumbs',
+    locale: 'en-US',
+    async run(page) {
+      return confirmResetScenario(page, 'en', 'pick');
     },
   },
   {
