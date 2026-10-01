@@ -93,6 +93,14 @@ function waitForServer(url, timeoutMs, viteProcess) {
 
 /** システムにインストール済みの Chrome または Edge を順に試す。 */
 async function launchSystemBrowser() {
+  // E2E_BROWSER_PATH: channel の Chrome/Edge が無い環境（Playwright 同梱 Chromium 等）用に実行ファイルを直接指定する。
+  if (process.env.E2E_BROWSER_PATH) {
+    return chromium.launch({
+      executablePath: process.env.E2E_BROWSER_PATH,
+      headless: true,
+      args: ['--autoplay-policy=no-user-gesture-required', '--no-sandbox'],
+    });
+  }
   const channels = ['chrome', 'msedge'];
   let lastError;
   for (const channel of channels) {
@@ -1819,6 +1827,77 @@ const scenarios = [
       return {
         pass,
         detail: `shown=${shown} stillShown(idle)=${stillShown} barOpacity=${barOpacity} undoCalls=${JSON.stringify(undoCalls)} doneShown=${doneShown} buttonGone=${buttonGone}`,
+      };
+    },
+  },
+  {
+    // #111: 除外ルールの追加後に再スキャン案内とボタンが出て、押すと rescan_last_directory が
+    // 1回だけ呼ばれる。再スキャン中に別タブへ往復しても、設定を閉じて開き直しても、ボタンは無効のまま・二重実行されず、
+    // 完了メッセージは戻ったときに見られる。
+    name: 'exclude rule change shows a rescan notice; the button rescans once even across tab round trips (#111)',
+    hash: 'exrescan',
+    async run(page) {
+      await page.waitForTimeout(1500); // 起動時の背景スキャン（rescan 1回目）の完了を待つ
+      await openSettingsModal(page);
+      await page.click('#tab-exclude');
+      await page.waitForTimeout(300);
+      const rescanCalls = () => countCalls(page, 'rescan_last_directory');
+      const baseline = await rescanCalls();
+      const noticeBefore = await isVisible(page, '今すぐ再スキャン');
+      await page.fill('input[type=text]', '**/thumbs/');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(300);
+      const noticeShown = await isVisible(page, '反映するには再スキャンが必要です');
+      const afterAdd = await rescanCalls(); // 自動では再スキャンしない
+      await page.click('button:has-text("今すぐ再スキャン")');
+      await page.waitForTimeout(150);
+      // 再スキャン中にタブを往復する
+      await page.click('#tab-history');
+      await page.click('#tab-exclude');
+      await page.waitForTimeout(100);
+      const busy = await page.evaluate(() => {
+        const b = [...document.querySelectorAll('button')].find((x) =>
+          x.textContent.includes('再スキャン中'),
+        );
+        return b ? { disabled: b.disabled, display: getComputedStyle(b).display } : null;
+      });
+      if (busy && !busy.disabled) await page.click('button:has-text("再スキャン中")');
+      // 再スキャン中に設定を閉じて開き直す（Settings は再マウントされるが状態は App が保持）
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+      await page.click('#tab-exclude');
+      await page.waitForTimeout(100);
+      const busyReopened = await page.evaluate(() => {
+        const b = [...document.querySelectorAll('button')].find((x) =>
+          x.textContent.includes('再スキャン中'),
+        );
+        return b ? b.disabled : null;
+      });
+      // 開き直し後も、追加したルールが一覧に残り（モックの状態保持）、案内も残る
+      const ruleListedAfterReopen = await page.evaluate(() =>
+        (document.querySelector('[role=tabpanel]')?.innerText ?? '').includes('**/thumbs/'),
+      );
+      const noticeAfterReopen = await isVisible(page, '反映するには再スキャンが必要です');
+      await page.waitForTimeout(2000);
+      const doneShown = await isVisible(page, '再スキャンしました');
+      const total = await rescanCalls();
+      const buttonGone = !(await isVisible(page, '今すぐ再スキャン'));
+      const pass =
+        !noticeBefore &&
+        noticeShown &&
+        afterAdd === baseline &&
+        busy !== null &&
+        busy.disabled === true &&
+        busyReopened === true &&
+        ruleListedAfterReopen &&
+        noticeAfterReopen &&
+        total === baseline + 1 &&
+        doneShown &&
+        buttonGone;
+      return {
+        pass,
+        detail: `baseline=${baseline} afterAdd=${afterAdd} total=${total} noticeBefore=${noticeBefore} noticeShown=${noticeShown} busy=${JSON.stringify(busy)} busyReopened=${busyReopened} ruleListedAfterReopen=${ruleListedAfterReopen} noticeAfterReopen=${noticeAfterReopen} doneShown=${doneShown} buttonGone=${buttonGone}`,
       };
     },
   },

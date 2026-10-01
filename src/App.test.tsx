@@ -74,8 +74,30 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
 // 呼ぶ。jsdomにはmatchMediaが無くこれらのシナリオでは不要なため、モジュール
 // グラフごと軽量なスタブに差し替える（全テスト共通のsetup.tsを汚さないため）。
 vi.mock('./components/Settings', () => ({
-  Settings: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="settings-stub" /> : null,
+  // #111: 除外ルール再スキャンの状態は App が持つ。スタブから props 経由で操作・観測する。
+  Settings: ({
+    isOpen,
+    excludeRescan,
+  }: {
+    isOpen: boolean;
+    excludeRescan: {
+      notice: { kind: string } | null;
+      rescanning: boolean;
+      noteChange: (c: { kind: 'added' | 'removed'; pattern: string }) => void;
+      rescan: () => void;
+    };
+  }) =>
+    isOpen ? (
+      <div data-testid="settings-stub">
+        <span data-testid="stub-notice">{excludeRescan.notice?.kind ?? 'none'}</span>
+        <span data-testid="stub-rescanning">{String(excludeRescan.rescanning)}</span>
+        <button
+          data-testid="stub-add"
+          onClick={() => excludeRescan.noteChange({ kind: 'added', pattern: '**/t/' })}
+        />
+        <button data-testid="stub-rescan" onClick={() => excludeRescan.rescan()} />
+      </div>
+    ) : null,
 }));
 
 import App from './App';
@@ -1122,5 +1144,43 @@ describe('App window mode toggle: re-sync failures are logged (#103)', () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+});
+
+// #111: Settings は openSettings のたびに key で再マウントされる。除外ルール変更の
+// 再スキャン案内・実行状態は App が保持し、閉じて開き直しても残る。
+describe('App keeps the exclude-rescan state across Settings close/reopen (#111)', () => {
+  it('keeps the notice and the running state (single IPC) after closing and reopening Settings', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('ようこそ SSS へ')).toBeTruthy());
+    rescanLastDirectory.mockClear();
+
+    let resolve!: (v: { totalFiles: number }) => void;
+    rescanLastDirectory.mockReturnValue(new Promise((r) => (resolve = r)));
+
+    fireEvent.click(screen.getByTitle('設定'));
+    fireEvent.click(screen.getByTestId('stub-add'));
+    expect(screen.getByTestId('stub-notice').textContent).toBe('added');
+
+    // 閉じて開き直す（Settings は別インスタンスに再マウントされる）
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('settings-stub')).toBeNull());
+    fireEvent.click(screen.getByTitle('設定'));
+    expect(screen.getByTestId('stub-notice').textContent).toBe('added');
+
+    // 再スキャン開始 → 閉じて開き直しても実行中のまま、二重実行されない
+    fireEvent.click(screen.getByTestId('stub-rescan'));
+    await waitFor(() => expect(screen.getByTestId('stub-rescanning').textContent).toBe('true'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('settings-stub')).toBeNull());
+    fireEvent.click(screen.getByTitle('設定'));
+    expect(screen.getByTestId('stub-rescanning').textContent).toBe('true');
+    fireEvent.click(screen.getByTestId('stub-rescan'));
+    expect(rescanLastDirectory).toHaveBeenCalledTimes(1);
+
+    resolve({ totalFiles: 1 });
+    await waitFor(() => expect(screen.getByTestId('stub-rescanning').textContent).toBe('false'));
+    expect(screen.getByTestId('stub-notice').textContent).toBe('none');
   });
 });
