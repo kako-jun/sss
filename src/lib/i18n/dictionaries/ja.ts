@@ -14,6 +14,7 @@ export const ja = {
   switchToFullscreen: 'フルスクリーンに戻す',
   windowModeLabel: 'ウィンドウモード',
   fullscreenLabel: 'フルスクリーン',
+  windowModeToggleFailed: 'ウィンドウモードを切り替えられませんでした',
   genericErrorTitle: 'エラーが発生しました',
   closeTooltip: '閉じる',
 

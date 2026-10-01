@@ -948,3 +948,179 @@ describe('App mouse gestures on the photo (#78)', () => {
     expect(getNextImage).not.toHaveBeenCalled();
   });
 });
+
+// #103: capability 不足などで setFullscreen/setDecorations が拒否されても、ボタン
+// （とF/F11）が無反応にならず、ユーザーへ失敗を通知する。表示はOSの実態に再同期する。
+describe('App window mode toggle failure notice (#103)', () => {
+  it('shows an alert and keeps the displayed mode consistent when setFullscreen rejects', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    win.isFullscreen.mockReset().mockResolvedValue(true);
+    win.setFullscreen.mockReset().mockRejectedValue(new Error('not allowed'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toBe(
+        'ウィンドウモードを切り替えられませんでした',
+      );
+    });
+    // 切替に失敗したので表示は元のまま（OSの実態=フルスクリーン）
+    expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
+    // 部分失敗に備え、実態(フルスクリーン)に合わせて装飾を非表示へ戻す
+    expect(win.setDecorations).toHaveBeenCalledWith(false);
+    errorSpy.mockRestore();
+  });
+
+  it('also shows the alert for the F key and clears it after a successful toggle', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    win.isFullscreen.mockReset().mockResolvedValue(true);
+    win.setFullscreen
+      .mockReset()
+      .mockRejectedValueOnce(new Error('denied'))
+      .mockResolvedValue(undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'f' });
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+    expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
+    errorSpy.mockRestore();
+  });
+});
+
+describe('App window mode toggle failure notice: partial failure and repeats (#103)', () => {
+  it('re-syncs decorations to the real state when setFullscreen succeeds but setDecorations fails', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    // 起動時は全画面。切替後にOSの実態は「ウィンドウモード」(false)になっている想定
+    win.isFullscreen.mockReset().mockResolvedValueOnce(true).mockResolvedValue(false);
+    win.setFullscreen.mockReset().mockResolvedValue(undefined);
+    win.setDecorations
+      .mockReset()
+      .mockRejectedValueOnce(new Error('denied'))
+      .mockResolvedValue(undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeTruthy();
+    });
+    // 1回目: 切替(!next=true)で失敗、2回目: 実態(false)に合わせて !actual=true を試行
+    await waitFor(() => {
+      expect(win.setDecorations).toHaveBeenNthCalledWith(1, true);
+      expect(win.setDecorations).toHaveBeenNthCalledWith(2, true);
+    });
+    expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
+    errorSpy.mockRestore();
+  });
+
+  it('keeps the alert for a full 5s after a repeated identical failure', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    win.isFullscreen.mockReset().mockResolvedValue(true);
+    win.setFullscreen.mockReset().mockRejectedValue(new Error('denied'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+      await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+      await waitFor(() => expect(win.setFullscreen).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      // 1回目の通知から3秒+。2回目の失敗でタイマーが取り直されるので、最初の5秒を過ぎても残る
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(screen.queryByRole('alert')).not.toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2500);
+      });
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      errorSpy.mockRestore();
+    }
+  });
+});
+
+describe('App window mode toggle: re-sync failures are logged (#103)', () => {
+  const loggedMessages = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.map((c) => String(c[0]));
+
+  it('logs when re-syncing decorations also fails', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    win.isFullscreen.mockReset().mockResolvedValueOnce(true).mockResolvedValue(false);
+    win.setFullscreen.mockReset().mockResolvedValue(undefined);
+    win.setDecorations.mockReset().mockRejectedValue(new Error('denied'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    try {
+      fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+
+      await waitFor(() => {
+        expect(loggedMessages(errorSpy)).toContain('Failed to re-sync window decorations:');
+      });
+      expect(screen.getByRole('alert')).toBeTruthy();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('logs when the real fullscreen state cannot be read during re-sync', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    win.isFullscreen.mockReset().mockResolvedValueOnce(true).mockRejectedValue(new Error('x'));
+    win.setFullscreen.mockReset().mockRejectedValue(new Error('denied'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    try {
+      fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+
+      await waitFor(() => {
+        expect(loggedMessages(errorSpy)).toContain('Failed to re-sync window mode:');
+      });
+      expect(screen.getByRole('alert')).toBeTruthy();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+});

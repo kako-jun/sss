@@ -87,6 +87,10 @@ function App() {
   const [directoryError, setDirectoryError] = useState<{ raw: string; directory: string } | null>(
     null,
   );
+  // #103: ウィンドウモード切替の失敗通知（権限不足等で setFullscreen が拒否されても無反応にしない）
+  const [windowModeError, setWindowModeError] = useState<{ text: string; seq: number } | null>(
+    null,
+  );
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
   const overlayRef = useRef<OverlayUIHandle>(null);
   const { isIdle, setIsHovering, resetIdle } = useMouseIdle(3000);
@@ -324,10 +328,35 @@ function App() {
       // フルスクリーン時は decorations を非表示に戻す
       await win.setDecorations(!next);
       setIsFullscreen(next);
+      setWindowModeError(null);
     } catch (err) {
       console.error('Failed to toggle window mode:', err);
+      setWindowModeError((prev) => ({
+        text: t('windowModeToggleFailed'),
+        seq: (prev?.seq ?? 0) + 1,
+      }));
+      // 片方だけ成功した場合に表示とOSの実態がずれないよう、実態から再同期する
+      try {
+        const win = getCurrentWindow();
+        const actual = await win.isFullscreen();
+        setIsFullscreen(actual);
+        // setFullscreen だけ成功した部分失敗に備え、装飾も実態に合わせる（失敗は握りつぶす）
+        await win.setDecorations(!actual).catch((decErr) => {
+          console.error('Failed to re-sync window decorations:', decErr);
+        });
+      } catch (syncErr) {
+        // 実態も取れなければ現状維持
+        console.error('Failed to re-sync window mode:', syncErr);
+      }
     }
   };
+
+  // #103: 失敗通知は数秒で自動的に消す
+  useEffect(() => {
+    if (!windowModeError) return;
+    const timer = setTimeout(() => setWindowModeError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [windowModeError]);
 
   // #66レビューmust1: キーボードハンドラが参照する値
   // （handlePrevious/handleNext/handleToggleWindowMode と、canGoBack/isSettingsOpen/
@@ -675,6 +704,22 @@ function App() {
           onMediaError={handleMediaError}
         />
       </div>
+
+      {windowModeError && (
+        // 下部のトースト・操作バー・その他メニューと重ならないよう画面上部に出す。右上のボタン列
+        // （約9rem幅）と重ならないよう、右端を空けた枠の中で中央寄せする（#103）。枠自体は
+        // pointer-events-none で写真上のクリック/ホイールを吸わない。切り詰められた全文を
+        // title で読めるよう、通知本体（小さな丸薬）だけ pointer-events-auto にする。
+        <div className="fixed top-4 left-4 right-[11rem] z-50 flex justify-center pointer-events-none">
+          <div
+            role="alert"
+            title={windowModeError.text}
+            className="pointer-events-auto max-w-full truncate bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10"
+          >
+            {windowModeError.text}
+          </div>
+        </div>
+      )}
 
       {/* 右上の常設ボタン（終了・ショートカット・ウィンドウモード・設定）。
           #66視覚刷新: 枠線付き四角ボタン4つの並びから、枠線なしアイコンを1つの
