@@ -32,7 +32,7 @@ _[Read this in English](README.en.md)_
 | macOS   | `sss_*_universal.dmg`（Apple Silicon / Intel 共通）                |
 | Linux   | `sss_*_amd64.AppImage` / `sss_*_amd64.deb` / `sss-*.x86_64.rpm`    |
 
-**v1.0.0 には、動画のスライドショー再生・日本語/英語UI・統計タブの刷新・ショートカット（Space・F / F11・?）と写真上のクリック/ホイール操作・取り消し・ウィンドウ状態の記憶など、その後の変更（[CHANGELOG.md](CHANGELOG.md) の `[Unreleased]`）は含まれていません。** 最新の `main` を使いたい場合は下記のソースビルドをしてください。なお、現在のリリースワークフローが Windows 向けに作るのは NSIS インストーラー（`setup.exe`）のみです（v1.0.0 の `.msi` は当時のビルドの成果物）。
+**v1.0.0 には、動画のスライドショー再生・日本語/英語UI・統計タブの刷新・ショートカット（Space・F / F11・?）と写真上のクリック/ホイール操作・取り消し・ウィンドウ状態の記憶など、その後の変更（[CHANGELOG.md](CHANGELOG.md) の `[1.1.0]`）は含まれていません。** 最新の `main` を使いたい場合は下記のソースビルドをしてください。なお、現在のリリースワークフローが Windows 向けに作るのは NSIS インストーラー（`setup.exe`）のみです（v1.0.0 の `.msi` は当時のビルドの成果物）。
 
 #### 未署名アプリの警告について
 

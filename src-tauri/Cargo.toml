@@ -1,6 +1,6 @@
 [package]
 name = "sss"
-version = "1.0.0"
+version = "1.1.0"
 description = "Smart Slide Show - A photo slideshow application for viewing 100k+ photos"
 authors = ["kako-jun"]
 license = "MIT"
