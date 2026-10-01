@@ -177,6 +177,50 @@ describe('App empty-state notice display (#65 問題1・9: ようこそ/空/接�
     });
   });
 
+  it('shows the no-readable-images guidance with a settings button when every photo fails to render (#120)', async () => {
+    useRestoredStartupPath();
+    let n = 0;
+    getNextImage.mockImplementation(async () => ({
+      kind: 'found',
+      data: {
+        path: `/photos/bad${n++}.jpg`,
+        optimizedPath: null,
+        isVideo: false,
+        width: 10,
+        height: 10,
+        fileSize: 0,
+        exif: null,
+        displayCount: 1,
+        lastDisplayed: null,
+      },
+    }));
+    undoDisplayCount.mockResolvedValue(undefined);
+    const { container } = render(<App />);
+
+    // 壊れた画像のonErrorを実ブラウザの代わりに手で発火し続ける（上限で止まるはず）。
+    for (let i = 0; i < 15; i++) {
+      await waitFor(() => {
+        const photo = Array.from(container.querySelectorAll('img')).find(
+          (el) => el.getAttribute('alt') === '' && el.getAttribute('src'),
+        );
+        if (!photo && !screen.queryByText('読み込める画像がありません')) throw new Error('wait');
+      });
+      if (screen.queryByText('読み込める画像がありません')) break;
+      const photo = Array.from(container.querySelectorAll('img')).find(
+        (el) => el.getAttribute('alt') === '' && el.getAttribute('src'),
+      )!;
+      fireEvent.error(photo);
+      await new Promise((r) => setTimeout(r, 700)); // 退場アニメーション(500ms)待ち
+    }
+
+    await waitFor(() => {
+      expect(screen.getByText('読み込める画像がありません')).toBeTruthy();
+    });
+    expect(screen.getByText('設定を開く')).toBeTruthy();
+    // 無限ループしていない: 10件目で止まる。
+    expect(getNextImage.mock.calls.length).toBeLessThanOrEqual(11);
+  }, 30000);
+
   it('shows a generic error notice with the rejection message on unexpected rejection', async () => {
     useRestoredStartupPath();
     getNextImage.mockRejectedValue(new Error('disk gone'));

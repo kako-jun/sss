@@ -554,6 +554,94 @@ const scenarios = [
     },
   },
   {
+    // #120: 壊れた/0バイトの画像が4件続いても、黒画面のまま表示間隔(5秒)を待たず
+    // 即座に読み飛ばして正常な画像に到達し、連続3件目から控えめなトーストが出る。
+    name: 'broken/0-byte images are skipped immediately (no black wait) and a soft toast appears (#120)',
+    hash: 'brokenrun',
+    async run(page) {
+      const started = Date.now();
+      let reachedMs = null;
+      let toastSeen = false;
+      while (Date.now() - started < 9000) {
+        const st = await page.evaluate(() => {
+          const img = [...document.querySelectorAll('img')].find(
+            (el) => el.alt !== 'SSS Logo' && el.getAttribute('src'),
+          );
+          return img ? { w: img.naturalWidth, src: img.src.slice(0, 22) } : null;
+        });
+        if (!toastSeen && (await isVisible(page, '読み込めない写真をスキップしています'))) {
+          toastSeen = true;
+        }
+        if (st && st.w > 0) {
+          reachedMs = Date.now() - started;
+          break;
+        }
+        await page.waitForTimeout(50);
+      }
+      // 表示間隔は5秒。到達が5秒未満（＝間隔を待っていない）であること。
+      const undoCalls = await countCalls(page, 'undo_display_count');
+      const pass = reachedMs !== null && reachedMs < 5000 && toastSeen && undoCalls >= 4;
+      if (process.env.E2E_SHOT_DIR) {
+        await page.screenshot({ path: `${process.env.E2E_SHOT_DIR}/brokenrun-ja.png` });
+      }
+      return {
+        pass,
+        detail: `reachedMs=${reachedMs} toastSeen=${toastSeen} undoCalls=${undoCalls}`,
+      };
+    },
+  },
+  ...[
+    {
+      name: 'ja',
+      hash: 'allbroken',
+      locale: 'ja-JP',
+      title: '読み込める画像がありません',
+      button: '設定を開く',
+    },
+    {
+      name: 'en',
+      hash: 'allbrokenen',
+      locale: 'en-US',
+      title: 'No photos could be loaded',
+      button: 'Open Settings',
+    },
+  ].map((c) => ({
+    // #120: 全件が壊れている場合は無限ループ・CPU空転にならず、上限(連続10件)で
+    // 停止して案内（設定を開く導線つき）を出し、その後 get_next_image を叩き続けない。
+    name: `all images broken: stops at the cap and shows guidance, no endless loop (${c.name}) (#120)`,
+    hash: c.hash,
+    locale: c.locale,
+    async run(page) {
+      const deadline = Date.now() + 15000;
+      let shown = false;
+      while (Date.now() < deadline) {
+        if (await isVisible(page, c.title)) {
+          shown = true;
+          break;
+        }
+        await page.waitForTimeout(150);
+      }
+      const buttonShown = await page.evaluate(
+        (label) =>
+          [...document.querySelectorAll('button')].some(
+            (b) => b.textContent.includes(label) && getComputedStyle(b).display !== 'none',
+          ),
+        c.button,
+      );
+      const nextsAtStop = await countCalls(page, 'get_next_image');
+      await page.waitForTimeout(6000); // 表示間隔(5秒)以上待って、再試行し続けないことを見る
+      const nextsLater = await countCalls(page, 'get_next_image');
+      const stillShown = await isVisible(page, c.title);
+      if (process.env.E2E_SHOT_DIR) {
+        await page.screenshot({ path: `${process.env.E2E_SHOT_DIR}/allbroken-${c.name}.png` });
+      }
+      return {
+        pass: shown && buttonShown && stillShown && nextsAtStop <= 12 && nextsLater === nextsAtStop,
+        detail: `shown=${shown} button=${buttonShown} stillShown=${stillShown} nextsAtStop=${nextsAtStop} nextsLater=${nextsLater}`,
+      };
+    },
+  })),
+  {
     // #65レビュー2巡目S8(must): 動画→動画の遷移で、退場中の古い動画要素が
     // play()で先頭から再生し直されない（＝短い動画でonEndedが二重発火して
     // 1枚飛ばすことがない）。同一DOM要素をJSのexpandoプロパティでタグ付けし、

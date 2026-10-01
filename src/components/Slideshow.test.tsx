@@ -122,6 +122,18 @@ describe('Slideshow media lifecycle (#65)', () => {
     expect(onAdvance).not.toHaveBeenCalled();
   });
 
+  it('calls onMediaReady when the <video> data loads (resets the consecutive-failure count, #120)', () => {
+    const onMediaReady = vi.fn();
+    const { container } = render(
+      <Slideshow
+        image={makeImage({ isVideo: true, path: '/videos/a.mp4' })}
+        onMediaReady={onMediaReady}
+      />,
+    );
+    fireEvent.loadedData(container.querySelector('video')!);
+    expect(onMediaReady).toHaveBeenCalledTimes(1);
+  });
+
   it('calls onMediaError with the video path when the <video> errors', () => {
     const onMediaError = vi.fn();
     const { container } = render(

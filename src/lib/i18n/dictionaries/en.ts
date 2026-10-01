@@ -46,6 +46,11 @@ export const en = {
   directoryUnreachableSubtitle: 'Check the connection, or pick a different folder in Settings',
   rootUnavailable: "Can't connect to the folder. Waiting to reconnect...",
   loadFailedGaveUp: 'Several photos failed to load. Check the folder connection.',
+  // #120: all of the photos in a row failed to render (corrupt / 0-byte files).
+  noReadableImagesTitle: 'No photos could be loaded',
+  noReadableImagesSubtitle:
+    'The files may be corrupted or empty. Check the folder in Settings, then rescan.',
+  mediaSkipToast: 'Skipping unreadable photos ({count} in a row)',
   startupDirectoryRejected: "Couldn't connect to your last folder: {reason}",
 
   // === Startup sequence status text (src/lib/startup.ts) ===

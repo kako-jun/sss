@@ -115,6 +115,8 @@ function App() {
     displayToken,
     isLoading,
     notice,
+    mediaSkipToast,
+    reportMediaFailure,
     progressPercent,
     progressDurationMs,
     loadNextImage,
@@ -284,6 +286,9 @@ function App() {
       } catch (err) {
         console.error('Failed to undo display count:', err);
       }
+      // #120: 失敗を数え、壊れた画像が連続して上限に達したら次へ進まず案内に切り替える
+      // （全件壊れたフォルダでの無限ループ・CPU空転の防止）。
+      if (!reportMediaFailure(path)) return;
       await continueInLastDirection();
     })();
   };
@@ -583,6 +588,9 @@ function App() {
     if (notice?.kind === 'loadFailedGaveUp') {
       return { title: t('loadFailedGaveUp'), subtitle: '' };
     }
+    if (notice?.kind === 'noReadableImages') {
+      return { title: t('noReadableImagesTitle'), subtitle: t('noReadableImagesSubtitle') };
+    }
     if (notice?.kind === 'error') {
       return { title: t('genericErrorTitle'), subtitle: notice.message };
     }
@@ -623,7 +631,9 @@ function App() {
         ? t('loadFailedGaveUp')
         : notice?.kind === 'error'
           ? notice.message
-          : directoryErrorMessage;
+          : mediaSkipToast
+            ? t('mediaSkipToast', { count: mediaSkipToast.count })
+            : directoryErrorMessage;
 
   // directoryError による下部トーストだけは数秒で自動的に消す（notice由来の通知は
   // 次の正常な画像取得時にnoticeがnullへ戻るため対象外。上の全画面案内側は

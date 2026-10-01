@@ -10,10 +10,12 @@ import { renderHook, act } from '@testing-library/react';
 // rather than the randomness.
 const getNextImage = vi.fn();
 const getPreviousImage = vi.fn();
+const undoDisplayCount = vi.fn();
 
 vi.mock('../lib/tauri', () => ({
   getNextImage: (...a: unknown[]) => getNextImage(...a),
   getPreviousImage: (...a: unknown[]) => getPreviousImage(...a),
+  undoDisplayCount: (...a: unknown[]) => undoDisplayCount(...a),
 }));
 
 import { useSlideshow } from './useSlideshow';
@@ -40,6 +42,8 @@ function found(path: string, isVideo = false): ImageNavigationResult {
 beforeEach(() => {
   getNextImage.mockReset();
   getPreviousImage.mockReset();
+  undoDisplayCount.mockReset();
+  undoDisplayCount.mockResolvedValue(undefined);
 });
 
 describe('useSlideshow initial state', () => {
@@ -812,5 +816,125 @@ describe('pause percentage uses the interval active when the timer started (#65ã
     expect(result.current.progressPercent).toBeLessThanOrEqual(100);
     expect(result.current.progressPercent).toBeGreaterThan(20);
     expect(result.current.progressPercent).toBeLessThan(40);
+  });
+});
+
+describe('broken media skipping (#120)', () => {
+  it('reportMediaFailure lets the caller continue below the cap and shows no toast yet', async () => {
+    const { result } = renderHook(() => useSlideshow());
+    let cont = false;
+    act(() => {
+      cont = result.current.reportMediaFailure('/bad1.jpg');
+    });
+    expect(cont).toBe(true);
+    expect(result.current.notice).toBeNull();
+    expect(result.current.mediaSkipToast).toBeNull();
+  });
+
+  it('shows the skip toast from the 3rd consecutive failure and it expires', async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useSlideshow());
+      act(() => {
+        result.current.reportMediaFailure('/1.jpg');
+        result.current.reportMediaFailure('/2.jpg');
+      });
+      expect(result.current.mediaSkipToast).toBeNull();
+      act(() => {
+        result.current.reportMediaFailure('/3.jpg');
+      });
+      expect(result.current.mediaSkipToast).toEqual({ count: 3 });
+      act(() => {
+        vi.advanceTimersByTime(6100);
+      });
+      expect(result.current.mediaSkipToast).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops with noReadableImages and clears the image after 10 consecutive failures', async () => {
+    getNextImage.mockResolvedValue(found('/ok.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.currentImage?.path).toBe('/ok.jpg');
+    const results: boolean[] = [];
+    act(() => {
+      for (let i = 0; i < 10; i++) results.push(result.current.reportMediaFailure(`/bad${i}.jpg`));
+    });
+    expect(results.slice(0, 9).every(Boolean)).toBe(true);
+    expect(results[9]).toBe(false);
+    expect(result.current.notice).toEqual({ kind: 'noReadableImages' });
+    expect(result.current.currentImage).toBeNull();
+    expect(result.current.mediaSkipToast).toBeNull();
+  });
+
+  it('a successful render (handleMediaReady) resets the consecutive-failure count', async () => {
+    const { result } = renderHook(() => useSlideshow());
+    act(() => {
+      for (let i = 0; i < 9; i++) result.current.reportMediaFailure(`/bad${i}.jpg`);
+      result.current.handleMediaReady();
+    });
+    let cont = false;
+    act(() => {
+      cont = result.current.reportMediaFailure('/bad-next.jpg');
+    });
+    expect(cont).toBe(true);
+    expect(result.current.notice).toBeNull();
+  });
+
+  it('skips a path that already failed this session without rendering it, undoing its count', async () => {
+    getNextImage
+      .mockResolvedValueOnce(found('/bad.jpg'))
+      .mockResolvedValueOnce(found('/bad.jpg'))
+      .mockResolvedValueOnce(found('/good.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    act(() => {
+      result.current.reportMediaFailure('/bad.jpg');
+    });
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.currentImage?.path).toBe('/good.jpg');
+    expect(undoDisplayCount).toHaveBeenCalledWith('/bad.jpg');
+    expect(getNextImage).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives up (no infinite loop) when every returned path is a known-broken one', async () => {
+    getNextImage.mockResolvedValue(found('/bad.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    act(() => {
+      result.current.reportMediaFailure('/bad.jpg');
+    });
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.notice).toEqual({ kind: 'noReadableImages' });
+    expect(result.current.currentImage).toBeNull();
+    expect(getNextImage.mock.calls.length).toBeLessThan(20);
+  });
+
+  it('initialize forgets the failed set so a fixed file is shown again after a rescan', async () => {
+    getNextImage.mockResolvedValue(found('/bad.jpg'));
+    const { result } = renderHook(() => useSlideshow());
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    act(() => {
+      result.current.reportMediaFailure('/bad.jpg');
+    });
+    await act(async () => {
+      await result.current.initialize();
+    });
+    expect(result.current.currentImage?.path).toBe('/bad.jpg');
+    expect(result.current.notice).toBeNull();
   });
 });
