@@ -269,10 +269,20 @@ Confirm:  bg-red-950/60 hover:bg-red-900/60 text-red-400/70 hover:text-red-400/9
           (the Settings "danger zone" button style; label names the action, never "OK")
 ```
 
-Long bodies: the panel is `flex flex-col max-h-[calc(100vh-2rem)]`; only the
-message scrolls (`min-h-0 overflow-y-auto`, with a bottom fade hint when more
-text is hidden) and the button row is `shrink-0`, so the buttons never leave
-the screen on short windows.
+Long bodies: the panel is `flex flex-col max-h-[calc(100vh-2rem)]`. The message is
+split on `\n\n`; the **last paragraph is pinned outside the scroll area, right
+above the button row** (`shrink-0`) so the destructive warning ("This cannot be
+undone…") is always readable without scrolling, even on a 360x300 window. Only
+the earlier paragraphs scroll (`min-h-0 overflow-y-auto`), with a stronger bottom
+fade (`h-14 from-neutral-950 via-neutral-950/80 to-transparent`) shown only while
+more text is hidden. A single-paragraph message is all scroll area (no pinned part).
+
+Keyboard access to the scrolling body: **key handler, not `tabIndex=0`.** While the
+body overflows, ↑/↓ (24px), PageUp/PageDown, Home/End on the dialog scroll it;
+Tab/Enter/Space/Esc behave as usual and nothing else is intercepted when it does
+not overflow. Making the body a focusable `region` would put it before Cancel in
+the focus order, so `useFocusTrap` would focus it first and Cancel would no
+longer be the default focus — the safe default for a destructive prompt wins.
 
 Esc / backdrop click = Cancel. No emoji.
 

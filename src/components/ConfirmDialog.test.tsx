@@ -122,4 +122,72 @@ describe('ConfirmDialogHost (#119)', () => {
     unmount();
     await expect(p).resolves.toBe(false);
   });
+
+  it('pins the last paragraph outside the scroll area, and keeps the full text for aria-describedby', async () => {
+    render(<ConfirmDialogHost />);
+    const p = open('一段落目\n\n二段落目\n\n取り消せません');
+    const dialog = screen.getByRole('alertdialog');
+    const final = screen.getByTestId('confirm-dialog-final');
+    expect(final.textContent).toBe('取り消せません');
+    // 最終段落はスクロール領域（overflow-y-auto）の内側にない
+    expect(final.closest('.overflow-y-auto')).toBeNull();
+    const scroller = dialog.querySelector('.overflow-y-auto') as HTMLElement;
+    expect(scroller.textContent).toBe('一段落目\n\n二段落目');
+    const described = document.getElementById(dialog.getAttribute('aria-describedby') as string);
+    expect(described?.textContent).toBe('一段落目\n\n二段落目\n\n取り消せません');
+    fireEvent.click(screen.getByText('キャンセル'));
+    await p;
+  });
+
+  it('works with a single-paragraph message (no pinned paragraph)', async () => {
+    render(<ConfirmDialogHost />);
+    const p = open('一段落だけ');
+    expect(screen.queryByTestId('confirm-dialog-final')).toBeNull();
+    expect(screen.getByRole('alertdialog').querySelector('.overflow-y-auto')?.textContent).toBe(
+      '一段落だけ',
+    );
+    fireEvent.click(screen.getByText('キャンセル'));
+    await p;
+  });
+
+  it('scrolls the overflowing body with arrow/Page/Home/End keys while Cancel keeps focus, and resolves nothing', async () => {
+    render(<ConfirmDialogHost />);
+    const settled = vi.fn();
+    const p = open('長い\n\n警告').then(settled);
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    });
+    const scroller = screen
+      .getByRole('alertdialog')
+      .querySelector('.overflow-y-auto') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 500 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 100 });
+    const cancel = screen.getByText('キャンセル');
+    expect(document.activeElement).toBe(cancel);
+
+    fireEvent.keyDown(cancel, { key: 'ArrowDown' });
+    expect(scroller.scrollTop).toBe(24);
+    fireEvent.keyDown(cancel, { key: 'PageDown' });
+    expect(scroller.scrollTop).toBe(24 + 76);
+    fireEvent.keyDown(cancel, { key: 'End' });
+    expect(scroller.scrollTop).toBe(500);
+    fireEvent.keyDown(cancel, { key: 'Home' });
+    expect(scroller.scrollTop).toBe(0);
+    // フォーカスはキャンセルのまま・ダイアログは閉じない（IPC 相当の解決も起きない）
+    expect(document.activeElement).toBe(cancel);
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    expect(settled).not.toHaveBeenCalled();
+    fireEvent.click(cancel);
+    await p;
+  });
+
+  it('does not hijack arrow keys when the body does not overflow', async () => {
+    render(<ConfirmDialogHost />);
+    const p = open('短い\n\n警告');
+    const ev = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+    screen.getByText('キャンセル').dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+    fireEvent.click(screen.getByText('キャンセル'));
+    await p;
+  });
 });

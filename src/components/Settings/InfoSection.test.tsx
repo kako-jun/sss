@@ -125,6 +125,17 @@ describe('InfoSection reset button (resetAllData)', () => {
     expect(resetAllData).not.toHaveBeenCalled();
   });
 
+  it('does not call resetAllData while the body is scrolled with the keyboard', () => {
+    renderInfo();
+    fireEvent.click(screen.getByText('すべてのデータを初期化'));
+    const cancel = within(screen.getByRole('alertdialog')).getByText('キャンセル');
+    for (const key of ['ArrowDown', 'PageDown', 'End', 'Home', 'ArrowUp']) {
+      fireEvent.keyDown(cancel, { key });
+    }
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    expect(resetAllData).not.toHaveBeenCalled();
+  });
+
   it('does not call resetAllData when cancelled via the Cancel button', () => {
     renderInfo();
     fireEvent.click(screen.getByText('すべてのデータを初期化'));

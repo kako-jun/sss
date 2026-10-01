@@ -281,6 +281,8 @@ async function confirmResetScenario(page, lang, kind = 'info') {
   const defaultFocusIsCancel = st && st.focus === (lang === 'ja' ? 'キャンセル' : 'Cancel');
 
   const shotDir = process.env.E2E_SHOT_DIR;
+  const fits = [];
+  let fitOk = true;
   if (shotDir) {
     for (const [w, h] of [
       [800, 600],
@@ -292,6 +294,30 @@ async function confirmResetScenario(page, lang, kind = 'info') {
       await page.setViewportSize({ width: w, height: h });
       await page.waitForTimeout(300);
       await page.screenshot({ path: path.join(shotDir, `confirm-${kind}-${lang}-${w}x${h}.png`) });
+      // 最終段落（警告）とボタンが viewport 内に完全に収まっている（スクロール不要で見える）こと。
+      const fit = await page.evaluate(() => {
+        const inView = (el) => {
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return (
+            r.top >= 0 &&
+            r.left >= 0 &&
+            r.bottom <= innerHeight &&
+            r.right <= innerWidth &&
+            r.height > 0
+          );
+        };
+        const d = document.querySelector('[role="alertdialog"]');
+        const btns = [...d.querySelectorAll('button')];
+        const final = d.querySelector('[data-testid="confirm-dialog-final"]');
+        return {
+          final: final ? inView(final) : 'none',
+          buttons: btns.every(inView),
+          panel: inView(d),
+        };
+      });
+      fits.push(`${w}x${h}:${JSON.stringify(fit)}`);
+      if (!fit.buttons || fit.final === false || !fit.panel) fitOk = false;
     }
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.waitForTimeout(200);
@@ -322,7 +348,9 @@ async function confirmResetScenario(page, lang, kind = 'info') {
   await page.waitForTimeout(400);
   const afterOk = { resets: await resets(), open: !!(await dialogState()) };
 
+  detail.push('fit=' + fits.join(' '));
   const pass =
+    fitOk &&
     st !== null &&
     st.modal === 'true' &&
     st.display !== 'none' &&
