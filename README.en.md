@@ -97,7 +97,7 @@ On later launches the previous folder is restored automatically and shown right 
   - **Previous**: goes back to the previous photo/video (from history, does not increase its display count)
   - **Pause/Play**: toggles pause/resume
   - **Next**: advances immediately
-  - **Pick** (hand icon): copies the current file into the pick folder (default: `Pictures/sss-picked`)
+  - **Pick** (hand icon): copies the current file into the pick destination folder (default: `Pictures/sss-picked`)
   - **"…" menu**: open in file manager, view picks, exclude (by date taken / folder / file)
   - **Map thumbnail** (photos with GPS only): click to open Google Maps
 - **Undo**: for a few seconds right after an exclude or a pick, a small toast offers "Undo". It removes the exclude rule and puts the photo back into the unplayed part of the playlist, or deletes the file the pick just copied (no confirmation dialog)
@@ -126,7 +126,7 @@ Open it with the gear button at the top right (or the button on the welcome scre
 | Tab           | Contents                                                                                                                               |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Folder        | Choose the photo folder (it is scanned right away) or re-scan the selected folder (result: files, new, deleted, duration, read errors) |
-| Options       | Display interval (5-60 s), follow EXIF rotation, video audio (default: off) and max playback time, pick folder, language               |
+| Options       | Display interval (5-60 s), follow EXIF rotation, video audio (default: off) and max playback time, pick destination folder, language   |
 | Exclude Rules | List, remove and manually add exclude rules                                                                                            |
 | Picks         | List and delete picked photos/videos                                                                                                   |
 | History       | Recently shown photos (latest 100) and excluding from there                                                                            |

@@ -213,7 +213,7 @@ export const en = {
   resetSettingsButton: 'Reset All Data',
   resettingSettingsLabel: 'Resetting...',
   confirmResetAllData:
-    'Permanently delete all data (settings, exclude rules, playlist, pick list, and display history)? Files in the pick destination folder are not deleted.\n\nThis cannot be undone. The app will restart when finished.',
+    'Reset all data?\n\nThis deletes your settings (including the pick destination), exclude rules, scanned file information, playlist, display history, and caches, and forgets the last folder. Files in the pick destination folder are not deleted, and the Picks tab keeps showing the files in that folder.\n\nThis cannot be undone. The app will restart when finished.',
   resettingMessage: 'Resetting. The app will restart when finished.',
   resetErrorPrefix: 'Error: {detail}',
   errorDbResetFailed: 'Failed to reset the database',

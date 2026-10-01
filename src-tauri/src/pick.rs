@@ -1,4 +1,4 @@
-//! ピック機能（お気に入りをピックフォルダへコピー・一覧・削除）のファイルシステム処理（#67）。
+//! ピック機能（お気に入りをピック先フォルダへコピー・一覧・削除）のファイルシステム処理（#67）。
 //!
 //! Tauri コマンド（`commands::file_operations`）から切り出した、状態を持たない関数群。
 //! 「同名衝突時の連番」「一覧に出す拡張子」「削除してよいパスの検証」を単体テストできる
@@ -78,7 +78,7 @@ fn preserve_modified_time(source: &Path, dest: &Path) {
     }
 }
 
-/// ピックフォルダ直下のメディアファイル（画像＋動画。スキャナと同じ拡張子定義）の一覧。
+/// ピック先フォルダ直下のメディアファイル（画像＋動画。スキャナと同じ拡張子定義）の一覧。
 pub fn list_picked_media(picked_dir: &Path) -> Result<Vec<String>, String> {
     let mut items: Vec<String> = Vec::new();
     let entries = fs::read_dir(picked_dir).map_err(|e| format!("Failed to read directory: {e}"))?;
@@ -101,8 +101,8 @@ pub fn list_picked_media(picked_dir: &Path) -> Result<Vec<String>, String> {
 
 /// `delete_picked_image` が削除してよいパスかを検証する純粋なファイルシステム検査。
 ///
-/// 許可するのは「ピックフォルダの中にある通常のメディアファイル」だけ。
-/// `..` によるフォルダ外への脱出、ピックフォルダ内にあるがフォルダ外を指すシンボリック
+/// 許可するのは「ピック先フォルダの中にある通常のメディアファイル」だけ。
+/// `..` によるフォルダ外への脱出、ピック先フォルダ内にあるがフォルダ外を指すシンボリック
 /// リンク、フォルダ自体、フォルダ外のパスはすべて拒否する（`canonicalize` で実体パスに
 /// 解決してから包含を判定する）。検証を通ったら、削除対象として渡された元のパス
 /// （シンボリックリンクなら「リンクそのもの」）を返す。
@@ -130,7 +130,7 @@ pub fn validate_picked_delete_target(
 }
 
 /// DB 登録パス（プレイリスト構成員・表示履歴）だけを許可する検証（#92）。
-/// `exclude_image` のようにピックフォルダ内のファイルまでは対象にしない操作で使う。
+/// `exclude_image` のようにピック先フォルダ内のファイルまでは対象にしない操作で使う。
 /// 登録値と一致しない（`known_in_db == false`）なら `pathNotManaged`。スキャナは symlink
 /// ファイルを登録しないので、登録後に symlink へ差し替えられたパスも `pathNotManaged`。
 /// 存在確認はしない（管理外のパスに対してディスクへ触れない＝存在有無のオラクルにならない）。
@@ -156,7 +156,7 @@ pub fn ensure_registered_media_path(path: &Path, known_in_db: bool) -> Result<Pa
 ///   `..` を含む相対パス等は一致しない）。スキャナは symlink ファイルを登録しない
 ///   （`follow_links(false)` + `is_file()`）ので、登録後に symlink へ差し替えられたパスは
 ///   拒否する。返すのは登録値そのまま。
-/// - ピックフォルダの中にある実体ファイル。`canonicalize` で実体パスに解決してから
+/// - ピック先フォルダの中にある実体ファイル。`canonicalize` で実体パスに解決してから
 ///   包含を判定する（`..` による脱出やフォルダ外を指すシンボリックリンクは拒否）。
 ///   返すのは **canonical パス**なので、検証後のリンク差し替え（TOCTOU）の窓を狭める。
 ///
@@ -421,7 +421,7 @@ mod tests {
         let text = picked.join("note.txt");
         fs::write(&text, b"x").unwrap();
         assert!(validate_picked_delete_target(&text, &picked).is_err());
-        // ピックフォルダ自体が無い場合も拒否（パニックしない）。
+        // ピック先フォルダ自体が無い場合も拒否（パニックしない）。
         assert!(validate_picked_delete_target(&text, &dir.join("nodir")).is_err());
         let _ = fs::remove_dir_all(&dir);
     }
@@ -594,8 +594,8 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// 現状固定: ピックフォルダ内のサブフォルダにあるメディアファイルも削除を許可する
-    /// （検証は「canonical パスがピックフォルダ配下」であることだけ。直下限定ではない）。
+    /// 現状固定: ピック先フォルダ内のサブフォルダにあるメディアファイルも削除を許可する
+    /// （検証は「canonical パスがピック先フォルダ配下」であることだけ。直下限定ではない）。
     /// 一覧（`list_picked_media`）は直下しか返さないので、UI からは通常到達しない。
     #[test]
     fn delete_target_in_a_subfolder_of_picked_dir_is_currently_accepted() {
@@ -620,7 +620,7 @@ mod tests {
             ensure_managed_media_path(&inside, &picked, false),
             Ok(inside.canonicalize().unwrap())
         );
-        // DB 登録済みならピックフォルダ外・存在しなくても通す（存在確認は呼び出し側）。
+        // DB 登録済みならピック先フォルダ外・存在しなくても通す（存在確認は呼び出し側）。
         assert_eq!(
             ensure_managed_media_path(&dir.join("elsewhere.jpg"), &picked, true),
             Ok(dir.join("elsewhere.jpg"))
@@ -641,10 +641,10 @@ mod tests {
             ensure_managed_media_path(&outside, &picked, false),
             expected
         );
-        // `..` でピックフォルダから脱出するパス。
+        // `..` でピック先フォルダから脱出するパス。
         let escape = picked.join("..").join("secret.jpg");
         assert_eq!(ensure_managed_media_path(&escape, &picked, false), expected);
-        // 相対パス・存在しないパス・ピックフォルダ自体。
+        // 相対パス・存在しないパス・ピック先フォルダ自体。
         assert_eq!(
             ensure_managed_media_path(Path::new("secret.jpg"), &picked, false),
             expected
@@ -654,7 +654,7 @@ mod tests {
             expected
         );
         assert_eq!(ensure_managed_media_path(&picked, &picked, false), expected);
-        // ピックフォルダが存在しない場合も拒否。
+        // ピック先フォルダが存在しない場合も拒否。
         assert_eq!(
             ensure_managed_media_path(&outside, &dir.join("no-such"), false),
             expected

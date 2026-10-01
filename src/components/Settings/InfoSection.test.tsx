@@ -102,7 +102,7 @@ describe('InfoSection reset button (resetAllData)', () => {
     fireEvent.click(screen.getByText('すべてのデータを初期化'));
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      'すべてのデータ（設定、除外ルール、プレイリスト、ピック一覧、表示履歴）を完全に削除して初期化しますか？ピック先フォルダのファイルは削除されません。\n\nこの操作は取り消せません。完了後アプリが再起動します。',
+      'すべてのデータを初期化しますか？\n\n設定（ピック先の指定を含む）、除外ルール、スキャン済みのファイル情報、プレイリスト、表示履歴、キャッシュを削除し、前回のフォルダも忘れます。ピック先フォルダ内のファイルは削除されず、ピックタブにはそのフォルダのファイルが引き続き表示されます。\n\nこの操作は取り消せません。完了後アプリが再起動します。',
     );
     expect(resetAllData).not.toHaveBeenCalled();
 
@@ -191,5 +191,24 @@ describe('InfoSection reset button (resetAllData)', () => {
     expect(screen.queryByText('エラー: スキャン実行中です。完了までお待ちください。')).toBeNull();
 
     consoleError.mockRestore();
+  });
+});
+
+// #112: en のボタン・確認ダイアログ文言と、破壊範囲（ピック先フォルダのファイルは残る）の表現を固定する。
+describe('InfoSection reset button in English (#112)', () => {
+  it('shows "Reset All Data" and the full confirmation text', () => {
+    act(() => {
+      setLanguageSetting('en');
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<InfoSection />);
+    fireEvent.click(screen.getByText('Reset All Data'));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Reset all data?\n\nThis deletes your settings (including the pick destination), exclude rules, scanned file information, playlist, display history, and caches, and forgets the last folder. Files in the pick destination folder are not deleted, and the Picks tab keeps showing the files in that folder.\n\nThis cannot be undone. The app will restart when finished.',
+    );
+    expect(resetAllData).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 });
