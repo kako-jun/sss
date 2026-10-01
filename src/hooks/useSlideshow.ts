@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getNextImage, getPreviousImage } from '../lib/tauri';
+import { getNextImage, getPreviousImage, undoDisplayCount } from '../lib/tauri';
 import type { ImageInfo, ImageNavigationResult } from '../types';
-import { clampDisplayInterval } from '../constants';
+import { clampDisplayInterval, mediaWatchdogMs } from '../constants';
 
 /**
  * 読込失敗（`ImageNavigationResult.kind === 'loadFailed'`）を自動で読み飛ばす際の
@@ -13,15 +13,42 @@ import { clampDisplayInterval } from '../constants';
 const MAX_CONSECUTIVE_LOAD_FAILURES = 5;
 
 /**
+ * 描画側（`<img>`/`<video>` の `onError`）の連続失敗の上限（#120）。バックエンドは
+ * ファイルの存在しか確認できず、0バイト・破損ファイルはWebViewで初めて失敗が分かる。
+ * 失敗したら即座に次へ進むが、フォルダ全件が壊れている場合に際限なく次を引き続けて
+ * CPU・IPCを空転させないよう、連続でこの件数失敗したら停止して案内に切り替える。
+ * 1枚でも表示に成功（`handleMediaReady`）すれば数え直す。
+ */
+const MAX_CONSECUTIVE_MEDIA_FAILURES = 10;
+
+/** `undo_display_count` がこれより長くかかったら診断ログを出す（ミリ秒、#120）。 */
+const UNDO_SLOW_WARN_MS = 1000;
+
+/** 連続でこの件数失敗した時点から、控えめなトースト（スキップ中）を出す（#120）。 */
+const MEDIA_FAILURE_TOAST_THRESHOLD = 3;
+/** スキップ中トーストを出し続ける時間。失敗が続く限り延長される。 */
+const MEDIA_FAILURE_TOAST_MS = 6000;
+
+/**
  * フロントに露出する「今アプリが伝えるべき状態」（#65）。
  * `ImageNavigationResult` をそのまま返さないのは、`found` はそのまま
  * `currentImage` に格納してしまい、それ以外の「案内が要る状態」だけをここに
  * 残したいため。
  */
+/**
+ * メディアの失敗の原因（#120）。`error`=`onError`（ファイルが本当に読めない）、
+ * `watchdog`=読込完了も失敗も来ないまま待ち時間を超えた（遅いだけの可能性がある）。
+ */
+type MediaFailureCause = 'error' | 'watchdog';
+
 export type SlideshowNotice =
   | { kind: 'emptyPlaylist' }
   | { kind: 'rootUnavailable' }
   | { kind: 'loadFailedGaveUp' }
+  // #120: 描画に失敗した画像が連続して上限に達した（全件壊れている可能性）。
+  | { kind: 'noReadableImages' }
+  // #120: 全件破損とは断定できないが、連続して読み込めなかったので止めた（「続ける」で再開）。
+  | { kind: 'mediaFailureStreak' }
   | { kind: 'error'; message: string };
 
 /**
@@ -45,7 +72,11 @@ export type SlideshowNotice =
  * @param interval 表示間隔（ミリ秒）。不正値は `clampDisplayInterval` で丸める。
  * @param isPlaying 再生中かどうか（呼び出し側で導出した派生値）。
  */
-export function useSlideshow(interval: number = 10000, isPlaying: boolean = false) {
+export function useSlideshow(
+  interval: number = 10000,
+  isPlaying: boolean = false,
+  playlistTotal: number = 0,
+) {
   const safeInterval = clampDisplayInterval(interval);
 
   const [currentImage, setCurrentImage] = useState<ImageInfo | null>(null);
@@ -56,6 +87,8 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
   // <video onEnded>が再発火しない（タイマーが張られない・動画が永久に止まる）
   // 不具合の修正に使う（`Slideshow`が`key={path + displayToken}`にする）。
   const [displayToken, setDisplayToken] = useState(0);
+  // #120: 壊れた画像を連続でスキップしている間だけ出す控えめなトースト用の件数。
+  const [mediaSkipToast, setMediaSkipToast] = useState<{ count: number } | null>(null);
 
   // プログレスバー用の2値。バーの見た目は呼び出し側がCSS transitionで表現する:
   //   transition: progressDurationMs > 0 ? `transform ${progressDurationMs}ms linear` : 'none'
@@ -67,6 +100,13 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
   const [progressDurationMs, setProgressDurationMs] = useState(0);
 
   const inFlightRef = useRef(false);
+  // #120: このセッション中に描画に失敗したパス。同じ壊れた画像が再び返ってきても
+  // 描画せず（黒いちらつきを出さず）その場で読み飛ばす。再スキャン（`initialize`）で
+  // 破棄する（ファイルが直された可能性があるため）。
+  const failedPathsRef = useRef<Set<string>>(new Set());
+  // #120: 描画に成功するまでの連続失敗数。
+  const mediaFailureStreakRef = useRef(0);
+  const mediaToastTimerRef = useRef<number | undefined>(undefined);
   // 同時実行ガード（inFlightRef）が既に「1度に1回しか呼ばせない」を保証しているため、
   // 通常運用ではrequestIdによる「古い応答の破棄」が実際に発火することはほぼ無い
   // （#65レビューnit: 二重の仕組みであることを明記）。それでも残しているのは、
@@ -77,6 +117,18 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
   // loadPreviousImageでさらに戻る、前進中は次へ進む）。`continueInLastDirection`が
   // 自動再試行(error/rootUnavailable)とonError時の続行の両方から使う。
   const lastDirectionRef = useRef<'next' | 'previous'>('next');
+
+  // #120: 失敗の「鮮度」判定（await中に手動で別の画像へ移っていないか）と、全件破損の判定
+  // （失敗セット件数 >= 再生リスト総数。0=総数不明）に使う最新値。
+  const currentPathRef = useRef<string | null>(null);
+  currentPathRef.current = currentImage?.path ?? null;
+  const playlistTotalRef = useRef(playlistTotal);
+  playlistTotalRef.current = playlistTotal;
+  // #120: 画像/動画の読込完了(onLoad/loadeddata)も失敗(onError)も来ない場合の見張り。
+  const watchdogTimerRef = useRef<number | undefined>(undefined);
+  const handleMediaFailureRef = useRef<(path: string, cause?: MediaFailureCause) => Promise<void>>(
+    async () => {},
+  );
 
   const isCurrentVideo = currentImage?.isVideo ?? false;
   const isCurrentVideoRef = useRef(isCurrentVideo);
@@ -149,11 +201,113 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
     setProgressPercent(0);
   }, [clearAdvanceTimer]);
 
+  const clearWatchdog = useCallback(() => {
+    window.clearTimeout(watchdogTimerRef.current);
+    watchdogTimerRef.current = undefined;
+  }, []);
+
+  const clearMediaSkipToast = useCallback(() => {
+    window.clearTimeout(mediaToastTimerRef.current);
+    mediaToastTimerRef.current = undefined;
+    setMediaSkipToast(null);
+  }, []);
+
+  /**
+   * 描画失敗を1件数える（#120）。連続失敗が閾値を超えたら控えめなトーストを出し、
+   * 失敗セットが再生リスト総数に達した（=全件破損）か、連続失敗が上限に達したら再生を止めて
+   * 案内へ切り替える（前者は「読み込める画像がありません」、後者は断定せず「連続して
+   * 読み込めませんでした」＋「続ける」）。総数が不明(0)の時は後者。
+   * @returns まだ次へ進んでよいなら true、打ち切ったなら false。
+   */
+  const registerMediaFailure = useCallback((): boolean => {
+    mediaFailureStreakRef.current += 1;
+    const streak = mediaFailureStreakRef.current;
+    const total = playlistTotalRef.current;
+    const allBroken = total > 0 && failedPathsRef.current.size >= total;
+    if (allBroken || streak >= MAX_CONSECUTIVE_MEDIA_FAILURES) {
+      mediaFailureStreakRef.current = 0;
+      clearAdvanceTimer();
+      clearWatchdog();
+      clearMediaSkipToast();
+      setCurrentImage(null);
+      setNotice({ kind: allBroken ? 'noReadableImages' : 'mediaFailureStreak' });
+      return false;
+    }
+    if (streak >= MEDIA_FAILURE_TOAST_THRESHOLD) {
+      setMediaSkipToast({ count: streak });
+      window.clearTimeout(mediaToastTimerRef.current);
+      mediaToastTimerRef.current = window.setTimeout(
+        () => setMediaSkipToast(null),
+        MEDIA_FAILURE_TOAST_MS,
+      );
+    }
+    return true;
+  }, [clearAdvanceTimer, clearWatchdog, clearMediaSkipToast]);
+
+  /**
+   * 表示を始めた画像/動画の見張りを張る（#120）。`max(表示間隔, 10秒)` のあいだ読込完了も
+   * 失敗も来なければ、失敗として扱い強制的に次へ進む（実アプリで報告された「黒画面が
+   * 間隔の間ずっと続く」への保険。原因診断を隠さないよう発動時は console.warn に残す）。
+   * 一時停止中は進めず、同じ時間だけ張り直す。
+   */
+  const armWatchdog = useCallback(
+    (path: string) => {
+      clearWatchdog();
+      const startedAt = Date.now();
+      const ms = mediaWatchdogMs(intervalRef.current);
+      const fire = () => {
+        watchdogTimerRef.current = undefined;
+        if (!isPlayingRef.current) {
+          watchdogTimerRef.current = window.setTimeout(fire, ms);
+          return;
+        }
+        console.warn(
+          `[sss] media watchdog: no load/error for ${((Date.now() - startedAt) / 1000).toFixed(1)}s, skipping`,
+          { path, navigationInFlight: inFlightRef.current },
+        );
+        void handleMediaFailureRef.current(path, 'watchdog');
+      };
+      watchdogTimerRef.current = window.setTimeout(fire, ms);
+    },
+    [clearWatchdog],
+  );
+
+  /**
+   * バックエンドが返した `found` が、このセッションで既に描画に失敗したパスなら
+   * 描画せず読み飛ばす（#120）。前進時はバックエンドが加算済みの表示回数を取り消す。
+   * @returns 'ok'=通常どおり表示 / 'skip'=読み飛ばして再取得 / 'giveUp'=上限到達で打ち切り
+   */
+  const screenKnownBroken = useCallback(
+    async (
+      result: ImageNavigationResult,
+      undoCount: boolean,
+    ): Promise<'ok' | 'skip' | 'giveUp'> => {
+      if (result.kind !== 'found' || !failedPathsRef.current.has(result.data.path)) return 'ok';
+      if (undoCount) {
+        try {
+          await undoDisplayCount(result.data.path);
+        } catch (err) {
+          console.error('Failed to undo display count:', err);
+        }
+      }
+      return registerMediaFailure() ? 'skip' : 'giveUp';
+    },
+    [registerMediaFailure],
+  );
+
   /**
    * `<img onLoad>` から呼ぶ（問題6: タイマー起点をIPC応答時点でなく実表示開始に）。
    * 動画は `onEnded` で自走するため、ここでは何もしない。
    */
   const handleMediaReady = useCallback(() => {
+    // #120: 描画に成功したので連続失敗の数え直し（動画は loadeddata で呼ばれる）。
+    // 見張りを解除し、スキップ中トーストも消す（成功で連続が途切れた）。
+    // 既知の限界（out of scope）: 見張りは「最初の読込完了」までしか見ない。動画が最初の
+    // フレームだけ読めて再生が始まらない場合（loadeddata 後に止まる）は見張りが解除済みで、
+    // 自力では進まない（従来どおり onEnded/onError/手動操作に委ねる）。
+    mediaFailureStreakRef.current = 0;
+    clearWatchdog();
+    clearMediaSkipToast();
     if (isCurrentVideoRef.current) return;
     remainingMsRef.current = intervalRef.current;
     activeIntervalRef.current = intervalRef.current;
@@ -164,7 +318,7 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
         void loadNextImageRef.current();
       });
     }
-  }, [startAdvanceTimer]);
+  }, [startAdvanceTimer, clearWatchdog, clearMediaSkipToast]);
 
   // loadNextImage/loadPreviousImage は下で定義するが、handleMediaReady/effect
   // からも参照したいため ref経由で先に穴を用意しておく（TDZを避ける）。
@@ -179,8 +333,10 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
           setDisplayToken((t) => t + 1);
           setNotice(null);
           resetTimerForNewMedia();
+          armWatchdog(result.data.path);
           return 'stop';
         case 'emptyPlaylist':
+          clearWatchdog();
           setCurrentImage(null);
           setNotice({ kind: 'emptyPlaylist' });
           return 'stop';
@@ -195,7 +351,7 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
           return 'stop';
       }
     },
-    [resetTimerForNewMedia],
+    [resetTimerForNewMedia, armWatchdog, clearWatchdog],
   );
 
   const loadNextImage = useCallback(async () => {
@@ -217,6 +373,11 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
         }
         if (myId !== requestIdRef.current) return; // 破棄された呼び出し
 
+        const screened = await screenKnownBroken(result, true);
+        if (myId !== requestIdRef.current) return;
+        if (screened === 'giveUp') return;
+        if (screened === 'skip') continue;
+
         const outcome = applyNextResult(result);
         if (outcome === 'stop') return;
 
@@ -231,7 +392,7 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
       inFlightRef.current = false;
       if (myId === requestIdRef.current) setIsLoading(false);
     }
-  }, [applyNextResult]);
+  }, [applyNextResult, screenKnownBroken]);
 
   loadNextImageRef.current = loadNextImage;
 
@@ -254,12 +415,19 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
         }
         if (myId !== requestIdRef.current) return;
 
+        // 戻る方向は表示回数を加算しないので取り消さない。
+        const screened = await screenKnownBroken(result, false);
+        if (myId !== requestIdRef.current) return;
+        if (screened === 'giveUp') return;
+        if (screened === 'skip') continue;
+
         switch (result.kind) {
           case 'found':
             setCurrentImage(result.data);
             setDisplayToken((t) => t + 1);
             setNotice(null);
             resetTimerForNewMedia();
+            armWatchdog(result.data.path);
             return;
           case 'noHistory':
             // 履歴の先頭（境界）。エラーではないので何もしない。
@@ -284,7 +452,7 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
       inFlightRef.current = false;
       if (myId === requestIdRef.current) setIsLoading(false);
     }
-  }, [resetTimerForNewMedia]);
+  }, [resetTimerForNewMedia, screenKnownBroken, armWatchdog]);
 
   loadPreviousImageRef.current = loadPreviousImage;
 
@@ -304,14 +472,75 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
   }, []);
 
   /**
+   * `<img>`/`<video>` の `onError`、または見張りの発動から呼ぶ（#120）。
+   * 順序は「表示回数の取り消し → 失敗の記録・計数 → 次へ」（#65: undo完了前に次の
+   * get_next_imageが走ると取り消しがパス不一致で無視されるため）。取り消しの待ち中に
+   * 手動で別の画像へ移っていたら（古い失敗）、計数も次への進行もしない（正常な画像を
+   * 消さない）。
+   *
+   * 失敗セットへの記録は原因で分ける: `error`（onError=本当に読めない）は、鮮度チェックの
+   * 結果に関わらず（undo待ち中にユーザーが先へ進んでいても、そのファイルが壊れている
+   * 事実は変わらないので）記録する。`watchdog`（読込が遅いだけかもしれない: 遅いNAS・
+   * loadeddata に10秒超かかる大きな動画）は記録しない。同じパスが再び当たったらもう一度
+   * 試す。連続失敗の計数には両方入る（成功で0に戻るので「連続して見張りが発動」の時だけ
+   * 積み上がる）。失敗セットに入らないので全件破損の判定にも使われない。
+   */
+  const handleMediaFailure = useCallback(
+    async (path: string, cause: MediaFailureCause = 'error') => {
+      clearWatchdog();
+      if (cause === 'error') failedPathsRef.current.add(path);
+      const startedAt = Date.now();
+      try {
+        await undoDisplayCount(path);
+      } catch (err) {
+        console.error('Failed to undo display count:', err);
+      }
+      const took = Date.now() - startedAt;
+      if (took > UNDO_SLOW_WARN_MS) {
+        console.warn(`[sss] undo_display_count took ${took}ms (slow backend / DB lock?)`, { path });
+      }
+      if (currentPathRef.current !== path) return; // 古い失敗
+      if (!registerMediaFailure()) return;
+      if (inFlightRef.current) {
+        console.warn('[sss] media failure: next navigation ignored, another one is in flight', {
+          path,
+        });
+      }
+      await continueInLastDirection();
+    },
+    [clearWatchdog, registerMediaFailure, continueInLastDirection],
+  );
+  handleMediaFailureRef.current = handleMediaFailure;
+
+  /**
+   * 連続失敗/全件破損の案内からの「続ける」（#120）。一時的な失敗（NAS瞬断・WebViewの
+   * 一時的なデコード失敗）で正常な写真が失敗セットに入ったままになる副作用を解くため、
+   * 失敗セットを空にして次の画像から試し直す。
+   */
+  const resumeAfterFailures = useCallback(async () => {
+    // 別のナビゲーションが進行中だと loadNextImage は黙って無視され、notice だけ消えて
+    // 黒画面＋案内なしになってしまう。進行中は何も変えず案内を残す（もう一度押せる）。
+    if (inFlightRef.current) return;
+    failedPathsRef.current.clear();
+    mediaFailureStreakRef.current = 0;
+    setNotice(null);
+    await loadNextImageRef.current();
+  }, []);
+
+  /**
    * 初回画像読み込み。#65: 以前は `autoPlay` 引数で内部の `isPlaying` を
    * 直接trueにしていたが、`isPlaying` は呼び出し側の派生値になったため、
    * ここでは単に最初の画像を読み込むだけでよい（再生が始まるかどうかは
    * 呼び出し側のフラグ次第。問題4の根本修正）。
    */
   const initialize = useCallback(async () => {
+    // #120: 再スキャン等で呼ばれる。ファイルが直った可能性があるので失敗記録を捨てる。
+    failedPathsRef.current.clear();
+    mediaFailureStreakRef.current = 0;
+    clearWatchdog();
+    clearMediaSkipToast();
     await loadNextImage();
-  }, [loadNextImage]);
+  }, [loadNextImage, clearWatchdog, clearMediaSkipToast]);
 
   // isPlaying の変化（外部からの一時停止/再開）に応じてタイマーを止める/
   // 残り時間から再開する。動画は自走するのでここでは何もしない。
@@ -334,7 +563,11 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
 
   // アンマウント時にタイマーを確実に破棄する。
   useEffect(() => {
-    return () => clearAdvanceTimer();
+    return () => {
+      clearAdvanceTimer();
+      window.clearTimeout(mediaToastTimerRef.current);
+      window.clearTimeout(watchdogTimerRef.current);
+    };
   }, [clearAdvanceTimer]);
 
   // #65レビューS3/S4: 一時的な通信断（`error`）やフォルダ接続不可
@@ -362,6 +595,9 @@ export function useSlideshow(interval: number = 10000, isPlaying: boolean = fals
     displayToken,
     isLoading,
     notice,
+    mediaSkipToast,
+    handleMediaFailure,
+    resumeAfterFailures,
     progressPercent,
     progressDurationMs,
     loadNextImage,

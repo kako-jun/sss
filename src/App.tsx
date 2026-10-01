@@ -15,7 +15,6 @@ import {
   rescanLastDirectory,
   getSetting,
   getOsLocale,
-  undoDisplayCount,
 } from './lib/tauri';
 import { runStartupSequence } from './lib/startup';
 import { invoke } from '@tauri-apps/api/core';
@@ -117,14 +116,16 @@ function App() {
     displayToken,
     isLoading,
     notice,
+    mediaSkipToast,
+    handleMediaFailure,
+    resumeAfterFailures,
     progressPercent,
     progressDurationMs,
     loadNextImage,
     loadPreviousImage,
-    continueInLastDirection,
     initialize,
     handleMediaReady,
-  } = useSlideshow(displayInterval, isPlaying);
+  } = useSlideshow(displayInterval, isPlaying, totalImages);
 
   // プレイリスト情報を更新
   const updatePlaylistInfo = async () => {
@@ -279,15 +280,10 @@ function App() {
   // get_next_imageを完了させてバックエンドのAppState.last_incremented_displayを
   // 次のpathへ進めてしまい、その後に届くundo_display_count(古いpath)が
   // パス不一致で無視されてしまう競合を避けるため。
+  // #120: undo → 失敗の計数 → 次へ（古い失敗の無視・上限での停止を含む）は
+  // useSlideshow の handleMediaFailure が担う。
   const handleMediaError = (path: string) => {
-    void (async () => {
-      try {
-        await undoDisplayCount(path);
-      } catch (err) {
-        console.error('Failed to undo display count:', err);
-      }
-      await continueInLastDirection();
-    })();
+    void handleMediaFailure(path);
   };
 
   // #78: 除外の取り消し後。画像がプレイリストへ戻ったので位置/総数を更新する。
@@ -576,7 +572,11 @@ function App() {
   // #65: 「ようこそ」画面は本当に未設定（ディレクトリが一度も設定されていない）の
   // 時だけ出す。設定済みだが空/接続不可/読込失敗の場合は専用の案内にする
   // （問題1: 消えたファイル1枚でようこそ画面に落ちる、の根絶）。
-  const emptyStateContent = (() => {
+  const emptyStateContent = ((): {
+    title: string;
+    subtitle: string;
+    canContinue?: boolean;
+  } | null => {
     if (!hasDirectory) {
       return { title: t('welcomeTitle'), subtitle: t('welcomeSubtitle') };
     }
@@ -588,6 +588,20 @@ function App() {
     }
     if (notice?.kind === 'loadFailedGaveUp') {
       return { title: t('loadFailedGaveUp'), subtitle: '' };
+    }
+    if (notice?.kind === 'noReadableImages') {
+      return {
+        title: t('noReadableImagesTitle'),
+        subtitle: t('noReadableImagesSubtitle'),
+        canContinue: true,
+      };
+    }
+    if (notice?.kind === 'mediaFailureStreak') {
+      return {
+        title: t('mediaFailureStreakTitle'),
+        subtitle: t('mediaFailureStreakSubtitle'),
+        canContinue: true,
+      };
     }
     if (notice?.kind === 'error') {
       return { title: t('genericErrorTitle'), subtitle: notice.message };
@@ -629,7 +643,9 @@ function App() {
         ? t('loadFailedGaveUp')
         : notice?.kind === 'error'
           ? notice.message
-          : directoryErrorMessage;
+          : mediaSkipToast
+            ? t('mediaSkipToast', { count: mediaSkipToast.count })
+            : directoryErrorMessage;
 
   // directoryError による下部トーストだけは数秒で自動的に消す（notice由来の通知は
   // 次の正常な画像取得時にnoticeがnullへ戻るため対象外。上の全画面案内側は
@@ -825,7 +841,7 @@ function App() {
             )}
             <div className="text-white/85 text-xl font-medium mb-2">{emptyStateContent.title}</div>
             {emptyStateContent.subtitle && (
-              <div className="text-white/50 text-sm mb-6 text-balance">
+              <div className="text-white/50 text-sm mb-6 text-balance whitespace-pre-line">
                 {emptyStateContent.subtitle}
               </div>
             )}
@@ -837,13 +853,29 @@ function App() {
                 {directoryErrorMessage}
               </div>
             )}
-            <button
-              onClick={handleSettings}
-              className="flex items-center justify-center gap-2 px-6 py-2.5 bg-white/90 hover:bg-white text-black font-medium rounded-lg transition-colors mx-auto text-sm"
-            >
-              <SettingsIcon size={16} />
-              {hasDirectory ? t('openSettings') : t('selectFolder')}
-            </button>
+            <div className="flex items-center justify-center gap-3">
+              {emptyStateContent.canContinue && (
+                // #120: 失敗で止まった時の主操作は「続ける」（失敗セットを空にして次へ）。
+                // 主ボタンは1画面に1つなので、この時の「設定を開く」は標準ボタンにする。
+                <button
+                  onClick={() => void resumeAfterFailures()}
+                  className="flex items-center justify-center gap-2 px-6 py-2.5 bg-white/90 hover:bg-white text-black font-medium rounded-lg transition-colors text-sm"
+                >
+                  {t('continueSlideshow')}
+                </button>
+              )}
+              <button
+                onClick={handleSettings}
+                className={
+                  emptyStateContent.canContinue
+                    ? 'flex items-center justify-center gap-2 px-6 py-2.5 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded-lg transition-colors text-sm'
+                    : 'flex items-center justify-center gap-2 px-6 py-2.5 bg-white/90 hover:bg-white text-black font-medium rounded-lg transition-colors text-sm'
+                }
+              >
+                <SettingsIcon size={16} />
+                {hasDirectory ? t('openSettings') : t('selectFolder')}
+              </button>
+            </div>
             {!hasDirectory && (
               <button
                 type="button"

@@ -28,7 +28,10 @@ interface SlideshowProps {
    * 従来どおり`onEnded`で進む。
    */
   videoMaxDurationSec?: number;
-  /** 画像の実表示開始（`<img onLoad>`）を通知する。タイマー起点に使う（#65 問題6）。 */
+  /**
+   * 画像の実表示開始（`<img onLoad>`）を通知する。タイマー起点に使う（#65 問題6）。
+   * 動画では読込成功（`loadeddata`）で呼ぶ（#120: 連続読込失敗の数え直し用。動画側は何も張らない）。
+   */
   onMediaReady?: () => void;
   /** 動画の再生終了、または画像/動画の読込エラー時に「次へ」進む。 */
   onAdvance?: () => void;
@@ -245,6 +248,9 @@ export function Slideshow({
               // 既に再生中/終了処理済み/退場中の要素には何もしない。
               const video = e.currentTarget;
               if (mediaKey !== currentMediaKeyRef.current) return;
+              // #120: 動画が実際に読めた印。連続読込失敗の数え直しに使う
+              // （動画のタイマーは onEnded で自走するため、これ自体は何も張らない）。
+              onMediaReady?.();
               if (!isPlaying || !video.paused || finishedKeyRef.current === mediaKey) return;
               startPlayback(video);
             }}

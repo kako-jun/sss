@@ -187,6 +187,43 @@
   鑑賞中の画像を消さない
 - **読込失敗**: 自動で次の画像へ進む（連続失敗が上限に達したら諦めて通知に切替）。
   ユーザー操作を要求しない
+- **描画失敗（0バイト・破損の画像/動画, #120）**: `<img>`/`<video>` の `onError` で即座に
+  次へスキップする（黒画面のまま表示間隔を待たない）。流れは `useSlideshow.handleMediaFailure`
+  （App の `handleMediaError` と見張りの両方から呼ぶ）: `undo_display_count`（統計に「表示された」と
+  残さない）→ 失敗セット記録・連続失敗の計数 → 次へ。undo の待ち中に手動で別の画像へ移っていた
+  （古い失敗）なら計数も続行もしない（正常な画像を消さない）。計数は画像の `onLoad`・動画の
+  `loadeddata`（`handleMediaReady`）で0に戻り、スキップ中トースト（`mediaSkipToast`、連続3件目から・
+  最後の失敗から約6秒・成功/`initialize` で即消す）も消える。
+  - **停止の2段階**: 失敗セット件数 >= 再生リスト総数（`useSlideshow` 第3引数。0=不明）の時だけ
+    `noReadableImages`（「読み込める画像がありません」＝全件破損）。連続10件
+    （`MAX_CONSECUTIVE_MEDIA_FAILURES`）で総数に届いていなければ `mediaFailureStreak`
+    （「連続して読み込めませんでした」、全件とは断定しない）。どちらも `currentImage=null` の全画面案内で
+    「続ける」（`resumeAfterFailures`: 失敗セットを空にして次を試し直す）と「設定を開く」。
+    ArrowRight 等の手動の次へでも復帰できる。再試行タイマーは無い。
+  - **失敗セットはセッション中保持**（`failedPathsRef`。再び返ってきても描画せず、前進時は
+    undo して読み飛ばす）。副作用として、一時的な失敗（NAS 瞬断・WebView の一時的なデコード失敗）で
+    正常な写真がそのセッション中二度と出なくなりうる。解除されるのは再スキャン（`initialize`）・
+    設定を開いて再スキャン・案内の「続ける」。
+  - **見張り（media watchdog）**: 表示を始めた画像/動画に対し `max(表示間隔, 10秒)`
+    （`constants.ts` の `mediaWatchdogMs`。下限は e2e だけ `VITE_MEDIA_WATCHDOG_MIN_MS` で短縮）の間
+    `onLoad`/`onError`/`loadeddata` のどれも来なければ失敗として `handleMediaFailure` に流し強制的に
+    次へ進む（一時停止中は張り直すだけ）。発動時は `console.warn('[sss] media watchdog: ...')` に
+    パス・待った秒数・`navigationInFlight`（`inFlightRef`）を残し、`undo_display_count` が1秒超なら
+    その旨も `console.warn` する（原因診断を隠さない）。
+    見張り由来のスキップは**失敗セットに入れない**（遅い NAS・loadeddata に10秒超かかる大きな動画など、遅いだけの
+    正常なファイルを二度と出さなくしないため。同じパスが再び当たればもう一度試す。全件破損の判定にも使わない。
+    連続失敗の計数には入る）。`onError` 由来は失敗セットに記録する（undo 待ち中に先へ進まれても記録は残す）。
+    既知の限界: 見張りは最初の `loadeddata` で解除されるので、最初のフレームだけ読めて再生が始まらない動画は対象外。
+  - **実アプリ（WebKitGTK）で報告された「黒画面が間隔の間ずっと続く」の仮説**（実描画では未再現）:
+    ① `handleMediaError` は `undo_display_count`（DB mutex 待ち）を await してから次へ進むので、
+    スキャン/先読みが DB を握っていると待たされる ② `continueInLastDirection` は `inFlightRef` が立っていると
+    **黙って return する**（別のナビゲーション中。診断ログを追加） ③ 画像の表示間隔タイマーは `onLoad` 起点
+    なので、壊れた画像（onLoad が来ない）では**タイマーが永遠に張られず**、`onError` が遅れる/来ないと
+    自力では進まない ④ WebKit が asset:// の 0 バイト/破損 JPEG で `error` を遅延させる・`load` 扱いに
+    する・pending のままにする可能性 ⑤ `AnimatePresence mode="wait"` の退場待ち（1枚あたり約0.5秒）。
+    実アプリでは `[sss]` のログのタイムスタンプで上のどこに隙間があるか確認する。
+  - **スキャナで0バイトを除外しない**（判断, #120）: 破損した非0バイトの画像は結局実行時スキップが必要で、
+    コピー途中の一時的な0バイトが履歴ごと「削除」扱いになる・生スキャン基準の削除判定との整合を崩すため
 - **起動時自動スキャンで前回ディレクトリが拒否された場合**: 理由をようこそ/
   案内画面に表示する（以前は`console.error`のみで握りつぶしていた）
 

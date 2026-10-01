@@ -193,6 +193,20 @@ errors `text-red-400/70`. The button is **Standard** (the tab already has its ow
 Primary button), shows `animate-spin` on its icon and is disabled while running.
 Give the block `role="status"`; there is at most one such block per tab.
 
+### Soft Skip Toast (#120)
+
+Shown at the bottom (`fixed bottom-20`, the same pill as the folder-unavailable /
+scan-failure notice: `bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2
+rounded-full border border-white/10`) while broken/0-byte photos are being skipped,
+from the 3rd consecutive failure; it disappears as soon as a photo renders (or ~6s
+after the last failure). Text only, no icon or emoji. When the slideshow stops for
+failures, the full-screen guidance card replaces it: "No photos could be loaded" (the
+failed set covers the whole playlist) or "Several photos in a row failed to load"
+(10 in a row, not known to be everything). Both show **Continue** (the one Primary
+button) next to **Open Settings** (Standard, with the gear icon), centered in a
+`flex gap-3` row; the subtitle uses an explicit `\n` (`whitespace-pre-line`) so Japanese
+breaks at a sentence boundary, never mid-word. There is no retry timer.
+
 ### Input Fields
 
 ```
