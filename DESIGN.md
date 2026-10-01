@@ -558,8 +558,9 @@ uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
 - Import custom fonts beyond Inter
 - Use opacity values outside standard increments (/5, /8, /10, /15, /20, /25, /30, etc.).
   Tailwind 3.4's own opacity scale is 5-step (0, 5, 10, ..., 95, 100) — `/8` is the
-  one value on this list that isn't a multiple of 5, and it's only usable because
-  `tailwind.config.js` adds `theme.extend.opacity: { 8: '0.08' }` explicitly
+  one value on this list that isn't a multiple of 5 (besides the background logo's
+  `opacity-2`, #99), and they're only usable because `tailwind.config.js` adds
+  `theme.extend.opacity: { 2: '0.02', 8: '0.08' }` explicitly
   (#66レビューmust3: without that entry, `border-white/8`/`bg-white/8` silently
   generate no CSS at all and fall back to Preflight's default `border-color:
 currentColor`, rendering a visibly brighter border than intended). Adding any
