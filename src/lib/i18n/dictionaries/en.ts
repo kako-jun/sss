@@ -213,7 +213,7 @@ export const en = {
   resetSettingsButton: 'Reset All Data',
   resettingSettingsLabel: 'Resetting...',
   confirmResetAllData:
-    'Reset all data?\n\nThis deletes your settings (including the pick destination), exclude rules, scanned file information, playlist, display history, and caches, and forgets the last folder. Files in the pick destination folder are not deleted, and the Picks tab keeps showing the files in that folder.\n\nThis cannot be undone. The app will restart when finished.',
+    'Reset all data?\n\nThis deletes your settings, exclude rules, scanned file information, playlist, scan history, display history, and caches, and forgets the last folder. The pick destination returns to the default (Pictures/sss-picked), and the Picks tab shows the files in that folder. Files in your previous pick destination are not deleted, but no longer appear in the tab.\n\nThis cannot be undone. The app will restart when finished.',
   resettingMessage: 'Resetting. The app will restart when finished.',
   resetErrorPrefix: 'Error: {detail}',
   errorDbResetFailed: 'Failed to reset the database',

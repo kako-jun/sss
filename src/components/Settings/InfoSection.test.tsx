@@ -102,7 +102,7 @@ describe('InfoSection reset button (resetAllData)', () => {
     fireEvent.click(screen.getByText('すべてのデータを初期化'));
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      'すべてのデータを初期化しますか？\n\n設定（ピック先の指定を含む）、除外ルール、スキャン済みのファイル情報、プレイリスト、表示履歴、キャッシュを削除し、前回のフォルダも忘れます。ピック先フォルダ内のファイルは削除されず、ピックタブにはそのフォルダのファイルが引き続き表示されます。\n\nこの操作は取り消せません。完了後アプリが再起動します。',
+      'すべてのデータを初期化しますか？\n\n設定、除外ルール、スキャン済みのファイル情報、プレイリスト、スキャン履歴、表示履歴、キャッシュを削除し、前回のフォルダも忘れます。ピック先は既定（Pictures/sss-picked）に戻り、ピックタブにはそのフォルダのファイルが表示されます。以前のピック先のファイルは削除されませんが、タブには表示されなくなります。\n\nこの操作は取り消せません。完了後アプリが再起動します。',
     );
     expect(resetAllData).not.toHaveBeenCalled();
 
@@ -206,7 +206,7 @@ describe('InfoSection reset button in English (#112)', () => {
     fireEvent.click(screen.getByText('Reset All Data'));
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      'Reset all data?\n\nThis deletes your settings (including the pick destination), exclude rules, scanned file information, playlist, display history, and caches, and forgets the last folder. Files in the pick destination folder are not deleted, and the Picks tab keeps showing the files in that folder.\n\nThis cannot be undone. The app will restart when finished.',
+      'Reset all data?\n\nThis deletes your settings, exclude rules, scanned file information, playlist, scan history, display history, and caches, and forgets the last folder. The pick destination returns to the default (Pictures/sss-picked), and the Picks tab shows the files in that folder. Files in your previous pick destination are not deleted, but no longer appear in the tab.\n\nThis cannot be undone. The app will restart when finished.',
     );
     expect(resetAllData).not.toHaveBeenCalled();
     confirmSpy.mockRestore();

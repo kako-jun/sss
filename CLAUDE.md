@@ -205,7 +205,7 @@
 | ピック / Picks             | ピック済みメディアのサムネイル一覧・削除（`PickSection`）                                                                                                                                                        |
 | 履歴 / History             | 最近表示した100件のサムネイル一覧・除外（`HistorySection`）                                                                                                                                                      |
 | 統計グラフ / Stats         | 表示回数ヒストグラム・表ビュー・表示回数リセット（`GraphSection`）                                                                                                                                               |
-| 情報 / Info                | バージョン・GitHubリンク・全データ初期化（ボタン「すべてのデータを初期化」/ "Reset All Data"。確認ダイアログの文言は `InfoSection` と辞書が正本）                                                                |
+| 情報 / Info                | バージョン・GitHubリンク・全データ初期化（`InfoSection`）                                                                                                                                                        |
 
 保存キー（`app_settings`）: `last_directory_path` / `display_interval`（ms） / `apply_exif_rotation` / `share_directory_path` / `language` / `video_audio_enabled` / `video_max_duration_sec` / `sssignore_migrated`。
 
