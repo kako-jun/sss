@@ -97,7 +97,7 @@ On later launches the previous folder is restored automatically and shown right 
   - **Previous**: goes back to the previous photo/video (from history, does not increase its display count)
   - **Pause/Play**: toggles pause/resume
   - **Next**: advances immediately
-  - **Pick** (hand icon): copies the current file into the pick destination folder (default: `Pictures/sss-picked`)
+  - **Pick** (hand icon): copies the current file into the pick destination folder (default: `sss-picked` in your Pictures folder)
   - **"…" menu**: open in file manager, view picks, exclude (by date taken / folder / file)
   - **Map thumbnail** (photos with GPS only): click to open Google Maps
 - **Undo**: for a few seconds right after an exclude or a pick, a small toast offers "Undo". It removes the exclude rule and puts the photo back into the unplayed part of the playlist, or deletes the file the pick just copied (no confirmation dialog)
