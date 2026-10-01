@@ -40,6 +40,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
     saveFailed,
     save: saveWithRollback,
     beginLoad,
+    noteUserEdit,
     markLoaded,
   } = useRollbackSave<number>(
     (ms) => {
@@ -138,6 +139,8 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
   // 通知だけ即時に行い、DB保存はdebounceする（#65 問題7）。
   const handleSliderChange = (seconds: number) => {
     const ms = clampDisplayInterval(seconds * 1000);
+    // debounce 待ちの間は保存が始まらないので、操作した時点で取得中の古い結果を失効させる
+    noteUserEdit();
     setDisplayInterval(ms);
     setNumberText(String(ms / 1000));
     onIntervalChange?.(ms);

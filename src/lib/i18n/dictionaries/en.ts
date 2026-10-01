@@ -92,7 +92,8 @@ export const en = {
   pickCopyFailed: "Couldn't copy the photo",
   errorPickPermissionDenied: "Couldn't copy: no permission to write to the pick destination",
   errorPickDiskFull: "Couldn't copy: the pick destination is out of space",
-  errorPickDestinationMissing: "Couldn't copy: the pick destination folder wasn't found",
+  errorPickDestinationMissing:
+    "Couldn't copy: the pick destination can't be used (a file with that name exists, or the folder wasn't found)",
   errorPickSourceMissing: "Couldn't copy: the original photo wasn't found",
   errorPathNotManaged: "This file isn't managed by the slideshow, so it can't be copied",
   errorShareDirectoryInvalid:

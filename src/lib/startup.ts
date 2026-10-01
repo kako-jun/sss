@@ -218,6 +218,9 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     }
   } catch (err) {
     console.error('Failed to initialize:', err);
+    // 防御的な経路: 通常 `initialize`/`updatePlaylistInfo` は内部で失敗を吸収するので到達しにくいが、
+    // 想定外の例外で画像表示の前後どちらに失敗しても、黙って「ようこそ」/空画面に見せないために報告する
+    // （画像が出ていれば App が上部トースト、出ていなければ再試行できる案内画面にする）。
     onStartupFailure?.('initialize', err);
     setInitStatus('');
     setIsInitialized(true);

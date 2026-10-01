@@ -814,8 +814,8 @@ function App() {
       {windowModeError && (
         // 下部のトースト・操作バー・その他メニューと重ならないよう画面上部に出す。右上のボタン列
         // （約9rem幅）と重ならないよう、右端を空けた枠の中で中央寄せする（#103）。枠自体は
-        // pointer-events-none で写真上のクリック/ホイールを吸わない。切り詰められた全文を
-        // title で読めるよう、通知本体（小さな丸薬）だけ pointer-events-auto にする。
+        // pointer-events-none で写真上のクリック/ホイールを吸わない。長い通知（フォールバックの旨など）は
+        // 切り詰めず折り返して全文を見せる（狭幅でも読める）。通知本体だけ pointer-events-auto にする。
         <div className="fixed top-4 left-4 right-[11rem] z-50 flex justify-center pointer-events-none">
           <div
             role="alert"

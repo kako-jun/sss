@@ -117,7 +117,7 @@ describe('backend error code -> message resolution (#80)', () => {
         'ピック先の空き容量が足りないためコピーできません',
       );
       expect(resolvePickErrorMessage('pickDestinationMissing')).toBe(
-        'ピック先のフォルダが見つからないためコピーできません',
+        'ピック先として使えないためコピーできません（同名のファイルがあるか、フォルダが見つかりません）',
       );
       expect(resolvePickErrorMessage('pickSourceUnreadable')).toBe(
         'コピー元の写真を読み取れないためコピーできません',

@@ -92,7 +92,8 @@ export const ja = {
   pickCopyFailed: 'エラー: コピー失敗',
   errorPickPermissionDenied: 'ピック先に書き込む権限がないためコピーできません',
   errorPickDiskFull: 'ピック先の空き容量が足りないためコピーできません',
-  errorPickDestinationMissing: 'ピック先のフォルダが見つからないためコピーできません',
+  errorPickDestinationMissing:
+    'ピック先として使えないためコピーできません（同名のファイルがあるか、フォルダが見つかりません）',
   errorPickSourceMissing: 'コピー元の写真が見つからないためコピーできません',
   errorPathNotManaged: 'このファイルはスライドショーの管理外のためコピーできません',
   errorShareDirectoryInvalid:

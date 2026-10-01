@@ -27,6 +27,9 @@ export function useRollbackSave<T>(
   const seqRef = useRef(0);
   const chainRef = useRef<Promise<unknown>>(Promise.resolve());
   const inFlightRef = useRef(0);
+  // 取得の世代。保存の開始・画面操作(noteUserEdit)のたびに進め、取得開始時に控えた世代と
+  // 食い違う取得結果(=操作より前の古い DB 読み取り)は反映しない。
+  const loadGenRef = useRef(0);
   const mountedRef = useRef(true);
   const setValueRef = useRef(setValue);
   const failureKeyRef = useRef(failureKey);
@@ -43,17 +46,24 @@ export function useRollbackSave<T>(
 
   // 取得の世代管理: 取得を始めた時点の保存操作の番号を控え、取得が返ってきたときに
   // その間にユーザーが保存を始めていたら（古い DB 読み取りになるので）保存済みの値を上書きしない。
-  const beginLoad = useCallback(() => seqRef.current, []);
+  // 保存中に始めた取得は、保存前の DB を読むかもしれないので最初から失効させる(-1)。
+  const beginLoad = useCallback(() => (inFlightRef.current > 0 ? -1 : loadGenRef.current), []);
+
+  /** 保存を伴わない画面操作(スライダーを動かした等)を記録し、取得中の古い結果を失効させる。 */
+  const noteUserEdit = useCallback(() => {
+    loadGenRef.current++;
+  }, []);
 
   /** 取得できた保存値を反映する。反映した（古い取得でなかった）ときだけ true。 */
   const markLoaded = useCallback((value: T, token: number): boolean => {
-    if (token !== seqRef.current) return false;
+    if (token !== loadGenRef.current) return false;
     savedRef.current = value;
     return true;
   }, []);
 
   const save = useCallback(async (next: T, persist: (value: T) => Promise<void>) => {
     const seq = ++seqRef.current;
+    loadGenRef.current++;
     const run = async (): Promise<boolean> => {
       try {
         await persist(next);
@@ -80,5 +90,5 @@ export function useRollbackSave<T>(
     return result;
   }, []);
 
-  return { saveFailed, save, beginLoad, markLoaded };
+  return { saveFailed, save, beginLoad, noteUserEdit, markLoaded };
 }

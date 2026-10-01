@@ -67,16 +67,18 @@ fn fail(stage: &str, e: &io::Error, code: &'static str) -> String {
 
 /// ピック先フォルダを（無ければ親ごと）作る。失敗は原因別のコードで返す（#115）。
 pub fn ensure_pick_dir(dir: &Path) -> Result<(), String> {
-    fs::create_dir_all(dir).map_err(|e| {
-        // ピック先のパスにファイルが居座っている場合、Windows は AlreadyExists（os error 183）、
-        // Unix は NotADirectory を返す。どちらも「ピック先として使えない」で同じ扱いにする。
-        let code = if e.kind() == io::ErrorKind::AlreadyExists {
-            "pickDestinationMissing"
-        } else {
-            pick_io_error_code(&e)
-        };
-        fail("create_dir_all", &e, code)
-    })
+    fs::create_dir_all(dir).map_err(|e| fail("create_dir_all", &e, create_dir_error_code(&e)))
+}
+
+/// `create_dir_all` の失敗を分類する純粋関数。ピック先のパスの途中にファイルが居座っている場合、
+/// Windows は `AlreadyExists`（os error 183）、Unix は `NotADirectory` を返す。どちらも
+/// 「ピック先として使えない」＝`pickDestinationMissing` で同じ扱いにする（OS 非依存でテストできる）。
+pub fn create_dir_error_code(e: &io::Error) -> &'static str {
+    if e.kind() == io::ErrorKind::AlreadyExists {
+        "pickDestinationMissing"
+    } else {
+        pick_io_error_code(e)
+    }
 }
 
 /// コピー元が存在し読み取れる状態かを確認する（#115）。親ディレクトリの権限エラーを
@@ -375,6 +377,19 @@ mod tests {
         }
         let _ = fs::set_permissions(&sub, fs::Permissions::from_mode(0o755));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_dir_error_code_is_os_independent() {
+        use std::io::{Error, ErrorKind};
+        let code = |kind| create_dir_error_code(&Error::from(kind));
+        // Windows はファイルが居座っていると AlreadyExists、Unix は NotADirectory
+        assert_eq!(code(ErrorKind::AlreadyExists), "pickDestinationMissing");
+        assert_eq!(code(ErrorKind::NotADirectory), "pickDestinationMissing");
+        assert_eq!(code(ErrorKind::NotFound), "pickDestinationMissing");
+        assert_eq!(code(ErrorKind::PermissionDenied), "pickPermissionDenied");
+        assert_eq!(code(ErrorKind::StorageFull), "pickDiskFull");
+        assert_eq!(code(ErrorKind::Other), "pickCopyFailed");
     }
 
     #[test]

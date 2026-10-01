@@ -222,3 +222,35 @@ describe('useRollbackSave: success-side guard and stale loads (#115)', () => {
     expect(setValue).toHaveBeenLastCalledWith(5);
   });
 });
+
+describe('useRollbackSave: load tokens (#115)', () => {
+  it('a UI edit without a save yet (e.g. a debounced slider) invalidates an in-flight load', () => {
+    const { result } = renderHook(() => useRollbackSave<number>(vi.fn(), 0, 'intervalSaveFailed'));
+    const token = result.current.beginLoad();
+    act(() => result.current.noteUserEdit());
+    let applied = true;
+    act(() => {
+      applied = result.current.markLoaded(7, token);
+    });
+    expect(applied).toBe(false);
+  });
+
+  it('a load started while a save is in flight never applies (it may read the pre-save value)', async () => {
+    const { result } = renderHook(() => useRollbackSave<number>(vi.fn(), 0, 'intervalSaveFailed'));
+    const d = deferred();
+    let p!: Promise<boolean>;
+    act(() => {
+      p = result.current.save(1, () => d.promise);
+    });
+    const token = result.current.beginLoad();
+    await act(async () => {
+      d.resolve();
+      await p;
+    });
+    let applied = true;
+    act(() => {
+      applied = result.current.markLoaded(0, token);
+    });
+    expect(applied).toBe(false);
+  });
+});

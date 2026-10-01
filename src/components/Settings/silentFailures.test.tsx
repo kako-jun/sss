@@ -533,3 +533,23 @@ describe('レビュー指摘の追加検証 (#115)', () => {
     expect(screen.queryByTestId('stats-load-error')).toBeNull();
   });
 });
+
+describe('取得結果がユーザー操作を上書きしない (#115)', () => {
+  it('IntervalSection: 取得中にスライダーを動かすと、遅れて届いた取得結果で上書きしない', async () => {
+    let resolveGet!: (v: string) => void;
+    tauri.getSetting.mockImplementation(
+      () =>
+        new Promise<string>((res) => {
+          resolveGet = res;
+        }),
+    );
+    render(<IntervalSection />);
+    const input = screen.getByRole('spinbutton') as HTMLInputElement;
+    fireEvent.change(screen.getByRole('slider'), { target: { value: '45' } });
+    expect(input.value).toBe('45');
+    await act(async () => {
+      resolveGet('10000');
+    });
+    expect(input.value).toBe('45');
+  });
+});
