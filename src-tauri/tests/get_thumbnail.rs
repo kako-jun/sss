@@ -135,7 +135,7 @@ fn playlist_member_and_history_images_return_a_thumbnail_under_the_cache_thumbs_
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// ピックフォルダ内のファイル（DB 未登録でも）は通る。
+/// ピック先フォルダ内のファイル（DB 未登録でも）は通る。
 #[test]
 fn picked_folder_image_is_allowed_without_a_db_row() {
     let dir = workspace("picked_ok");
@@ -147,7 +147,7 @@ fn picked_folder_image_is_allowed_without_a_db_row() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #87: 管理外の絶対パス・相対パス・`..` 経由・ピックフォルダ外を指すシンボリックリンクは
+/// #87: 管理外の絶対パス・相対パス・`..` 経由・ピック先フォルダ外を指すシンボリックリンクは
 /// デコードせず `pathNotManaged`（サムネイルも作らない）。
 #[test]
 fn unmanaged_paths_are_rejected_without_decoding() {

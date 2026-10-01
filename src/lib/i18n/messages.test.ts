@@ -115,3 +115,22 @@ describe('i18n dictionaries (#80)', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// #112: 「ピック先フォルダ」の呼称を固定する（旧呼称の取り残しの再発防止）。
+// 確認ダイアログには、DBに無い「ピック一覧」/ "pick list" をリセット対象として書かない。
+describe('pick destination terminology (#112)', () => {
+  it('does not use legacy names for the pick destination folder', () => {
+    const all = [...Object.values(ja), ...Object.values(en)].join('\n');
+    expect(all).not.toMatch(/ピックフォルダ/);
+    expect(all).not.toMatch(/picks? folder/i);
+    expect(all).not.toMatch(/pick list/i);
+    expect(ja.confirmResetAllData).not.toContain('ピック一覧');
+  });
+
+  it('uses the same name in ja and en for the pick destination', () => {
+    expect(ja.pickDestinationTitle).toBe('ピック先フォルダ');
+    expect(en.pickDestinationTitle).toBe('Pick Destination Folder');
+    expect(ja.confirmDeletePickedPhoto).toContain('ピック先フォルダ');
+    expect(en.confirmDeletePickedPhoto).toContain('pick destination folder');
+  });
+});
