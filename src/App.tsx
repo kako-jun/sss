@@ -708,8 +708,8 @@ function App() {
       {windowModeError && (
         <div
           role="alert"
-          // 他のトースト/通知（bottom-20 中央、z-40/z-50）の上に積み、同時表示でも重ならないようにする
-          className="fixed bottom-36 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 max-w-[90vw]"
+          // 下部のトースト・操作バー・その他メニューと重ならないよう、画面上部中央に出す（右上のボタン列を避けて幅を制限）
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 whitespace-nowrap truncate max-w-[calc(100vw-12rem)]"
         >
           {windowModeError.text}
         </div>

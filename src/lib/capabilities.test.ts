@@ -106,7 +106,8 @@ export function scanWindowMethods(text: string): string[] {
   }
   for (const m of text.matchAll(/\b(Window|WebviewWindow)\s+as\s+(\w+)/g)) classes.push(m[2]);
   // `import * as w from '@tauri-apps/api/window'` → `w.getCurrentWindow()` / `w.Window`
-  const nsRe = /import\s*\*\s*as\s+(\w+)\s+from\s+'@tauri-apps\/api\/(?:window|webviewWindow)'/g;
+  const nsRe =
+    /import\s*\*\s*as\s+(\w+)\s+from\s+['"]@tauri-apps\/api\/(?:window|webviewWindow)['"]/g;
   for (const m of text.matchAll(nsRe)) {
     for (const f of ['getCurrentWindow', 'getCurrentWebviewWindow']) {
       factories.push(`${m[1]}${WS}\\.${WS}${f}`);
@@ -202,6 +203,11 @@ describe('scanWindowMethods (#103 スキャナ自体の検証)', () => {
     expect(scanWindowMethods(c)).toContain('setPosition');
   });
 
+  it('detects namespace imports written with double quotes', () => {
+    const src = 'import * as w from "@tauri-apps/api/window";\nw.getCurrentWindow().minimize();';
+    expect(scanWindowMethods(src)).toContain('minimize');
+  });
+
   it('detects import-aliased Window class (Window as W)', () => {
     const src = "import { Window as W } from '@tauri-apps/api/window';\nW.getCurrent().center();";
     expect(scanWindowMethods(src)).toContain('center');
@@ -221,6 +227,25 @@ describe('ウィンドウ API の import 範囲ガード (#103)', () => {
       .filter(({ text }) => WINDOW_MODULES.some((m) => text.includes(m)))
       .map(({ file }) => file.slice(SRC.length + 1));
     expect(importers).toEqual(['App.tsx']);
+  });
+});
+
+describe('スキャナで追えない形の使用禁止ガード (#103)', () => {
+  it('src does not call window commands directly via invoke("plugin:window|...")', () => {
+    const offenders = sources
+      .filter(({ text }) => /plugin:window\|/.test(text))
+      .map(({ file }) => file.slice(SRC.length + 1));
+    expect(offenders).toEqual([]);
+  });
+
+  // 分割代入の抽出は `[^}]*` を使うため、デフォルト値にオブジェクトリテラル（`}` を含む）
+  // があると崩れる。既知の限界として、ウィンドウ API を扱うファイルでの使用を禁止する。
+  it('window API files do not use nested braces inside destructuring patterns', () => {
+    const offenders = sources
+      .filter(({ text }) => WINDOW_MODULES.some((m) => text.includes(m)))
+      .filter(({ text }) => /\b(?:const|let|var)\s*\{[^}]*\{/.test(text))
+      .map(({ file }) => file.slice(SRC.length + 1));
+    expect(offenders).toEqual([]);
   });
 });
 
