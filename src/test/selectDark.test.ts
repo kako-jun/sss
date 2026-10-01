@@ -20,6 +20,10 @@ function walk(dir: string): string[] {
 }
 
 /**
+ * 対象範囲: JSX の `<select>` タグのみ。`<Select>` ラッパーや `as="select"` は対象外
+ * (現 src に無い)。`createElement(..., 'select')` は構文木で検出し、検証不能として
+ * offender 扱いにする(JSX を使えという運用ガード)。
+ *
  * TypeScript の構文木から <select> を列挙し、className に sss-select が
  * 完全一致のトークンとして含まれるかを判定する。コメント・文字列・正規表現内の
  * `<select` は構文木に現れないので誤検出しない(手書きスキャナは使わない)。
@@ -28,9 +32,11 @@ function classTokens(node: ts.Node | undefined): string[] | null {
   if (!node) return null;
   if (ts.isStringLiteralLike(node)) return node.text.split(/\s+/);
   if (ts.isTemplateExpression(node)) {
-    // 静的な断片だけを見る(`${}` の中身は無視。静的断片に sss-select があれば十分)。
-    const parts = [node.head.text, ...node.templateSpans.map((sp) => sp.literal.text)];
-    return parts.flatMap((t) => t.split(/\s+/));
+    // `${}` を非空白のセンチネルに置き換えて分割し、`${}` に隣接するトークン
+    // (`a${b}sss-select` のように別クラスと連結し得る断片)を除外する。
+    const joined =
+      node.head.text + node.templateSpans.map((sp) => '\u0000' + sp.literal.text).join('');
+    return joined.split(/\s+/).filter((t) => !t.includes('\u0000'));
   }
   if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)) {
     return classTokens(node.expression);
@@ -67,6 +73,22 @@ function scanSelects(src: string): boolean[] {
       );
       results.push(exprHasSssSelect(attr?.initializer));
     }
+    if (ts.isCallExpression(node)) {
+      const callee = ts.isPropertyAccessExpression(node.expression)
+        ? node.expression.name.text
+        : ts.isIdentifier(node.expression)
+          ? node.expression.text
+          : '';
+      const first = node.arguments[0];
+      if (
+        callee === 'createElement' &&
+        first &&
+        ts.isStringLiteralLike(first) &&
+        first.text === 'select'
+      ) {
+        results.push(false);
+      }
+    }
     ts.forEachChild(node, visit);
   };
   visit(sf);
@@ -100,6 +122,14 @@ describe('scan helpers (#102)', () => {
     expect(() => scanSelects('<select className="a"')).not.toThrow();
   });
 
+  it('flags createElement("select") as an offender (JSX required)', () => {
+    expect(
+      scanSelects("const x = React.createElement('select', { className: 'sss-select' });"),
+    ).toEqual([false]);
+    expect(scanSelects("const x = createElement('select');")).toEqual([false]);
+    expect(scanSelects("const x = createElement('div');")).toEqual([]);
+  });
+
   it('matches sss-select only as a whole token', () => {
     const one = (cls: string) => scanSelects(`const x = <select className=${cls} />;`);
     expect(one('"sss-select px-2"')).toEqual([true]);
@@ -119,6 +149,15 @@ describe('scan helpers (#102)', () => {
     expect(one('{`a ${b}-sss-select`}')).toEqual([false]);
     expect(one('{c ? "sss-select a" : "sss-select b"}')).toEqual([true]);
     expect(one('{c ? "sss-select a" : "b"}')).toEqual([false]);
+    // 隣接断片は別クラスと連結し得るので不可
+    expect(one('{`a ${b}sss-select`}')).toEqual([false]);
+    expect(one('{`sss-select${x}`}')).toEqual([false]);
+    expect(one('{`${x}sss-select`}')).toEqual([false]);
+    expect(one('{`${x} sss-select ${y}`}')).toEqual([true]);
+    // 仕様: 連結・論理式は判定不能として安全側(offender)に倒す
+    expect(one('{"sss-select " + x}')).toEqual([false]);
+    expect(one('{cond && "sss-select"}')).toEqual([false]);
+    expect(one('{cond ? "sss-select" : undefined}')).toEqual([false]);
     // 判定不能な動的 className は安全側(offender)
     expect(one('{cn("sss-select", x)}')).toEqual([false]);
     expect(
