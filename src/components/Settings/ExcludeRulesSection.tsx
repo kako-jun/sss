@@ -125,7 +125,9 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
           {otherScanRunning && notice !== null && (
             <p className="text-white/50">{t('excludeRescanOtherScanRunning')}</p>
           )}
-          {rescanErrorMessage && <p className="text-red-400/70">{rescanErrorMessage}</p>}
+          {rescanErrorMessage && (
+            <p className="select-text text-red-400/70">{rescanErrorMessage}</p>
+          )}
           {(notice !== null || rescanning) && (
             <button
               onClick={rescan?.rescan}
@@ -154,7 +156,7 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
                     {t('dateRuleTag')}
                   </span>
                 )}
-                <span className="text-white/55 text-sm truncate" title={pattern}>
+                <span className="select-text text-white/55 text-sm truncate" title={pattern}>
                   {pattern}
                 </span>
               </div>
@@ -195,7 +197,9 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
           {t('addButtonLabel')}
         </button>
       </div>
-      {addErrorMessage && <div className="text-red-400/80 text-sm">{addErrorMessage}</div>}
+      {addErrorMessage && (
+        <div className="select-text text-red-400/80 text-sm">{addErrorMessage}</div>
+      )}
     </div>
   );
 }

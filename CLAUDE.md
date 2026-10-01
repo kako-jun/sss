@@ -100,6 +100,23 @@
 #### 通常表示
 
 - 初回起動は全画面（`tauri.conf.json`: `fullscreen: true` / `decorations: false` / 背景 `#000000`）。F / F11 や右上のボタンでウィンドウモードへ切り替えられ、以後は前回の状態を復元する（#78）
+- **ウィンドウの最小サイズ**（#116）: `tauri.conf.json` の `minWidth: 480` / `minHeight: 360`。実測で、幅 460px 以下では英語の設定タブ（フォルダ/オプション）が横スクロールになり、420px 幅では「フォルダ」タブの「選択」ボタンが切れ、440px 以下でも設定タブが横スクロールになる。480x360 では設定の全タブ（ja/en）・確認モーダル・ようこそ/空/エラー案内・オーバーレイ・「…」メニューと除外サブメニューが崩れない（縦は設定本文がスクロールで吸収。高さ 360 未満は未確認）。値を下げる場合は e2e の「layout holds at the minimum window size」で確認する。`tauri-plugin-window-state` が保存済みの小さいサイズを復元しても、OS のウィンドウマネージャが最小サイズへ丸める想定（Windows の `WM_GETMINMAXINFO`・macOS の `contentMinSize`・GTK のサイズヒント）。Rust 側の補正は入れていない（実機確認項目）
+- **ネイティブらしい振る舞い**（#116）: ブラウザのような挙動を出さない。`index.css` の `body` は `user-select: none`（Ctrl+A で画面全体が青くハイライトされず、透明な隠しツールチップ等も選択されない）。選択が有用な箇所は `user-select: text` で許可する: `input`/`textarea`（CSS で全域）、エラーメッセージ・読み取りエラー例・除外パターン・確認モーダル本文（Tailwind `select-text`）。新しく「コピーしたくなる文言」を足す時は `select-text` を付ける（`src/test/userSelect.test.ts` が主要箇所を走査）。右クリックメニューとブラウザ系ショートカットの抑止は `src/lib/webviewGuards.ts`（`main.tsx` で登録）:
+
+  | 対象                                                                           | 本番                                                                                                            | 開発（`import.meta.env.DEV`）             |
+  | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+  | 右クリック（`contextmenu`）                                                    | `preventDefault`。ただし `input`/`textarea`/contentEditable は許可（コピー/貼り付け）                           | 抑止しない（devtools の「検証」を使える） |
+  | F5・Ctrl/Cmd+R・Ctrl+Shift+R（再読み込み）                                     | 抑止                                                                                                            | 抑止しない                                |
+  | F12・Ctrl+Shift+I/J/C（devtools）                                              | 抑止（そもそも release ビルドは `devtools` feature 無し）                                                       | 抑止しない                                |
+  | Ctrl+P（印刷）・Ctrl+S（保存）・Ctrl+U（ソース表示）・Ctrl+O（ファイルを開く） | 抑止                                                                                                            | 抑止しない                                |
+  | Ctrl+F・Ctrl+G・F3（検索）・F7（キャレットブラウズ）                           | 抑止                                                                                                            | 抑止しない                                |
+  | Ctrl + `+`/`-`/`=`/`0`（テンキー含む）・Ctrl+ホイール・ピンチ（ズーム）        | 抑止（`wheel` は `passive:false`）。Tauri 既定の `zoomHotkeysEnabled: false` と二重                             | 抑止しない                                |
+  | Alt+←/→（戻る/進む）                                                           | 抑止                                                                                                            | 抑止しない                                |
+  | Ctrl+A・Ctrl+C/V/X/Z                                                           | 触らない（入力欄の編集用。全選択のハイライトは CSS で防ぐ）                                                     | 触らない                                  |
+  | F / F11 / Space / ? / 矢印 / Esc、確認モーダルの Esc/Tab/Enter/Space           | 触らない（修飾キー無し、または `preventDefault` のみで `stopPropagation` しないため、既存ハンドラと競合しない） | 触らない                                  |
+
+  e2e だけは `VITE_FORCE_WEBVIEW_GUARDS=true`（`e2e/run.js` が vite に渡す）で dev サーバーでも本番と同じ抑止を有効にして検証する。実機（Windows の WebView2）での右クリック/F5/ズームは未確認（PR・Issue の「実機確認項目」）
+
 - 画像/動画を中央に表示（object-fit: contain）
 - 背景: 黒
 - UI非表示（マウスを動かすと表示）
@@ -596,6 +613,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 - `tauri.ts`: Tauriコマンドのラッパー関数
 - `startup.ts`: 起動シーケンス（設定読込→`restore_playlist`→バックグラウンドの`rescan_last_directory`）。どちらも引数なし（#93）
 - `keyboardShortcuts.ts`・`photoGestures.ts`: ショートカット判定・写真上のクリック/ホイール判定（純関数）
+- `webviewGuards.ts`: 本番での WebView 既定の右クリックメニュー・ブラウザ系ショートカットの抑止（#116）
 - `displayCountChart.ts`: 統計グラフの目盛り・範囲の純関数
 - `i18n/`: 辞書（ja/en）・`t()`・ロケール状態・バックエンドエラーコードの解決
 

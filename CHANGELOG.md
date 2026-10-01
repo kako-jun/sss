@@ -9,6 +9,8 @@ Dates use `YYYY-MM-DD`.
 
 ### Changed
 
+- ウィンドウの最小サイズを 480x360 に設定（`tauri.conf.json` の `minWidth`/`minHeight`）。実測で 460px 以下では英語の設定タブが横スクロールになり、420px 幅では設定「フォルダ」タブの「選択」ボタンが切れていたため。480x360 で設定の全タブ・確認モーダル・案内画面・オーバーレイ・「…」メニューが崩れないことを実描画で確認。実ブラウザ e2e に最小サイズでの崩れ検出シナリオ（ja/en）を追加 (#116)
+- テキスト選択と WebView 既定動作の抑止。`body` を `user-select: none` にし、Ctrl+A で画面全体が青くハイライトされたり透明な隠しツールチップが選択されたりしないようにした（入力欄・エラー詳細・除外パターン・確認モーダル本文は選択/コピー可）。本番ビルドでは右クリックの既定メニュー（入力欄は除く）、F5/Ctrl+R・F12/Ctrl+Shift+I・Ctrl+P/S/U/F/G/O・ズーム（Ctrl+±/0/ホイール）・Alt+←/→ を抑止する（開発時は何も抑止せず devtools を使える）。自前ショートカットと確認モーダルのキーには影響しない。決定表は CLAUDE.md。Windows 実機での右クリック/F5/ズームは未確認 (#116)
 - 開発者向け: pre-commit の `lint-staged` を `--no-stash` で実行するようにした。既定の退避 stash は全 worktree で共有されるため、並行 worktree のコミットや他セッションの `git stash pop` と衝突して worktree が壊れる事故があった。並行コミットの検証スクリプト `scripts/verify-concurrent-precommit.sh` を追加し、CLAUDE.md に `--no-stash` の代償と worktree 運用の指針を追記 (#126)
 - ようこそ画面の「? ショートカット一覧を表示」ヒントをボタンにし、クリック（Enter/Space）でもショートカット一覧を開けるようにした。hover/キーボードフォーカスで少し明るくなる (#100)
 

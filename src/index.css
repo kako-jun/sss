@@ -37,6 +37,20 @@ body {
   overflow: hidden;
   background-color: #000;
   color-scheme: dark;
+  /* #116: ネイティブアプリとして振る舞う。Ctrl+A で画面全体が青くハイライトされたり、
+     透明な隠しツールチップ等の文言が選択されたりしないよう、既定は選択不可にする。
+     選択が有用な箇所（入力欄・エラー詳細・確認モーダル本文など）は下の入力欄ルールか
+     Tailwind の `select-text` で個別に許可する（src/test/userSelect.test.ts が担保）。 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* #116: 入力欄は常に選択/コピー/貼り付けできる（一部の WebKit は user-select:none の
+   継承で input への入力自体が効かなくなるため、明示的に text へ戻す）。 */
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 #root {

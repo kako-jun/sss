@@ -76,7 +76,7 @@ export function ShareDirectorySection() {
         </button>
       </div>
       {error && (
-        <p role="alert" className="text-xs text-red-300/80">
+        <p role="alert" className="select-text text-xs text-red-300/80">
           {error}
         </p>
       )}

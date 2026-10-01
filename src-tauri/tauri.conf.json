@@ -30,6 +30,8 @@
         "title": "sss - Smart Slide Show",
         "width": 1920,
         "height": 1080,
+        "minWidth": 480,
+        "minHeight": 360,
         "decorations": false,
         "alwaysOnTop": false,
         "visible": true,

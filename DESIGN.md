@@ -647,6 +647,13 @@ uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
 - Only show information that's actually present — no "No date" / "No location"
   placeholder boxes for absent EXIF data (#66)
 - Set `pointer-events: none` on idle UI (`opacity: 0` when idle)
+- Keep the page non-selectable by default (`body { user-select: none }`, #116) so
+  Ctrl+A never paints the whole screen blue; opt back in with `user-select: text`
+  (Tailwind `select-text`) only where copying is useful — inputs/textareas (global
+  CSS rule), error messages, file paths, and the confirm modal body
+- Keep the window usable down to the minimum size (`minWidth` 480 / `minHeight` 360 in
+  `tauri.conf.json`, #116): no clipped buttons, no horizontal scroll (the settings
+  tab row is the one designed exception), no overlap
 
 ### Don't
 
@@ -665,6 +672,9 @@ uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
 currentColor`, rendering a visibly brighter border than intended). Adding any
   further non-multiple-of-5 value here requires the same `tailwind.config.js`
   addition, verified against the built `dist/assets/*.css`
+- Show the WebView's browser chrome: right-click context menu, reload/devtools/print/
+  find/zoom shortcuts are suppressed in production (`src/lib/webviewGuards.ts`, #116;
+  decision table in CLAUDE.md). Right-click stays enabled inside text inputs
 - Reach for `rounded` (4px) on anything but a tiny inline badge — buttons/cards
   are `rounded-lg`, floating surfaces are `rounded-2xl`/`rounded-full` (#66)
 
