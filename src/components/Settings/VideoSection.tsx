@@ -11,6 +11,8 @@ import {
   parseVideoMaxDuration,
 } from '../../constants';
 import { useT } from '../../lib/i18n';
+import { useRollbackSave } from '../../hooks/useRollbackSave';
+import { InlineError } from './SectionErrors';
 
 interface VideoSectionProps {
   /** 音声ON/OFFが変わった時に、再生中のスライドショーへ即時反映するための通知（#68）。 */
@@ -35,37 +37,70 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
   const [audioEnabled, setAudioEnabled] = useState<boolean>(DEFAULT_VIDEO_AUDIO_ENABLED);
   const [maxDurationSec, setMaxDurationSec] = useState<number>(DEFAULT_VIDEO_MAX_DURATION_SEC);
 
+  // #115: 取得失敗（既定値表示）と保存失敗（巻き戻し）を利用者に伝える。通知は1か所にまとめる。
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const onAudioChangeRef = useRef(onAudioChange);
+  useEffect(() => {
+    onAudioChangeRef.current = onAudioChange;
+  });
+  const onMaxDurationChangeRef = useRef(onMaxDurationChange);
+  useEffect(() => {
+    onMaxDurationChangeRef.current = onMaxDurationChange;
+  });
+  const audioSave = useRollbackSave<boolean>((v) => {
+    setAudioEnabled(v);
+    onAudioChangeRef.current?.(v);
+  }, DEFAULT_VIDEO_AUDIO_ENABLED);
+  const maxDurationSave = useRollbackSave<number>((v) => {
+    setMaxDurationSec(v);
+    onMaxDurationChangeRef.current?.(v);
+  }, DEFAULT_VIDEO_MAX_DURATION_SEC);
+  const { markLoaded: markAudioLoaded } = audioSave;
+  const { markLoaded: markMaxDurationLoaded } = maxDurationSave;
+
   // 読込が完了する前にユーザーが操作した場合、遅れて届いた保存値で上書きしない。
   const audioTouchedRef = useRef(false);
   const maxDurationTouchedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
-    getSetting(SETTING_VIDEO_AUDIO_ENABLED)
-      .then((value) => {
-        if (!cancelled && !audioTouchedRef.current) setAudioEnabled(parseVideoAudioEnabled(value));
-      })
-      .catch((err) => console.error('Failed to load video audio setting:', err));
-    getSetting(SETTING_VIDEO_MAX_DURATION_SEC)
-      .then((value) => {
-        if (!cancelled && !maxDurationTouchedRef.current)
-          setMaxDurationSec(parseVideoMaxDuration(value));
-      })
-      .catch((err) => console.error('Failed to load video max duration setting:', err));
+    let failed = false;
+    const onLoadError = (what: string) => (err: unknown) => {
+      console.error(`Failed to load ${what}:`, err);
+      failed = true;
+      if (!cancelled) setLoadFailed(true);
+    };
+    Promise.all([
+      getSetting(SETTING_VIDEO_AUDIO_ENABLED)
+        .then((value) => {
+          if (cancelled) return;
+          markAudioLoaded(parseVideoAudioEnabled(value));
+          if (!audioTouchedRef.current) setAudioEnabled(parseVideoAudioEnabled(value));
+        })
+        .catch(onLoadError('video audio setting')),
+      getSetting(SETTING_VIDEO_MAX_DURATION_SEC)
+        .then((value) => {
+          if (cancelled) return;
+          markMaxDurationLoaded(parseVideoMaxDuration(value));
+          if (!maxDurationTouchedRef.current) setMaxDurationSec(parseVideoMaxDuration(value));
+        })
+        .catch(onLoadError('video max duration setting')),
+    ]).then(() => {
+      if (!cancelled && !failed) setLoadFailed(false);
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt, markAudioLoaded, markMaxDurationLoaded]);
 
   const handleAudioChange = async (checked: boolean) => {
     audioTouchedRef.current = true;
     setAudioEnabled(checked);
     onAudioChange?.(checked);
-    try {
-      await saveSetting(SETTING_VIDEO_AUDIO_ENABLED, checked ? 'true' : 'false');
-    } catch (err) {
-      console.error('Failed to save video audio setting:', err);
-    }
+    await audioSave.save(checked, (v) =>
+      saveSetting(SETTING_VIDEO_AUDIO_ENABLED, v ? 'true' : 'false'),
+    );
   };
 
   const handleMaxDurationChange = async (raw: string) => {
@@ -73,11 +108,9 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
     const sec = normalizeVideoMaxDuration(parseInt(raw, 10));
     setMaxDurationSec(sec);
     onMaxDurationChange?.(sec);
-    try {
-      await saveSetting(SETTING_VIDEO_MAX_DURATION_SEC, sec.toString());
-    } catch (err) {
-      console.error('Failed to save video max duration setting:', err);
-    }
+    await maxDurationSave.save(sec, (v) =>
+      saveSetting(SETTING_VIDEO_MAX_DURATION_SEC, v.toString()),
+    );
   };
 
   const optionLabel = (sec: number): string => {
@@ -130,6 +163,22 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
           {t('videoMaxDurationDescription')}
         </p>
       </div>
+
+      <InlineError
+        message={
+          audioSave.saveFailed || maxDurationSave.saveFailed
+            ? t('settingSaveFailed')
+            : loadFailed
+              ? t('settingLoadFailed')
+              : null
+        }
+        onRetry={
+          !audioSave.saveFailed && !maxDurationSave.saveFailed && loadFailed
+            ? () => setAttempt((n) => n + 1)
+            : undefined
+        }
+        testId="video-error"
+      />
     </div>
   );
 }

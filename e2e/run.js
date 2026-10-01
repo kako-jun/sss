@@ -2372,6 +2372,184 @@ const scenarios = [
       return { pass, detail: details.join(' ') };
     },
   },
+  {
+    // #115: 取得失敗（get_ignore_patterns/get_picked_images/get_recent_images/get_display_stats を
+    // reject）は、「〜はありません」の空状態でなく「読み込みに失敗しました」のエラー状態と再試行ボタンになる。
+    name: 'load failures show an error state with retry, not the empty message (#115)',
+    hash: 'slides?fail=get_ignore_patterns,get_picked_images,get_recent_images,get_display_stats',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await openSettingsModal(page);
+      const tabs = [
+        { id: 'exclude', empty: '除外ルールはありません' },
+        { id: 'pick', empty: 'ピックした写真はありません' },
+        { id: 'history', empty: '表示履歴はありません' },
+        { id: 'stats', empty: 'データがありません' },
+      ];
+      const details = [];
+      let pass = true;
+      for (const tab of tabs) {
+        await page.click(`#tab-${tab.id}`);
+        await page.waitForTimeout(300);
+        const errorShown = await isVisible(page, '読み込みに失敗しました');
+        const retryShown = await page.evaluate(() =>
+          [...document.querySelectorAll('[role=tabpanel] [role=alert] button')].some(
+            (b) => b.textContent.includes('再試行') && getComputedStyle(b).display !== 'none',
+          ),
+        );
+        const emptyShown = await isVisible(page, tab.empty);
+        const ok = errorShown && retryShown && !emptyShown;
+        if (!ok) pass = false;
+        details.push(`${tab.id}:error=${errorShown} retry=${retryShown} emptyShown=${emptyShown}`);
+      }
+      return { pass, detail: details.join(' ') };
+    },
+  },
+  {
+    // #115: 失敗していた取得は、障害が直ってから再試行ボタンを押すと回復し、本当に空なら空状態の文言になる。
+    name: 'retry recovers from a load failure and then shows the genuine empty state (#115)',
+    hash: 'slides?fail=get_picked_images',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await openSettingsModal(page);
+      await page.click('#tab-pick');
+      await page.waitForTimeout(300);
+      const errorShown = await isVisible(page, '読み込みに失敗しました');
+      // 再試行の前にバックエンド側の障害が直ったことにする
+      await page.evaluate(() => window.__e2eHealFailures());
+      // dev の StrictMode は mount 時の取得を2回呼ぶので、絶対数でなく再試行ボタンによる増分を見る
+      const callsBefore = await countCalls(page, 'get_picked_images');
+      await page.click('[role=tabpanel] [role=alert] button');
+      await page.waitForTimeout(300);
+      const errorGone = !(await isVisible(page, '読み込みに失敗しました'));
+      const emptyShown = await isVisible(page, 'ピックした写真はありません');
+      const calls = (await countCalls(page, 'get_picked_images')) - callsBefore;
+      const pass = errorShown && errorGone && emptyShown && calls === 1;
+      return {
+        pass,
+        detail: `errorShown=${errorShown} errorGone=${errorGone} emptyShown=${emptyShown} retry calls=${calls}`,
+      };
+    },
+  },
+  {
+    // #115: 保存失敗（save_setting を reject）は、チェックボックス・select・間隔・言語を元の値へ戻し、
+    // 失敗を通知する。同じ失敗を重ねても通知は1つ（積み上がらない）。
+    name: 'save failures roll the control back and show one notice (#115)',
+    hash: 'slides?fail=save_setting',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await openSettingsModal(page);
+      await page.click('#tab-options');
+      await page.waitForTimeout(400);
+      const exif = page.locator('[role=tabpanel] input[type=checkbox]').first();
+      const exifBefore = await exif.isChecked();
+      await exif.click();
+      await exif.click();
+      await exif.click();
+      await page.waitForTimeout(300);
+      const exifAfter = await exif.isChecked();
+      const exifNotices = await page.locator('[data-testid=exif-error]').count();
+
+      const select = page.locator('select').first();
+      const selectBefore = await select.inputValue();
+      await select.selectOption('30');
+      await page.waitForTimeout(300);
+      const selectAfter = await select.inputValue();
+
+      const number = page.locator('input[type=number]');
+      const numberBefore = await number.inputValue();
+      await number.fill('30');
+      await number.blur();
+      await page.waitForTimeout(300);
+      const numberAfter = await number.inputValue();
+
+      await page.click('button:has-text("English")');
+      await page.waitForTimeout(300);
+      const lang = await page.evaluate(() => document.documentElement.lang);
+      const noticeText = await page.evaluate(() =>
+        [...document.querySelectorAll('[role=alert]')].map((e) => e.textContent).join(' | '),
+      );
+      const noticeVisible = await isVisible(page, '設定を保存できませんでした。元の値に戻しました');
+      const pass =
+        exifAfter === exifBefore &&
+        exifNotices === 1 &&
+        selectAfter === selectBefore &&
+        numberAfter === numberBefore &&
+        lang === 'ja' &&
+        noticeVisible;
+      return {
+        pass,
+        detail: `exif ${exifBefore}->${exifAfter} notices=${exifNotices} select ${selectBefore}->${selectAfter} number ${numberBefore}->${numberAfter} htmlLang=${lang} noticeVisible=${noticeVisible} alerts=${noticeText}`,
+      };
+    },
+  },
+  {
+    // #115: 除外ルールの削除失敗は、ルールを一覧に残したまま失敗を通知する（成功に見せない）。
+    name: 'remove failure keeps the exclude rule listed and shows a notice (#115)',
+    hash: 'slides?fail=remove_ignore_pattern',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await openSettingsModal(page);
+      await page.click('#tab-exclude');
+      await page.waitForTimeout(300);
+      await page.fill('input[type=text]', '*.keepme');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(300);
+      await page.click('button[title="解除"]');
+      await page.waitForTimeout(300);
+      const noticeShown = await isVisible(page, '除外ルールを削除できませんでした');
+      const stillListed = await isVisible(page, '*.keepme');
+      const pass = noticeShown && stillListed;
+      return { pass, detail: `noticeShown=${noticeShown} stillListed=${stillListed}` };
+    },
+  },
+  {
+    // #115: ピックの失敗は原因（空き容量不足）を伝える。「エラー: コピー失敗」だけではない。
+    name: 'pick failure tells the cause (disk full) (#115)',
+    hash: 'slides?fail=pick_image:pickDiskFull',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await wakeFromIdle(page);
+      await page.click('button[title="メニュー"]');
+      await page.click('button[title="ピック（コピー）"]');
+      await page.waitForTimeout(300);
+      const causeShown = await isVisible(page, 'ピック先の空き容量が足りないためコピーできません');
+      const genericShown = await isVisible(page, 'エラー: コピー失敗');
+      const pass = causeShown && !genericShown;
+      return { pass, detail: `causeShown=${causeShown} genericShown=${genericShown}` };
+    },
+  },
+  {
+    // #115: 英語ロケールでも失敗の文言が英語で出る（取得失敗・ピック失敗の原因）。
+    name: 'English locale: load failure and pick failure causes render in English (#115)',
+    hash: 'slides?fail=get_picked_images,pick_image:pickPermissionDenied',
+    locale: 'en-US',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await wakeFromIdle(page);
+      await page.click('button[title="Menu"]');
+      await page.click('button[title="Pick (copy)"]');
+      await page.waitForTimeout(300);
+      const causeShown = await isVisible(
+        page,
+        "Couldn't copy: no permission to write to the pick destination",
+      );
+      await openSettingsModal(page);
+      await page.click('#tab-pick');
+      await page.waitForTimeout(300);
+      const loadErrorShown = await isVisible(page, "Couldn't load this");
+      const retryShown = await page.evaluate(() =>
+        [...document.querySelectorAll('[role=alert] button')].some((b) =>
+          b.textContent.includes('Retry'),
+        ),
+      );
+      const pass = causeShown && loadErrorShown && retryShown;
+      return {
+        pass,
+        detail: `causeShown=${causeShown} loadErrorShown=${loadErrorShown} retryShown=${retryShown}`,
+      };
+    },
+  },
 ];
 
 /**

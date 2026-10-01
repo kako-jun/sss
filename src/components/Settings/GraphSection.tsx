@@ -8,6 +8,7 @@ import { useT, useLocale } from '../../lib/i18n';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { EVEN_SPREAD_MAX, percentOf, spreadOf } from '../../lib/displayCountChart';
 import { CHART_HEIGHT, buildDisplayCountOptions } from './displayCountPlot';
+import { LoadError, InlineError } from './SectionErrors';
 
 export function GraphSection() {
   const t = useT();
@@ -18,15 +19,21 @@ export function GraphSection() {
   const [displayStats, setDisplayStats] = useState<DisplayStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isResetting, setIsResetting] = useState(false);
+  // #115: 取得失敗は「データがありません」の空状態と区別してエラー表示＋再試行にする。
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
 
   const loadStats = useCallback(async () => {
     setIsLoading(true);
+    setLoadFailed(false);
     try {
       setDisplayStats(await getDisplayStats());
     } catch (err) {
       console.error('Failed to load display stats:', err);
+      setDisplayStats(null);
+      setLoadFailed(true);
     } finally {
       setIsLoading(false);
     }
@@ -44,11 +51,17 @@ export function GraphSection() {
     if (!ok) return;
 
     setIsResetting(true);
+    setResetError(null);
     try {
       await resetAllDisplayCounts();
-      await loadStats();
     } catch (err) {
       console.error('Failed to reset display counts:', err);
+      setResetError(t('resetDisplayCountsFailed'));
+      setIsResetting(false);
+      return;
+    }
+    try {
+      await loadStats();
     } finally {
       setIsResetting(false);
     }
@@ -93,6 +106,10 @@ export function GraphSection() {
         {t('loadingLabel')}
       </div>
     );
+  }
+
+  if (loadFailed) {
+    return <LoadError onRetry={loadStats} testId="stats-load-error" />;
   }
 
   if (!displayStats || displayStats.files === 0) {
@@ -212,6 +229,7 @@ export function GraphSection() {
       >
         {isResetting ? t('resettingLabel') : t('resetDisplayCountsButton')}
       </button>
+      <InlineError message={resetError} testId="stats-reset-error" />
     </div>
   );
 }

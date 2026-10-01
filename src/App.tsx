@@ -441,6 +441,8 @@ function App() {
           await invoke('exit_app');
         } catch (err) {
           console.error('Failed to exit app:', err);
+          // #115: Esc を押しても何も起きない無反応にせず、上部の通知（#103）で失敗を伝える。
+          setWindowModeError((prev) => ({ text: t('exitFailed'), seq: (prev?.seq ?? 0) + 1 }));
         }
         return;
       }
@@ -519,7 +521,7 @@ function App() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, []);
+  }, [t]);
 
   // #66レビュー3巡目should: 設定モーダルを開いた操作がマウスクリックだったか
   // どうかをuseFocusTrapへ伝える（詳細はuseFocusTrap.tsのJSDoc参照）。

@@ -15,6 +15,7 @@ export const ja = {
   windowModeLabel: 'ウィンドウモード',
   fullscreenLabel: 'フルスクリーン',
   windowModeToggleFailed: 'ウィンドウモードを切り替えられませんでした',
+  exitFailed: 'アプリを終了できませんでした',
   genericErrorTitle: 'エラーが発生しました',
   closeTooltip: '閉じる',
   cancelButton: 'キャンセル',
@@ -79,6 +80,10 @@ export const ja = {
   lastDisplayedTooltip: '最終表示: {when}',
   pickCopyDone: 'コピー完了: {path}',
   pickCopyFailed: 'エラー: コピー失敗',
+  errorPickPermissionDenied: 'ピック先に書き込む権限がないためコピーできません',
+  errorPickDiskFull: 'ピック先の空き容量が足りないためコピーできません',
+  errorPickDestinationMissing: 'ピック先のフォルダが見つからないためコピーできません',
+  errorPickSourceMissing: 'コピー元の写真が見つからないためコピーできません',
   errorPathNotManaged: 'このファイルはスライドショーの管理外のためコピーできません',
   errorShareDirectoryInvalid:
     'このフォルダはピック先に指定できません（ルート・ホームフォルダ・相対パスなどは不可）',
@@ -102,6 +107,17 @@ export const ja = {
 
   // === 設定画面: 共通 ===
   loadingLabel: '読み込み中...',
+  // #115: 失敗が「空」や成功に見えないよう、取得失敗・保存失敗・操作失敗を明示する
+  loadFailed: '読み込みに失敗しました',
+  retryButton: '再試行',
+  settingLoadFailed: '設定を読み込めませんでした。表示は既定値です',
+  settingSaveFailed: '設定を保存できませんでした。元の値に戻しました',
+  removeRuleFailed: '除外ルールを削除できませんでした',
+  deletePickedFailed: 'ピックした写真を削除できませんでした',
+  resetDisplayCountsFailed: '表示回数をリセットできませんでした',
+  openGitHubFailed: 'GitHub を開けませんでした',
+  versionUnavailable: '取得できません',
+  errorLastDirectoryLoadFailed: '前回のフォルダを読み込めませんでした',
   selectButtonLabel: '選択',
   secondsUnit: '{value}秒',
   // #82レビューnit: IntervalSectionの「秒」単独表示は`secondsUnit`に空文字を

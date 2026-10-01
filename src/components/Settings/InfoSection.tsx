@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { resetAllData } from '../../lib/tauri';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { useT, resolveResetAllDataErrorMessage } from '../../lib/i18n';
+import { InlineError } from './SectionErrors';
 
 // #82レビューshould1: 確定済みの文言でなく状態種別＋生のエラーコードを保持し、
 // レンダーのたびに現在のロケールへ変換する（言語切替中の新旧混在防止）。
@@ -17,12 +18,16 @@ export function InfoSection() {
   // #66 問題7: バージョンを「1.0.0」でハードコードしていたのを、Tauriの
   // `getVersion()`（`tauri.conf.json`のバージョンを返す）から取得するようにする。
   const [version, setVersion] = useState<string>('');
+  // #115: 取得に失敗したら「…」のまま黙らず、取得できなかったと示す。
+  const [versionFailed, setVersionFailed] = useState(false);
+  const [openGitHubFailed, setOpenGitHubFailed] = useState(false);
 
   useEffect(() => {
     getVersion()
       .then(setVersion)
       .catch((err) => {
         console.error('Failed to get app version:', err);
+        setVersionFailed(true);
       });
   }, []);
   const resetMessageText =
@@ -35,8 +40,10 @@ export function InfoSection() {
   const handleOpenGitHub = async () => {
     try {
       await openUrl('https://github.com/kako-jun/sss');
+      setOpenGitHubFailed(false);
     } catch (err) {
       console.error('Failed to open GitHub:', err);
+      setOpenGitHubFailed(true);
     }
   };
 
@@ -74,7 +81,11 @@ export function InfoSection() {
       <div className="space-y-3">
         <h3 className="text-base font-medium text-white/70">Smart Slide Show (sss)</h3>
         <div className="text-white/50 text-sm space-y-1">
-          <div>{t('versionLabel', { version: version || '…' })}</div>
+          <div>
+            {t('versionLabel', {
+              version: version || (versionFailed ? t('versionUnavailable') : '…'),
+            })}
+          </div>
           <div>{t('appDescription')}</div>
         </div>
       </div>
@@ -92,6 +103,10 @@ export function InfoSection() {
           <ExternalLink size={16} />
           {t('viewOnGitHub')}
         </button>
+        <InlineError
+          message={openGitHubFailed ? t('openGitHubFailed') : null}
+          testId="open-github-error"
+        />
       </div>
 
       {/* 設定の初期化。#66視覚刷新: 罫線区切りをやめ、カード背景で危険な操作の

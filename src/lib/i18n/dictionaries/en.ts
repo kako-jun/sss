@@ -15,6 +15,7 @@ export const en = {
   windowModeLabel: 'Windowed',
   fullscreenLabel: 'Fullscreen',
   windowModeToggleFailed: "Couldn't switch window mode",
+  exitFailed: "Couldn't exit the app",
   genericErrorTitle: 'Something went wrong',
   closeTooltip: 'Close',
   cancelButton: 'Cancel',
@@ -79,6 +80,10 @@ export const en = {
   lastDisplayedTooltip: 'Last shown: {when}',
   pickCopyDone: 'Copied to {path}',
   pickCopyFailed: "Couldn't copy the photo",
+  errorPickPermissionDenied: "Couldn't copy: no permission to write to the pick destination",
+  errorPickDiskFull: "Couldn't copy: the pick destination is out of space",
+  errorPickDestinationMissing: "Couldn't copy: the pick destination folder wasn't found",
+  errorPickSourceMissing: "Couldn't copy: the original photo wasn't found",
   errorPathNotManaged: "This file isn't managed by the slideshow, so it can't be copied",
   errorShareDirectoryInvalid:
     "This folder can't be used as the pick destination (not allowed: root, home folder, relative paths, etc.)",
@@ -104,6 +109,17 @@ export const en = {
 
   // === Settings: shared ===
   loadingLabel: 'Loading...',
+  // #115: failures must not look like "empty" or success, so loads, saves and actions say so
+  loadFailed: "Couldn't load this",
+  retryButton: 'Retry',
+  settingLoadFailed: "Couldn't load the setting. Showing the default.",
+  settingSaveFailed: "Couldn't save the setting. Reverted to the previous value.",
+  removeRuleFailed: "Couldn't remove the exclude rule",
+  deletePickedFailed: "Couldn't delete the picked photo",
+  resetDisplayCountsFailed: "Couldn't reset the display counts",
+  openGitHubFailed: "Couldn't open GitHub",
+  versionUnavailable: 'unavailable',
+  errorLastDirectoryLoadFailed: "Couldn't load the last folder",
   selectButtonLabel: 'Select',
   secondsUnit: '{value}s',
   secondsUnitOnly: 's',

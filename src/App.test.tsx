@@ -589,6 +589,22 @@ describe('App Escape key (#66 問題1)', () => {
       expect(invoke).toHaveBeenCalledWith('exit_app');
     });
   });
+
+  it('tells the user when exit_app fails instead of doing nothing (#115)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getLastDirectoryPath.mockResolvedValue(null);
+    invoke.mockRejectedValueOnce(new Error('exit denied'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(await screen.findByText('アプリを終了できませんでした')).toBeTruthy();
+    spy.mockRestore();
+  });
 });
 
 // #66 問題4: Space=一時停止/再開、F/F11=フルスクリーン切替、?=ショートカット一覧。

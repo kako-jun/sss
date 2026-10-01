@@ -7,6 +7,8 @@ import {
   clampDisplayInterval,
 } from '../../constants';
 import { useT } from '../../lib/i18n';
+import { useRollbackSave } from '../../hooks/useRollbackSave';
+import { InlineError } from './SectionErrors';
 
 interface IntervalSectionProps {
   onIntervalChange?: (interval: number) => void;
@@ -23,21 +25,53 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
   // 確定（onBlur/Enter）した時だけ displayInterval に反映する。
   const [numberText, setNumberText] = useState<string>(String(DEFAULT_DISPLAY_INTERVAL / 1000));
 
+  // #115: 取得失敗（既定値表示）と保存失敗（巻き戻し）を利用者に伝える。
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const onIntervalChangeRef = useRef(onIntervalChange);
+  useEffect(() => {
+    onIntervalChangeRef.current = onIntervalChange;
+  });
+  const {
+    saveFailed,
+    save: saveWithRollback,
+    markLoaded,
+  } = useRollbackSave<number>((ms) => {
+    // 保存できなかった値は画面にも再生中のスライドショーにも残さない（DBの値と揃える）。
+    setDisplayInterval(ms);
+    setNumberText(String(ms / 1000));
+    onIntervalChangeRef.current?.(ms);
+  }, DEFAULT_DISPLAY_INTERVAL);
+  const persist = useCallback(
+    (ms: number) => saveWithRollback(ms, (v) => saveSetting('display_interval', v.toString())),
+    [saveWithRollback],
+  );
+
   const saveTimeoutRef = useRef<number | undefined>(undefined);
   // #65レビューS5: debounce中の保存先（ms）を覚えておき、unmount時に破棄せず
   // flushできるようにする。
   const pendingMsRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
+    let cancelled = false;
     getSetting('display_interval')
       .then((value) => {
+        if (cancelled) return;
+        setLoadFailed(false);
         if (!value) return;
         const ms = clampDisplayInterval(parseInt(value, 10));
+        markLoaded(ms);
         setDisplayInterval(ms);
         setNumberText(String(ms / 1000));
       })
-      .catch(console.error);
-  }, []);
+      .catch((err) => {
+        console.error('Failed to load display interval:', err);
+        if (!cancelled) setLoadFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt, markLoaded]);
 
   useEffect(() => {
     return () => {
@@ -49,38 +83,39 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
         window.clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = undefined;
         if (pendingMsRef.current !== undefined) {
-          saveSetting('display_interval', pendingMsRef.current.toString()).catch((err) => {
-            console.error('Failed to flush pending display interval on unmount:', err);
-          });
+          // 失敗時の巻き戻し（親のスライドショーの間隔を保存済みの値へ戻す）は persist が行う。
+          void persist(pendingMsRef.current);
         }
       }
     };
-  }, []);
+  }, [persist]);
 
-  const persistDebounced = useCallback((ms: number) => {
-    if (saveTimeoutRef.current !== undefined) {
-      window.clearTimeout(saveTimeoutRef.current);
-    }
-    pendingMsRef.current = ms;
-    saveTimeoutRef.current = window.setTimeout(() => {
-      saveTimeoutRef.current = undefined;
+  const persistDebounced = useCallback(
+    (ms: number) => {
+      if (saveTimeoutRef.current !== undefined) {
+        window.clearTimeout(saveTimeoutRef.current);
+      }
+      pendingMsRef.current = ms;
+      saveTimeoutRef.current = window.setTimeout(() => {
+        saveTimeoutRef.current = undefined;
+        pendingMsRef.current = undefined;
+        void persist(ms);
+      }, SAVE_DEBOUNCE_MS);
+    },
+    [persist],
+  );
+
+  const persistImmediately = useCallback(
+    (ms: number) => {
+      if (saveTimeoutRef.current !== undefined) {
+        window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = undefined;
+      }
       pendingMsRef.current = undefined;
-      saveSetting('display_interval', ms.toString()).catch((err) => {
-        console.error('Failed to save display interval:', err);
-      });
-    }, SAVE_DEBOUNCE_MS);
-  }, []);
-
-  const persistImmediately = useCallback((ms: number) => {
-    if (saveTimeoutRef.current !== undefined) {
-      window.clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = undefined;
-    }
-    pendingMsRef.current = undefined;
-    saveSetting('display_interval', ms.toString()).catch((err) => {
-      console.error('Failed to save display interval:', err);
-    });
-  }, []);
+      void persist(ms);
+    },
+    [persist],
+  );
 
   // スライダー: ドラッグ中は毎ステップDB書込せず、値の反映と再生中スライドショーへの
   // 通知だけ即時に行い、DB保存はdebounceする（#65 問題7）。
@@ -145,6 +180,11 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
           <span className="text-white/50 text-sm">{t('secondsUnitOnly')}</span>
         </div>
       </div>
+      <InlineError
+        message={saveFailed ? t('settingSaveFailed') : loadFailed ? t('settingLoadFailed') : null}
+        onRetry={!saveFailed && loadFailed ? () => setAttempt((n) => n + 1) : undefined}
+        testId="interval-error"
+      />
     </div>
   );
 }

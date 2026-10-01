@@ -30,6 +30,25 @@ pub fn numbered_file_name(file_name: &OsStr, n: u32) -> OsString {
     name
 }
 
+/// ピックの IO エラーを、フロント辞書が原因別の文言へ変換するエラーコードに分類する（#115）。
+///
+/// `pickPermissionDenied`（権限なし）/ `pickDiskFull`（空き容量なし）/
+/// `pickDestinationMissing`（ピック先が見つからない）/ `pickCopyFailed`（その他）。
+/// 詳細なエラー内容は利用者に不要なので標準エラーにだけ残す。
+pub fn pick_io_error_code(e: &io::Error) -> &'static str {
+    eprintln!("pick_image: io error: {e}");
+    match e.kind() {
+        io::ErrorKind::PermissionDenied => "pickPermissionDenied",
+        io::ErrorKind::StorageFull => "pickDiskFull",
+        io::ErrorKind::NotFound => "pickDestinationMissing",
+        _ => match e.raw_os_error() {
+            // ENOSPC（Unix）/ ERROR_DISK_FULL・ERROR_HANDLE_DISK_FULL（Windows）
+            Some(28) | Some(112) | Some(39) => "pickDiskFull",
+            _ => "pickCopyFailed",
+        },
+    }
+}
+
 /// `source` を `dest_dir` にコピーし、実際に作られたパスを返す。
 ///
 /// 同名ファイルが既にある場合は `name_1.ext`, `name_2.ext` ... と連番を付ける。以前は
@@ -52,7 +71,7 @@ pub fn copy_with_unique_name(source: &Path, dest_dir: &Path) -> Result<PathBuf, 
         match OpenOptions::new().write(true).create_new(true).open(&dest) {
             Ok(reserved) => drop(reserved),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(format!("Failed to copy file: {e}")),
+            Err(e) => return Err(pick_io_error_code(&e).to_string()),
         }
         return match fs::copy(source, &dest) {
             Ok(_) => {
@@ -61,7 +80,12 @@ pub fn copy_with_unique_name(source: &Path, dest_dir: &Path) -> Result<PathBuf, 
             }
             Err(e) => {
                 let _ = fs::remove_file(&dest);
-                Err(format!("Failed to copy file: {e}"))
+                // 宛先は予約済みなので、ここでの NotFound は「元ファイルが消えた」を意味する。
+                if e.kind() == io::ErrorKind::NotFound {
+                    Err("imageFileNotFound".to_string())
+                } else {
+                    Err(pick_io_error_code(&e).to_string())
+                }
             }
         };
     }
@@ -219,6 +243,31 @@ pub fn resolve_open_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pick_io_error_code_classifies_causes() {
+        use std::io::{Error, ErrorKind};
+        assert_eq!(
+            pick_io_error_code(&Error::from(ErrorKind::PermissionDenied)),
+            "pickPermissionDenied"
+        );
+        assert_eq!(
+            pick_io_error_code(&Error::from(ErrorKind::StorageFull)),
+            "pickDiskFull"
+        );
+        assert_eq!(
+            pick_io_error_code(&Error::from_raw_os_error(28)),
+            "pickDiskFull"
+        );
+        assert_eq!(
+            pick_io_error_code(&Error::from(ErrorKind::NotFound)),
+            "pickDestinationMissing"
+        );
+        assert_eq!(
+            pick_io_error_code(&Error::from(ErrorKind::Other)),
+            "pickCopyFailed"
+        );
+    }
 
     fn workspace(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("sss_pick_{tag}_{}", std::process::id()));

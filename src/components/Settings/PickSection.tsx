@@ -1,26 +1,18 @@
 import { X } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { getPickedImages, deletePickedImage } from '../../lib/tauri';
 import { useT } from '../../lib/i18n';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { Thumbnail } from './Thumbnail';
+import { useAsyncLoad } from '../../hooks/useAsyncLoad';
+import { LoadError, InlineError } from './SectionErrors';
 
 export function PickSection() {
   const t = useT();
-  const [images, setImages] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    getPickedImages()
-      .then((result) => {
-        setImages(result);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error('Failed to load picked images:', err);
-        setLoading(false);
-      });
-  }, []);
+  // #115: 取得失敗は「ピックした写真はありません」の空状態と区別してエラー表示＋再試行にする。
+  const load = useAsyncLoad<string[]>(getPickedImages, 'picked images');
+  const images = load.state.status === 'ready' ? load.state.data : [];
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDelete = async (path: string) => {
     const ok = await confirmDialog({
@@ -30,20 +22,33 @@ export function PickSection() {
     if (!ok) return;
     try {
       await deletePickedImage(path);
-      setImages((prev) => prev.filter((p) => p !== path));
+      load.update((prev) => prev.filter((p) => p !== path));
+      setDeleteError(null);
     } catch (err) {
       console.error('Failed to delete picked image:', err);
+      setDeleteError(t('deletePickedFailed'));
     }
   };
 
-  if (loading) {
+  if (load.state.status === 'loading') {
     // #66レビュー2巡目nit: /30→/50（他の説明/補助テキストと同じ濃さに統一）。
     return <div className="text-white/50 text-sm">{t('loadingLabel')}</div>;
+  }
+
+  if (load.state.status === 'error') {
+    return (
+      <div className="space-y-4">
+        <h3 className="text-sm font-medium text-white/70">{t('pickListTitle')}</h3>
+        <LoadError onRetry={load.reload} testId="pick-load-error" />
+      </div>
+    );
   }
 
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-medium text-white/70">{t('pickListTitle')}</h3>
+
+      <InlineError message={deleteError} testId="pick-delete-error" />
 
       {images.length === 0 ? (
         <div className="p-4 bg-black/30 rounded-lg text-center text-white/50 text-sm">

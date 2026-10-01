@@ -50,6 +50,8 @@ export function ScanSection({ onScanComplete, guard }: ScanSectionProps) {
         }
       } catch (err) {
         console.error('Failed to load last directory path:', err);
+        // #115: 前回のフォルダが空欄のまま黙らないよう、失敗を表示する。
+        setError({ kind: 'key', key: 'errorLastDirectoryLoadFailed' });
       }
     };
     loadLastDirectory();
@@ -87,6 +89,7 @@ export function ScanSection({ onScanComplete, guard }: ScanSectionProps) {
         if (lastDirectory) setSelectedDirectory(lastDirectory);
       } catch (err) {
         console.error('Failed to load last directory path:', err);
+        setError({ kind: 'key', key: 'errorLastDirectoryLoadFailed' });
       }
       // スキャン完了を通知するが、設定画面は閉じない
       guard?.clearUpTo(token);
@@ -165,7 +168,11 @@ export function ScanSection({ onScanComplete, guard }: ScanSectionProps) {
         {isScanning ? t('scanningLabel') : t('scanLabel')}
       </button>
 
-      {errorMessage && <div className="text-sm text-red-400/70">{errorMessage}</div>}
+      {errorMessage && (
+        <div role="alert" className="text-sm text-red-400/70">
+          {errorMessage}
+        </div>
+      )}
 
       {realtimeProgress && (
         <div className="text-sm text-white/50 font-mono">

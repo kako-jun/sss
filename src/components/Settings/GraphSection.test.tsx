@@ -285,16 +285,26 @@ describe('GraphSection summary cards and table (#67)', () => {
     expect(screen.queryByTestId('fairness-badge')).toBeNull();
   });
 
-  it('falls back to the "no data" message and logs when loading fails', async () => {
+  it('shows a load error with retry, distinct from the "no data" state, when loading fails (#115)', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    getDisplayStats.mockRejectedValue(new Error('db locked'));
+    getDisplayStats.mockRejectedValueOnce(new Error('db locked'));
 
     render(<GraphSection />);
 
     await waitFor(() => {
+      expect(screen.getByTestId('stats-load-error')).toBeTruthy();
+    });
+    expect(screen.getByText('読み込みに失敗しました')).toBeTruthy();
+    expect(screen.queryByText('データがありません。スキャンを実行してください。')).toBeNull();
+    expect(spy).toHaveBeenCalled();
+
+    // 再試行で空のデータが返れば、今度は本当に空の状態として表示される
+    getDisplayStats.mockResolvedValue({ files: 0, min: 0, max: 0, mean: 0, bins: [] });
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }));
+    await waitFor(() => {
       expect(screen.getByText('データがありません。スキャンを実行してください。')).toBeTruthy();
     });
-    expect(spy).toHaveBeenCalled();
+    expect(screen.queryByTestId('stats-load-error')).toBeNull();
     spy.mockRestore();
   });
 });

@@ -150,13 +150,13 @@ pub async fn pick_image<R: tauri::Runtime>(
     let source_path = source_path.as_path();
 
     if !source_path.exists() {
-        return Err("Image file does not exist".to_string());
+        return Err("imageFileNotFound".to_string());
     }
 
     // ディレクトリが存在しない場合は作成
     if !share_directory.exists() {
         fs::create_dir_all(&share_directory)
-            .map_err(|e| format!("Failed to create share directory: {e}"))?;
+            .map_err(|e| crate::pick::pick_io_error_code(&e).to_string())?;
     }
 
     // 起動時・設定変更時点ではディレクトリが未作成で asset scope 許可に失敗していることが
