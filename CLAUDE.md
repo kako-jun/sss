@@ -674,7 +674,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 - **CI**: `.github/workflows/ci.yml` — push/PR to main で2ジョブ実行
   - `check`（ubuntu-22.04）: `npm run lint` / `npm run format:check` / `npm run build` / `npm test`（vitest）/ `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test`
   - `cross-platform`（windows-latest / macos-latest）: `cargo clippy --all-targets -- -D warnings` / `cargo test`。`#[cfg(windows)]`/`#[cfg(target_os = "macos")]` 配下のコード・実機限定テストは ubuntu だけでは一度もコンパイルされないため（#63 で発覚した Windows 固有バグの反省）。Windows では `tauri::test::mock_app` 系 integration test が `src-tauri/build.rs` のマニフェスト埋め込みワークアラウンドを必要とする（tauri-apps/tauri#13419 未修正の既知バグ。詳細は architecture.md）
-  - `npm run e2e` は CI に含めない（実ブラウザ/実ファイル前提のため手動実行）
+  - `npm run e2e` は CI に含めない（実ブラウザ/実ファイル前提のため手動実行。理由・ゲート化の可否は `e2e/README.md`）。e2e のシナリオは固定 sleep・固定長のサンプリング窓でなく条件待ち、モックの完了は時間でなくテスト解放式のゲートにする（#124）
   - 両ジョブとも `env.CARGO_BUILD_JOBS: 4` でリポルート `.cargo/config.toml` の `jobs=1`（ローカルのメモリ制約回避用）を上書きし、CIランナーでは既定に近い並列度でビルドする（#69レビュー）。ローカル開発時の `jobs=1` はそのまま維持
 - **フロントのテスト指針**（#108）: (1) `vi.stubGlobal` したグローバル（`IntersectionObserver` 等）は、`render` の `unmount()` で effect を畳んでから `unstubAllGlobals()` で戻す（`try/finally`）。effect は描画コミットの後に非同期で走り、`afterEach` の `cleanup` が消えたスタブに当たって落ちる負荷依存の偶発失敗になる。(2) 「〜が呼ばれていない」系の否定アサートは、先に effect が走った証拠（`observe` の呼び出し等）を `waitFor` で待ってから検証する（待たないと effect 前に通過する空振りになる）。固定 sleep は使わない
 - **Audit**: `.github/workflows/audit.yml`（ci.yml とは別ファイル）— `rustsec/audit-check` で `src-tauri` の Rust 依存関係を検査。`src-tauri/Cargo.toml`/`Cargo.lock` を変更する push/PR と、毎週月曜03:00 UTC の schedule（新規登録された既知脆弱性の検出用）でのみ実行し、無関係な変更で毎回は回さない

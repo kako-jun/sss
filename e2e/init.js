@@ -206,7 +206,13 @@
             errorExamples: [],
           };
         case 'rescan_last_directory':
-          if (sc === 'exrescan') await new Promise((r) => setTimeout(r, 1800));
+          // #124: 固定時間(1800ms)で完了させると、負荷で再スキャン中の確認が間に合わず揺れる。
+          // テストが `__rescanGateArmed` を立てた後の呼び出しだけ、`__rescanRelease()` が
+          // 呼ばれるまで完了を保留する（起動時の背景スキャンは即完了）。
+          if (sc === 'exrescan' && window.__rescanGateArmed)
+            await new Promise((r) => {
+              window.__rescanRelease = r;
+            });
           if (sc === 'unreach') {
             await new Promise((r) => setTimeout(r, 100));
             // #80: 実際のバックエンドはユーザー向け文言でなくエラーコードで返す

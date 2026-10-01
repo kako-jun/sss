@@ -1256,44 +1256,53 @@ const scenarios = [
     name: 'newly mounted media always fades in over ~0.5s, never appears instantly at opacity 1 (M4)',
     hash: 'fade',
     async run(page) {
-      async function sampleOpacityFor(ms) {
-        const samples = [];
-        const deadline = Date.now() + ms;
-        while (Date.now() < deadline) {
-          const opacity = await page.evaluate(() => {
-            const el =
-              document.querySelector('video') ||
-              [...document.querySelectorAll('img')].find((i) => i.alt !== 'SSS Logo');
-            return el ? Number(getComputedStyle(el).opacity) : null;
-          });
-          samples.push(opacity);
-          await page.waitForTimeout(40);
-        }
-        return samples;
+      // 固定長のサンプリング窓だと、負荷でフェード開始が遅れたり page.evaluate が間延びしたとき
+      // （窓内に1.0へ届かない・サンプルが数個しか取れない）に偽陰性になる。ページ内で約16ms間隔に
+      // 自前サンプリングし、「低opacity(<0.9)を観測したあとに高opacity(>=0.95)へ到達する」
+      // 条件が満たされるまで（上限 timeoutMs）待つ条件待ちにする。
+      async function observeFade(timeoutMs) {
+        return page.evaluate(
+          (timeout) =>
+            new Promise((resolve) => {
+              const samples = [];
+              let sawLow = false;
+              let sawHighAfterLow = false;
+              const deadline = performance.now() + timeout;
+              const tick = () => {
+                const el =
+                  document.querySelector('video') ||
+                  [...document.querySelectorAll('img')].find((i) => i.alt !== 'SSS Logo');
+                const o = el ? Number(getComputedStyle(el).opacity) : null;
+                if (samples.length < 400) samples.push(o === null ? null : Number(o.toFixed(3)));
+                if (o !== null && o < 0.9) sawLow = true;
+                if (sawLow && o !== null && o >= 0.95) sawHighAfterLow = true;
+                if (sawHighAfterLow || performance.now() > deadline) {
+                  clearInterval(timer);
+                  resolve({ ok: sawHighAfterLow, samples });
+                }
+              };
+              const timer = setInterval(tick, 16);
+            }),
+          timeoutMs,
+        );
       }
 
-      const fadesIn = (samples) => {
-        const sawLow = samples.some((o) => o !== null && o < 0.9);
-        const sawHigh = samples.some((o) => o !== null && o >= 0.95);
-        return sawLow && sawHigh;
-      };
-
       // 初回マウント(画像a)のフェードインを見る。
-      const initialSamples = await sampleOpacityFor(700);
+      const initial = await observeFade(6000);
 
       // 手動で次へ進み、2件目(動画)への切り替わりのフェードインも見る
-      // （退場500ms + 自身のフェード500msぶん、余裕を持って観測する）。
+      // （退場500ms + 自身のフェード500msぶん。観測は条件成立まで待つ）。
       await page.keyboard.press('ArrowRight');
-      const toVideoSamples = await sampleOpacityFor(1300);
+      const toVideo = await observeFade(6000);
 
       // さらに次へ進み、動画→画像の切り替わりも確認する。
       await page.keyboard.press('ArrowRight');
-      const toImageSamples = await sampleOpacityFor(1300);
+      const toImage = await observeFade(6000);
 
-      const pass = fadesIn(initialSamples) && fadesIn(toVideoSamples) && fadesIn(toImageSamples);
+      const pass = initial.ok && toVideo.ok && toImage.ok;
       return {
         pass,
-        detail: `initial=${JSON.stringify(initialSamples)} toVideo=${JSON.stringify(toVideoSamples)} toImage=${JSON.stringify(toImageSamples)}`,
+        detail: `initial=${JSON.stringify(initial.samples)} toVideo=${JSON.stringify(toVideo.samples)} toImage=${JSON.stringify(toImage.samples)}`,
       };
     },
   },
@@ -1873,31 +1882,33 @@ const scenarios = [
     name: 'idle hides the cursor and the top-right button row; moving the mouse restores both (#66 問題3・10)',
     hash: 'slides',
     async run(page) {
-      await page.waitForTimeout(1000); // 最初の画像表示を待つ（idleは初期状態でtrueのまま）
-      await page.waitForTimeout(2500); // 合計3.5秒超、マウスは一度も動かさない
-      const idleState = await page.evaluate(() => {
-        const root = document.querySelector('.w-screen.h-screen.bg-black');
-        const btnRow = [...document.querySelectorAll('div')].find(
-          (el) => el.querySelector('svg.lucide-settings') && el.className.includes('fixed'),
-        );
-        return {
-          cursor: root ? getComputedStyle(root).cursor : null,
-          buttonRowOpacity: btnRow ? Number(getComputedStyle(btnRow).opacity) : null,
-        };
-      });
+      // 固定 sleep + 一度きりの読み取りだと、負荷で opacity のトランジション途中（例 0.998）を
+      // 読んで揺れる（#124）。状態が確定する（cursor / opacity が目標値に達する）まで条件待ちする。
+      const readState = () =>
+        page.evaluate(() => {
+          const root = document.querySelector('.w-screen.h-screen.bg-black');
+          const btnRow = [...document.querySelectorAll('div')].find(
+            (el) => el.querySelector('svg.lucide-settings') && el.className.includes('fixed'),
+          );
+          return {
+            cursor: root ? getComputedStyle(root).cursor : null,
+            buttonRowOpacity: btnRow ? Number(getComputedStyle(btnRow).opacity) : null,
+          };
+        });
+      const settle = async (isTarget) => {
+        const deadline = Date.now() + 8000;
+        let st = await readState();
+        while (!isTarget(st) && Date.now() < deadline) {
+          await page.waitForTimeout(50);
+          st = await readState();
+        }
+        return st;
+      };
+      // マウスは一度も動かさない（idleは初期状態でtrueのまま）
+      const idleState = await settle((st) => st.cursor === 'none' && st.buttonRowOpacity === 0);
       await page.mouse.move(300, 300);
       await page.mouse.move(320, 320);
-      await page.waitForTimeout(300);
-      const activeState = await page.evaluate(() => {
-        const root = document.querySelector('.w-screen.h-screen.bg-black');
-        const btnRow = [...document.querySelectorAll('div')].find(
-          (el) => el.querySelector('svg.lucide-settings') && el.className.includes('fixed'),
-        );
-        return {
-          cursor: root ? getComputedStyle(root).cursor : null,
-          buttonRowOpacity: btnRow ? Number(getComputedStyle(btnRow).opacity) : null,
-        };
-      });
+      const activeState = await settle((st) => st.cursor !== 'none' && st.buttonRowOpacity === 1);
       const pass =
         idleState.cursor === 'none' &&
         idleState.buttonRowOpacity === 0 &&
@@ -2292,8 +2303,12 @@ const scenarios = [
       await page.waitForTimeout(300);
       const noticeShown = await isVisible(page, '反映するには再スキャンが必要です');
       const afterAdd = await rescanCalls(); // 自動では再スキャンしない
+      // 再スキャンの完了はテストが明示的に解放するまで保留される（init.js、固定時間に依存しない）。
+      await page.evaluate(() => {
+        window.__rescanGateArmed = true;
+      });
       await page.click('button:has-text("今すぐ再スキャン")');
-      await page.waitForTimeout(150);
+      await page.waitForSelector('button:has-text("再スキャン中")');
       // 再スキャン中にタブを往復する
       await page.click('#tab-history');
       await page.click('#tab-exclude');
@@ -2322,7 +2337,12 @@ const scenarios = [
         (document.querySelector('[role=tabpanel]')?.innerText ?? '').includes('**/thumbs/'),
       );
       const noticeAfterReopen = await isVisible(page, '反映するには再スキャンが必要です');
-      await page.waitForTimeout(2000);
+      await page.evaluate(() => window.__rescanRelease());
+      await page
+        .waitForFunction(() => document.body.innerText.includes('再スキャンしました'), null, {
+          timeout: 5000,
+        })
+        .catch(() => {});
       const doneShown = await isVisible(page, '再スキャンしました');
       const total = await rescanCalls();
       const buttonGone = !(await isVisible(page, '今すぐ再スキャン'));
