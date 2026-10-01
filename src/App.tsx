@@ -706,12 +706,18 @@ function App() {
       </div>
 
       {windowModeError && (
-        <div
-          role="alert"
-          // 下部のトースト・操作バー・その他メニューと重ならないよう、画面上部中央に出す（右上のボタン列を避けて幅を制限）
-          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 whitespace-nowrap truncate max-w-[calc(100vw-12rem)]"
-        >
-          {windowModeError.text}
+        // 下部のトースト・操作バー・その他メニューと重ならないよう画面上部に出す。右上のボタン列
+        // （約9rem幅）と重ならないよう、右端を空けた枠の中で中央寄せする（#103）。枠自体は
+        // pointer-events-none で写真上のクリック/ホイールを吸わない。切り詰められた全文を
+        // title で読めるよう、通知本体（小さな丸薬）だけ pointer-events-auto にする。
+        <div className="fixed top-4 left-4 right-[11rem] z-50 flex justify-center pointer-events-none">
+          <div
+            role="alert"
+            title={windowModeError.text}
+            className="pointer-events-auto max-w-full truncate bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10"
+          >
+            {windowModeError.text}
+          </div>
         </div>
       )}
 

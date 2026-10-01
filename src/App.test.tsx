@@ -1090,12 +1090,16 @@ describe('App window mode toggle: re-sync failures are logged (#103)', () => {
       expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+    try {
+      fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
 
-    await waitFor(() => {
-      expect(loggedMessages(errorSpy)).toContain('Failed to re-sync window decorations:');
-    });
-    errorSpy.mockRestore();
+      await waitFor(() => {
+        expect(loggedMessages(errorSpy)).toContain('Failed to re-sync window decorations:');
+      });
+      expect(screen.getByRole('alert')).toBeTruthy();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('logs when the real fullscreen state cannot be read during re-sync', async () => {
@@ -1108,11 +1112,15 @@ describe('App window mode toggle: re-sync failures are logged (#103)', () => {
       expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+    try {
+      fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
 
-    await waitFor(() => {
-      expect(loggedMessages(errorSpy)).toContain('Failed to re-sync window mode:');
-    });
-    errorSpy.mockRestore();
+      await waitFor(() => {
+        expect(loggedMessages(errorSpy)).toContain('Failed to re-sync window mode:');
+      });
+      expect(screen.getByRole('alert')).toBeTruthy();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

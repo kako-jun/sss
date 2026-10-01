@@ -230,6 +230,9 @@ describe('ウィンドウ API の import 範囲ガード (#103)', () => {
   });
 });
 
+// 既知の限界（スキャナ本体）: `import type * as` や `from` の前後で改行が入る import、
+// 文字列を組み立てた invoke（'plugin:' + 'window|...'）、別ファイルへ window を渡す形は追えない。
+// 最後の2つは下のガードと「window API を import するのは App.tsx のみ」で実質的に禁じる。
 describe('スキャナで追えない形の使用禁止ガード (#103)', () => {
   it('src does not call window commands directly via invoke("plugin:window|...")', () => {
     const offenders = sources
@@ -240,6 +243,21 @@ describe('スキャナで追えない形の使用禁止ガード (#103)', () => 
 
   // 分割代入の抽出は `[^}]*` を使うため、デフォルト値にオブジェクトリテラル（`}` を含む）
   // があると崩れる。既知の限界として、ウィンドウ API を扱うファイルでの使用を禁止する。
+  // for-of・関数引数の分割代入（`for (const { a } of xs)` / `({ a }) =>`）も window オブジェクトを
+  // 展開する形としては想定外なので、ウィンドウ API を扱うファイルでの `{ ... } of win` /
+  // `({ setX })` 形は検出して失敗させる。
+  it('window API files do not destructure window methods in for-of or function parameters', () => {
+    const offenders = sources
+      .filter(({ text }) => WINDOW_MODULES.some((m) => text.includes(m)))
+      .filter(({ text }) =>
+        /\b(?:const|let|var)\s*\{[^}]*\b(?:set[A-Z]\w*|toggleMaximize|startDragging)\b[^}]*\}\s*of\b|\(\s*\{[^}]*\b(?:set[A-Z]\w*|toggleMaximize|startDragging)\b[^}]*\}\s*[:,)]/.test(
+          text,
+        ),
+      )
+      .map(({ file }) => file.slice(SRC.length + 1));
+    expect(offenders).toEqual([]);
+  });
+
   it('window API files do not use nested braces inside destructuring patterns', () => {
     const offenders = sources
       .filter(({ text }) => WINDOW_MODULES.some((m) => text.includes(m)))
