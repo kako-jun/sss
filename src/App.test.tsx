@@ -973,7 +973,8 @@ describe('App window mode toggle failure notice (#103)', () => {
     });
     // 切替に失敗したので表示は元のまま（OSの実態=フルスクリーン）
     expect(screen.getByTitle('ウィンドウモードに切り替え')).toBeTruthy();
-    expect(win.setDecorations).not.toHaveBeenCalled();
+    // 部分失敗に備え、実態(フルスクリーン)に合わせて装飾を非表示へ戻す
+    expect(win.setDecorations).toHaveBeenCalledWith(false);
     errorSpy.mockRestore();
   });
 
@@ -1002,5 +1003,74 @@ describe('App window mode toggle failure notice (#103)', () => {
     });
     expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
     errorSpy.mockRestore();
+  });
+});
+
+describe('App window mode toggle failure notice: partial failure and repeats (#103)', () => {
+  it('re-syncs decorations to the real state when setFullscreen succeeds but setDecorations fails', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    // 起動時は全画面。切替後にOSの実態は「ウィンドウモード」(false)になっている想定
+    win.isFullscreen.mockReset().mockResolvedValueOnce(true).mockResolvedValue(false);
+    win.setFullscreen.mockReset().mockResolvedValue(undefined);
+    win.setDecorations
+      .mockReset()
+      .mockRejectedValueOnce(new Error('denied'))
+      .mockResolvedValue(undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeTruthy();
+    });
+    // 1回目: 切替(!next=true)で失敗、2回目: 実態(false)に合わせて !actual=true を試行
+    await waitFor(() => {
+      expect(win.setDecorations).toHaveBeenNthCalledWith(1, true);
+      expect(win.setDecorations).toHaveBeenNthCalledWith(2, true);
+    });
+    expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
+    errorSpy.mockRestore();
+  });
+
+  it('keeps the alert for a full 5s after a repeated identical failure', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    win.isFullscreen.mockReset().mockResolvedValue(true);
+    win.setFullscreen.mockReset().mockRejectedValue(new Error('denied'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+      await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
+      await waitFor(() => expect(win.setFullscreen).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      // 1回目の通知から3秒+。2回目の失敗でタイマーが取り直されるので、最初の5秒を過ぎても残る
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(screen.queryByRole('alert')).not.toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2500);
+      });
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      errorSpy.mockRestore();
+    }
   });
 });

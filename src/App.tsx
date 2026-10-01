@@ -88,7 +88,9 @@ function App() {
     null,
   );
   // #103: ウィンドウモード切替の失敗通知（権限不足等で setFullscreen が拒否されても無反応にしない）
-  const [windowModeError, setWindowModeError] = useState<string | null>(null);
+  const [windowModeError, setWindowModeError] = useState<{ text: string; seq: number } | null>(
+    null,
+  );
   const initRef = useRef(false); // 初期化が1回だけ実行されるようにする
   const overlayRef = useRef<OverlayUIHandle>(null);
   const { isIdle, setIsHovering, resetIdle } = useMouseIdle(3000);
@@ -329,10 +331,17 @@ function App() {
       setWindowModeError(null);
     } catch (err) {
       console.error('Failed to toggle window mode:', err);
-      setWindowModeError(t('windowModeToggleFailed'));
+      setWindowModeError((prev) => ({
+        text: t('windowModeToggleFailed'),
+        seq: (prev?.seq ?? 0) + 1,
+      }));
       // 片方だけ成功した場合に表示とOSの実態がずれないよう、実態から再同期する
       try {
-        setIsFullscreen(await getCurrentWindow().isFullscreen());
+        const win = getCurrentWindow();
+        const actual = await win.isFullscreen();
+        setIsFullscreen(actual);
+        // setFullscreen だけ成功した部分失敗に備え、装飾も実態に合わせる（失敗は握りつぶす）
+        await win.setDecorations(!actual).catch(() => {});
       } catch {
         // 実態も取れなければ現状維持
       }
@@ -698,7 +707,7 @@ function App() {
           role="alert"
           className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 max-w-[90vw]"
         >
-          {windowModeError}
+          {windowModeError.text}
         </div>
       )}
 

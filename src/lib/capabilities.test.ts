@@ -86,17 +86,85 @@ const sources = listSourceFiles(SRC)
   .filter((f) => !f.includes(`${join('src', 'test')}`))
   .map((file) => ({ file, text: readFileSync(file, 'utf8') }));
 
-/** `@tauri-apps/api/window` を import するファイルで呼ばれるウィンドウメソッド名。 */
+const WINDOW_MODULES = ['@tauri-apps/api/window', '@tauri-apps/api/webviewWindow'];
+
+/**
+ * ウィンドウ API を import するファイルのソースから、呼ばれているウィンドウメソッド名を返す。
+ * 取りこぼしを避けるため、次をすべて拾う。
+ * - `getCurrentWindow()` / `getCurrentWebviewWindow()` / `Window.getCurrent()` の直呼びと、
+ *   `import { getCurrentWindow as gw }` の別名呼び出しに続くチェーン
+ * - それらの戻り値（`new Window(...)` 含む）を代入した変数（`const w = ...`）への呼び出し
+ * - 変数名に依らず、対応表にある（=明示権限が要る）メソッド名の `.xxx(` 呼び出し
+ */
+export function scanWindowMethods(text: string): string[] {
+  const factories = ['getCurrentWindow', 'getCurrentWebviewWindow'];
+  for (const m of text.matchAll(/\b(getCurrentWindow|getCurrentWebviewWindow)\s+as\s+(\w+)/g)) {
+    factories.push(m[2]);
+  }
+  const factoryAlt = factories.join('|');
+  const call = `(?:(?:${factoryAlt})\\s*\\(\\s*\\)|(?:Window|WebviewWindow)\\s*\\.\\s*getCurrent\\s*\\(\\s*\\))`;
+  const vars = new Set<string>(['win']);
+  const assign = new RegExp(
+    `(?:\\b(?:const|let|var)\\s+(\\w+)|\\b(\\w+))\\s*=\\s*(?:await\\s+)?(?:${call}|new\\s+(?:Window|WebviewWindow)\\s*\\()`,
+    'g',
+  );
+  for (const m of text.matchAll(assign)) vars.add(m[1] ?? m[2]);
+
+  const found: string[] = [];
+  const chained = new RegExp(
+    `(?:\\b(?:${[...vars].join('|')})\\b|${call})\\s*\\.\\s*(\\w+)\\s*\\(`,
+    'g',
+  );
+  for (const m of text.matchAll(chained)) found.push(m[1]);
+  const known = Object.keys(WINDOW_METHOD_PERMISSIONS).filter(
+    (k) => WINDOW_METHOD_PERMISSIONS[k] !== 'default',
+  );
+  const anyVar = new RegExp(`\\.\\s*(${known.join('|')})\\s*\\(`, 'g');
+  for (const m of text.matchAll(anyVar)) found.push(m[1]);
+  return [...new Set(found)];
+}
+
 function usedWindowMethods(): Array<{ file: string; method: string }> {
   const used: Array<{ file: string; method: string }> = [];
   for (const { file, text } of sources) {
-    if (!text.includes('@tauri-apps/api/window')) continue;
-    // `win.xxx(` と `getCurrentWindow().xxx(`（改行を挟むチェーンを含む）
-    const re = /(?:\bwin|\bgetCurrentWindow\(\))\s*\.\s*(\w+)\s*\(/g;
-    for (const m of text.matchAll(re)) used.push({ file, method: m[1] });
+    if (!WINDOW_MODULES.some((m) => text.includes(m))) continue;
+    for (const method of scanWindowMethods(text)) used.push({ file, method });
   }
   return used;
 }
+
+describe('scanWindowMethods (#103 スキャナ自体の検証)', () => {
+  it('detects direct getCurrentWindow().x() chains, including across newlines', () => {
+    expect(scanWindowMethods('getCurrentWindow()\n  .setTitle("a")')).toEqual(['setTitle']);
+  });
+
+  it('detects calls through an aliased variable', () => {
+    const src = 'const w = getCurrentWindow();\nawait w.setFullscreen(true);';
+    expect(scanWindowMethods(src)).toContain('setFullscreen');
+  });
+
+  it('detects calls on an unknown-to-table method through an aliased variable', () => {
+    const src = 'const w = getCurrentWindow();\nw.setBadgeCount(1);';
+    expect(scanWindowMethods(src)).toContain('setBadgeCount');
+  });
+
+  it('detects getCurrentWebviewWindow and Window.getCurrent()', () => {
+    expect(scanWindowMethods('getCurrentWebviewWindow().hide()')).toEqual(['hide']);
+    expect(scanWindowMethods('Window.getCurrent().minimize()')).toEqual(['minimize']);
+    expect(scanWindowMethods('const x = Window.getCurrent(); x.close();')).toContain('close');
+  });
+
+  it('detects import-aliased factory calls', () => {
+    const src =
+      "import { getCurrentWindow as gw } from '@tauri-apps/api/window';\ngw().setDecorations(false);";
+    expect(scanWindowMethods(src)).toContain('setDecorations');
+  });
+
+  it('detects new Window(...) instances and reassigned variables', () => {
+    expect(scanWindowMethods("const z = new Window('x'); z.center();")).toContain('center');
+    expect(scanWindowMethods('let q; q = getCurrentWindow(); q.maximize();')).toContain('maximize');
+  });
+});
 
 describe('capability と src の Tauri API 呼び出しの整合 (#103)', () => {
   it('detects at least the window methods the app is known to call (scanner sanity)', () => {
