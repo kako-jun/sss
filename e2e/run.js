@@ -20,6 +20,7 @@
 // playwright-core は devDependency（ブラウザ本体はダウンロードしない）。
 // システムにインストール済みの Chrome または Edge を `channel` 指定で使う。
 
+import { expectedWheelNavigations } from './wheel-expect.js';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -1861,7 +1862,9 @@ const scenarios = [
     // 判定（#124で作り直し）: 「新しくマウントされた要素そのもの」を追跡する。
     // ページ読み込み前（setup）に MutationObserver を仕込み、メディア要素（video/img）が
     // DOM に追加された**その瞬間**（microtask、描画前）の computed opacity を要素ごとに記録する。
-    //   - 合格 = 追加直後の最初の値が低く(<0.9)、**同じ要素**が後に高く(>=0.95)なった要素がある。
+    //   - 合格 = 追加直後の最初の値が低く(<0.9)、**同じ要素**が追加から150ms以上かけて高く(>=0.95)なり、
+    //     途中値(0.1〜0.9)も観測された要素がある（transition.duration:0 の瞬時フェードを除く）。
+    //   - 退場(exit)の見た目は対象外（新しくマウントされた要素だけを見る）。
     //   - 退場中の既存要素が下がる低 opacity は、新要素ではないので数えない
     //     （旧実装は観測窓が長いと自動送りの退場フェードアウトを「低」と誤認し、
     //     次の画像が opacity 1 で瞬時に出ても PASS した）。
@@ -1880,8 +1883,10 @@ const scenarios = [
             el,
             kind: el.tagName.toLowerCase(),
             first,
-            maxAfter: first,
-            samples: [Number(first.toFixed(3))],
+            tAdded: performance.now(),
+            tHigh: null, // 初めて opacity >= 0.95 を観測した時刻
+            mid: 0, // 途中値(0.1〜0.9)を観測したサンプル数
+            done: false,
           });
         };
         const isMedia = (el) =>
@@ -1898,11 +1903,19 @@ const scenarios = [
           }
         }).observe(document, { childList: true, subtree: true });
         setInterval(() => {
+          const now = performance.now();
           for (const t of tracked) {
-            if (!t.el.isConnected) continue;
+            if (t.done) continue; // 到達済み・DOMから消えた要素は走査しない
+            if (!t.el.isConnected) {
+              t.done = true;
+              continue;
+            }
             const o = Number(getComputedStyle(t.el).opacity);
-            if (o > t.maxAfter) t.maxAfter = o;
-            if (t.samples.length < 200) t.samples.push(Number(o.toFixed(3)));
+            if (o > 0.1 && o < 0.9) t.mid++;
+            if (o >= 0.95) {
+              t.tHigh = now;
+              t.done = true;
+            }
           }
         }, 16);
       });
@@ -1914,7 +1927,8 @@ const scenarios = [
             i,
             kind: t.kind,
             first: Number(t.first.toFixed(3)),
-            max: Number(t.maxAfter.toFixed(3)),
+            fadeMs: t.tHigh === null ? null : Math.round(t.tHigh - t.tAdded),
+            mid: t.mid,
           })),
         );
       // `from` 以降に追加された kind の要素で「最初の値<0.9 かつ同じ要素が>=0.95に到達」したものを待つ。
@@ -1922,9 +1936,16 @@ const scenarios = [
         const ok = await page
           .waitForFunction(
             ([f, k]) =>
-              window.__fadeTracked
-                .slice(f)
-                .some((t) => (k === 'any' || t.kind === k) && t.first < 0.9 && t.maxAfter >= 0.95),
+              window.__fadeTracked.slice(f).some(
+                (t) =>
+                  (k === 'any' || t.kind === k) &&
+                  t.first < 0.9 &&
+                  t.tHigh !== null &&
+                  // 「~0.5s かけて」: 追加から 0.95 到達まで 150ms 以上、途中値のサンプルが 1 つ以上
+                  // （duration: 0 のように瞬時に 1 へ飛ぶものを除く。負荷は差を広げる方向にしか働かない）。
+                  t.tHigh - t.tAdded >= 150 &&
+                  t.mid >= 1,
+              ),
             [from, kind],
             { timeout: 12000, polling: 50 },
           )
@@ -3115,10 +3136,7 @@ const scenarios = [
       await page.mouse.wheel(0, 100);
       await page.waitForTimeout(400);
       const stamps = await page.evaluate(() => window.__wheelStamps.slice());
-      const expectedReal = stamps.reduce(
-        (n, t, i) => (i > 0 && t - stamps[i - 1] >= 200 ? n + 1 : n),
-        1,
-      );
+      const expectedReal = expectedWheelNavigations(stamps, 200);
       const nextAfterReal = await countCalls(page, 'get_next_image');
       // (2) 同一フレーム内に 3 発をページ内から発火（isTrusted=false）: 到達間隔が 0 なので
       //     負荷に依らず必ず 1 回に畳まれる。
@@ -4570,6 +4588,17 @@ async function main() {
     const results = [];
     let browserRestarts = 0;
     let consecutiveOpenFailures = 0;
+    // 内部検証用（既定は無効、本番経路に影響しない。e2e/README.md 参照）。
+    const crashBrowserAt = process.env.E2E_TEST_CRASH_BROWSER_AT || '';
+    let crashed = false;
+    let injectedLaunchFailures = Number(process.env.E2E_TEST_FAIL_LAUNCH || 0);
+    const relaunchBrowser = async () => {
+      if (injectedLaunchFailures > 0) {
+        injectedLaunchFailures--;
+        throw new Error('injected launch failure (E2E_TEST_FAIL_LAUNCH)');
+      }
+      return launchSystemBrowser();
+    };
     try {
       // E2E_ONLY='(#68)' のようにカンマ区切りの部分文字列を指定すると、名前が一致するシナリオだけ実行する
       // （デバッグ用。未指定なら全件）。
@@ -4588,18 +4617,25 @@ async function main() {
         // （goto のタイムアウト等、ブラウザが生きている失敗では再起動しない。シナリオ自体の FAIL も再試行しない）。
         const consoleErrors = [];
         const openPage = async () => {
-          const pg = await browser.newPage({
-            viewport: scenario.viewport || { width: 1280, height: 800 },
-            locale: scenario.locale || 'ja-JP',
-          });
-          await pg.addInitScript({ path: INIT_SCRIPT });
-          pg.on('console', (m) => {
-            if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
-          });
-          // #120: goto 前に仕込みが要るシナリオ（応答しないリクエスト等）用。
-          if (scenario.setup) await scenario.setup(pg);
-          await pg.goto(`${BASE_URL}/#${scenario.hash}`);
-          return pg;
+          let pg;
+          try {
+            pg = await browser.newPage({
+              viewport: scenario.viewport || { width: 1280, height: 800 },
+              locale: scenario.locale || 'ja-JP',
+            });
+            await pg.addInitScript({ path: INIT_SCRIPT });
+            pg.on('console', (m) => {
+              if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
+            });
+            // #120: goto 前に仕込みが要るシナリオ（応答しないリクエスト等）用。
+            if (scenario.setup) await scenario.setup(pg);
+            await pg.goto(`${BASE_URL}/#${scenario.hash}`);
+            return pg;
+          } catch (e) {
+            // goto のタイムアウト等で途中失敗したとき、作ったページを残さない。
+            if (pg) await pg.close().catch(() => {});
+            throw e;
+          }
         };
         const isBrowserGone = (err) =>
           !browser.isConnected() || /closed|disconnected|crashed/i.test(String(err && err.message));
@@ -4608,6 +4644,7 @@ async function main() {
         try {
           if (!browser.isConnected()) throw new Error('browser disconnected');
           page = await openPage();
+          consecutiveOpenFailures = 0;
         } catch (err) {
           if (!isBrowserGone(err)) {
             results.push({
@@ -4624,7 +4661,7 @@ async function main() {
           await browser.close().catch(() => {});
           consoleErrors.length = 0;
           try {
-            browser = await launchSystemBrowser();
+            browser = await relaunchBrowser();
             page = await openPage();
             consecutiveOpenFailures = 0;
           } catch (err2) {
@@ -4652,6 +4689,11 @@ async function main() {
         // 前面に出してからキーボード操作を伴うシナリオを実行する。
         await page.bringToFront();
         let outcome;
+        // 内部検証用（README 参照）: 指定シナリオの実行中にブラウザを落として再起動経路を決定的に再現する。
+        if (crashBrowserAt && !crashed && scenario.name.includes(crashBrowserAt)) {
+          crashed = true;
+          setTimeout(() => browser.close().catch(() => {}), 300);
+        }
         try {
           outcome = await scenario.run(page);
         } catch (err) {
@@ -4675,7 +4717,7 @@ async function main() {
       const mark = r.pass ? 'PASS' : 'FAIL';
       if (!r.pass) allPass = false;
       console.log(
-        `  [${mark}] ${r.name}${r.retried ? ` (retried: browser restarted: ${r.retried})` : ''}\n        ${r.detail}`,
+        `  [${mark}] ${r.name}${r.retried ? ` (retried: 前のシナリオでブラウザが落ちたため再起動: ${r.retried})` : ''}\n        ${r.detail}`,
       );
       if (r.consoleErrors.length > 0) {
         console.log(`        console errors: ${r.consoleErrors.join(' | ')}`);
