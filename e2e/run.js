@@ -249,14 +249,11 @@ async function measureOverlayContrast(page) {
     const bar = document.querySelector('.fixed.bottom-6 > div');
     const info = bar && bar.querySelector('div[title]');
     if (info) {
-      const spans = [...info.querySelectorAll('span')];
-      const name = spans[0];
-      if (name) add('filename', 'text', name);
-      const mono = spans.filter((s) => s.classList.contains('font-mono'));
-      const date = mono.find((s) => !s.classList.contains('tabular-nums'));
-      const pos = mono.find((s) => s.classList.contains('tabular-nums'));
-      if (date) add('date', 'text', date);
-      if (pos) add('position', 'text', pos);
+      // #114: 要素は data-overlay で引く（ファイル名は前半/後半の2要素に分かれるため外側を測る）。
+      for (const part of ['filename', 'date', 'position']) {
+        const el = info.querySelector(`[data-overlay="${part}"]`);
+        if (el) add(part, 'text', el);
+      }
     }
     if (bar) {
       [...bar.querySelectorAll(':scope button')].forEach((b, i) => {
@@ -3175,7 +3172,8 @@ const scenarios = [
       await wakeFromIdle(page);
       const info = await page.evaluate(() => {
         const bar = document.querySelector('button[aria-haspopup="menu"]').closest('.fixed');
-        const span = [...bar.querySelectorAll('span.truncate')].find((e) => e.textContent.trim());
+        // #114: ファイル名は前半/後半の2要素に分かれるため、外側の data-overlay=filename を使う。
+        const span = bar.querySelector('[data-overlay="filename"]');
         if (!span) return null;
         const r = span.getBoundingClientRect();
         return {
@@ -3809,7 +3807,156 @@ const scenarios = [
       };
     },
   },
+  ...[
+    { name: 'ja', locale: 'ja-JP', date: '2023年8月15日 12:34' },
+    { name: 'en', locale: 'en-US', date: 'Aug 15, 2023, 12:34 PM' },
+  ].map((c) => ({
+    // #114: 長いファイル名(60字・拡張子つき)+EXIF日付+位置+地図でも、ファイル名は 480〜3840 幅で
+    // 最低限読める文字数を保ち（修正前は 480 幅で 0 文字・800〜3840 幅で 20 文字）、省略されても拡張子が
+    // 見える。撮影日はロケール整形され（生 ISO の T 区切りでない）、バーは画面内に収まり高さも増えない。
+    name: `overlay filename keeps a readable width with date + map, date is locale-formatted (${c.name}) (#114)`,
+    hash: 'bar',
+    locale: c.locale,
+    async run(page) {
+      const long =
+        'Family_Trip_Okinawa_Churaumi_Aquarium_Whale_Shark_2023_08_15_0815.jpg'.slice(0, 56) +
+        '.jpg';
+      const sizes = [
+        [480, 420, 28],
+        [800, 600, 45],
+        [1280, 800, 45],
+        [1920, 1080, 60],
+        [3840, 2160, 60],
+      ];
+      const bad = [];
+      const lines = [];
+      for (const [w, h, minChars] of sizes) {
+        await page.setViewportSize({ width: w, height: h });
+        const q = (o) => new URLSearchParams(o).toString();
+        const cases = {
+          short: q({ name: 'IMG_0001.jpg' }),
+          long: q({
+            name: long,
+            date: '2023-08-15T12:34:56',
+            gps: '1',
+            pos: '1234',
+            total: '100000',
+          }),
+          bigcount: q({
+            name: long,
+            date: '2023-08-15 12:34:56',
+            gps: '1',
+            pos: '1234567',
+            total: '99999999',
+          }),
+        };
+        for (const [kind, query] of Object.entries(cases)) {
+          await page.goto('about:blank');
+          await page.goto(`${BASE_URL}/#bar?${query}`);
+          await page.reload();
+          await page.waitForSelector('.fixed.bottom-6 div[title]', { timeout: 15000 });
+          await page.waitForTimeout(500);
+          await page.mouse.move(w / 2, h / 2 - 50);
+          await page.mouse.move(w / 2 + 1, h / 2 - 49);
+          await page.waitForTimeout(400);
+          const m = await page.evaluate(measureOverlayName);
+          if (process.env.E2E_SHOT_DIR) {
+            fs.writeFileSync(
+              `${process.env.E2E_SHOT_DIR}/filename-${c.name}-${w}x${h}-${kind}.png`,
+              await page.screenshot({
+                type: 'png',
+                clip: { x: 0, y: Math.max(0, h - 140), width: Math.min(w, 1700), height: 140 },
+              }),
+            );
+          }
+          const fail = [];
+          if (!m) fail.push('bar missing');
+          else {
+            if (m.hScroll) fail.push('h-scroll');
+            if (!m.barInViewport) fail.push('bar off-screen');
+            if (m.barH > 60) fail.push(`bar height ${m.barH}`);
+            if (kind === 'short') {
+              if (m.visible !== m.total) fail.push(`short name clipped ${m.visible}/${m.total}`);
+              if (m.dateText !== null) fail.push('date shown without EXIF');
+            } else {
+              if (m.visible < minChars) fail.push(`only ${m.visible} chars visible (<${minChars})`);
+              if (!m.tailVisible || !m.visibleText.endsWith('.jpg')) fail.push('extension hidden');
+              if (m.userSelect !== 'text') fail.push(`user-select ${m.userSelect}`);
+              if (m.dateText !== c.date) fail.push(`date "${m.dateText}"`);
+              if (m.dateText && m.dateText.includes('T')) fail.push('raw ISO date');
+              if (m.posClipped) fail.push('position clipped');
+              if (w >= 800 && kind === 'long' && m.dateClipped) fail.push('date clipped');
+              if (w >= 1920 && kind === 'long' && m.headClipped) fail.push('filename truncated');
+            }
+          }
+          if (fail.length) bad.push(`${w}x${h}/${kind}: ${fail.join(', ')}`);
+          lines.push(`${w}x${h}/${kind}=${m ? `${m.visible}/${m.total}` : 'n/a'}`);
+        }
+      }
+      return { pass: bad.length === 0, detail: bad.length ? bad.join(' | ') : lines.join(' ') };
+    },
+  })),
 ];
+
+/**
+ * #114: 操作バーのファイル名の「実際に見えている文字数」と日付の表示を、実描画で測る。
+ * 文字ごとの矩形を取り、祖先のクリップ枠（overflow が visible 以外）の外にはみ出した文字は
+ * 数えない（`…` で省略された部分は数えない）。page.evaluate に関数ごと渡すので外側の変数は
+ * 参照しない。
+ */
+function measureOverlayName() {
+  const info = document.querySelector('.fixed.bottom-6 div[title]');
+  if (!info) return null;
+  const bar = info.closest('.fixed');
+  const name = info.querySelector('[data-overlay="filename"]');
+  const date = info.querySelector('[data-overlay="date"]');
+  const pos = info.querySelector('[data-overlay="position"]');
+  let visible = 0;
+  let total = 0;
+  let visibleText = '';
+  const walker = document.createTreeWalker(name, NodeFilter.SHOW_TEXT);
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    for (let i = 0; i < t.data.length; i++) {
+      const rg = document.createRange();
+      rg.setStart(t, i);
+      rg.setEnd(t, i + 1);
+      const b = rg.getBoundingClientRect();
+      total++;
+      let ok = b.width > 0;
+      for (let a = t.parentElement; a && a !== document.body; a = a.parentElement) {
+        if (getComputedStyle(a).overflowX === 'visible') continue;
+        const A = a.getBoundingClientRect();
+        if (b.right > A.right + 0.5 || b.left < A.left - 0.5) ok = false;
+      }
+      if (ok) {
+        visible++;
+        visibleText += t.data[i];
+      }
+    }
+  }
+  const parts = [...name.children];
+  const tail = parts.length > 1 ? parts[parts.length - 1] : null;
+  const barRect = bar.getBoundingClientRect();
+  const infoRect = info.getBoundingClientRect();
+  return {
+    visible,
+    total,
+    visibleText,
+    barW: Math.round(barRect.width),
+    barH: Math.round(barRect.height),
+    barInViewport: barRect.left >= 0 && barRect.right <= innerWidth,
+    infoW: Math.round(infoRect.width),
+    tailText: tail ? tail.textContent : '',
+    tailVisible: tail ? tail.getBoundingClientRect().right <= infoRect.right + 0.5 : true,
+    headClipped: parts[0].scrollWidth > parts[0].clientWidth + 1,
+    dateText: date ? date.textContent : null,
+    dateClipped: date ? date.scrollWidth > date.clientWidth + 1 : false,
+    posText: pos ? pos.textContent : null,
+    posClipped: pos ? pos.scrollWidth > pos.clientWidth + 1 : false,
+    userSelect: getComputedStyle(name).userSelect,
+    hScroll: document.documentElement.scrollWidth > innerWidth,
+  };
+}
 
 /**
  * #116: 現在の画面で「ボタン切れ・横スクロール・画面外はみ出し・ボタン同士の重なり」を探す。
