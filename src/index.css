@@ -127,7 +127,7 @@ a:focus-visible,
     border-color 150ms;
 }
 
-.sss-checkbox:hover {
+.sss-checkbox:hover:not(:disabled):not(:checked) {
   border-color: rgba(255, 255, 255, 0.75);
 }
 
@@ -209,11 +209,11 @@ a:focus-visible,
   background-color: rgba(255, 255, 255, 0.9);
 }
 
-.sss-range:hover::-webkit-slider-thumb {
+.sss-range:hover:not(:disabled)::-webkit-slider-thumb {
   background-color: #fff;
 }
 
-.sss-range:hover::-moz-range-thumb {
+.sss-range:hover:not(:disabled)::-moz-range-thumb {
   background-color: #fff;
 }
 
@@ -246,7 +246,7 @@ a:focus-visible,
     border-color: ButtonText;
   }
 
-  .sss-checkbox:hover {
+  .sss-checkbox:hover:not(:disabled) {
     border-color: Highlight;
   }
 
@@ -259,9 +259,16 @@ a:focus-visible,
     background-color: HighlightText;
   }
 
+  /* チェック済みは塗りも枠も Highlight なので、リングは別色(CanvasText)にして区別する。 */
   .sss-checkbox:focus-visible,
   .sss-range:focus-visible {
-    outline-color: Highlight;
+    outline-color: CanvasText;
+  }
+
+  /* GrayText 自体が減光色なので、通常の opacity 0.3 を重ねて二重に薄くしない。 */
+  .sss-checkbox:disabled,
+  .sss-range:disabled {
+    opacity: 1;
   }
 
   .sss-checkbox:disabled {
@@ -300,12 +307,12 @@ a:focus-visible,
     border-color: ButtonText;
   }
 
-  .sss-range:hover::-webkit-slider-thumb {
+  .sss-range:hover:not(:disabled)::-webkit-slider-thumb {
     background-color: Highlight;
     border-color: Highlight;
   }
 
-  .sss-range:hover::-moz-range-thumb {
+  .sss-range:hover:not(:disabled)::-moz-range-thumb {
     background-color: Highlight;
     border-color: Highlight;
   }

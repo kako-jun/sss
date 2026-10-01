@@ -507,7 +507,22 @@ async function inputDarkScenario(page, lang) {
     await box.evaluate((e) => (e.disabled = true));
     const dis = await read(box);
     await shot(box, `checkbox${i}-disabled`);
+    // hover の枠の明るさ変化は有効時だけ(disabled では効かない)。チェック済みは枠が元から
+    // 明るいので、未チェックに戻して見る。
+    await box.evaluate((e) => {
+      e.disabled = false;
+      e.click();
+    });
+    await page.waitForTimeout(100);
+    const bb = await box.boundingBox();
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    await page.waitForTimeout(100);
+    const hoverEnabled = await box.evaluate((e) => getComputedStyle(e).borderTopColor);
+    await box.evaluate((e) => (e.disabled = true));
+    await page.waitForTimeout(100);
+    const hoverDisabled = await box.evaluate((e) => getComputedStyle(e).borderTopColor);
     await box.evaluate((e) => (e.disabled = false));
+    await page.mouse.move(0, 0);
     // 箱の中心とラベル1行目の中心が ±1px に収まる(縦位置のずれ検出)
     const align = await box.evaluate((e) => {
       const sib = e.nextElementSibling;
@@ -534,10 +549,12 @@ async function inputDarkScenario(page, lang) {
       off.h >= 20 &&
       focused.outlineStyle === 'solid' &&
       lum(focused.outlineColor) > 0.5 &&
-      Number(dis.opacity) < 1;
+      Number(dis.opacity) < 1 &&
+      hoverDisabled === off.border &&
+      hoverEnabled !== off.border;
     if (!ok) pass = false;
     details.push(
-      `cb${i}=${ok} align=${align.toFixed(1)} off=${off.bg}/${off.border} on=${on.bg} focus=${focused.outlineStyle}/${focused.outlineColor} dis=${dis.opacity} size=${off.w}x${off.h}`,
+      `cb${i}=${ok} align=${align.toFixed(1)} off=${off.bg}/${off.border} on=${on.bg} focus=${focused.outlineStyle}/${focused.outlineColor} dis=${dis.opacity} hover=${hoverEnabled}/${hoverDisabled} size=${off.w}x${off.h}`,
     );
   }
   // range は全タブを巡って探す（所属タブに依存しない）
@@ -606,7 +623,80 @@ async function inputForcedColorsScenario(page) {
     on.afterDisplay === 'block' &&
     on.afterBg !== on.bg &&
     off.afterDisplay === 'none';
-  return { pass, detail: `off=${JSON.stringify(off)} on=${JSON.stringify(on)}` };
+  // チェック済み+キーボードフォーカス: リングが塗り・枠と別色で見える(nit: 同色だと消える)
+  await box.evaluate((e) => e.blur());
+  await page.keyboard.press('Tab');
+  await box.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(100);
+  const ring = await box.evaluate((e) => {
+    const cs = getComputedStyle(e);
+    return {
+      outline: cs.outlineColor,
+      style: cs.outlineStyle,
+      bg: cs.backgroundColor,
+      border: cs.borderTopColor,
+    };
+  });
+  const clip = async (name) => {
+    if (!shotDir) return;
+    const b = await box.boundingBox();
+    await page.screenshot({
+      path: path.join(shotDir, name),
+      clip: { x: b.x - 8, y: b.y - 8, width: b.width + 16, height: b.height + 16 },
+    });
+  };
+  await clip('forced-colors-checked-focus.png');
+  // 未チェック+フォーカス
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(150);
+  const ringOff = await box.evaluate((e) => {
+    const cs = getComputedStyle(e);
+    return {
+      outline: cs.outlineColor,
+      style: cs.outlineStyle,
+      bg: cs.backgroundColor,
+      border: cs.borderTopColor,
+    };
+  });
+  await clip('forced-colors-unchecked-focus.png');
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(150);
+  // checked + disabled: GrayText のまま opacity を重ねて二重に薄くしない
+  await box.evaluate((e) => (e.disabled = true));
+  const dis = await read();
+  const disOpacity = await box.evaluate((e) => getComputedStyle(e).opacity);
+  await clip('forced-colors-checked-disabled.png');
+  await box.evaluate((e) => (e.disabled = false));
+  // disabled では hover の枠変化が効かない(チェック済みは枠が元から Highlight なので未チェックで見る)
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(150);
+  const hoverCheck = async (disabled) => {
+    await box.evaluate((e, d) => (e.disabled = d), disabled);
+    const b = await box.boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.waitForTimeout(150);
+    const border = await box.evaluate((e) => getComputedStyle(e).borderTopColor);
+    await page.mouse.move(0, 0);
+    await box.evaluate((e) => (e.disabled = false));
+    return border;
+  };
+  const hoverEnabled = await hoverCheck(false);
+  const hoverDisabled = await hoverCheck(true);
+  const colorsOk =
+    ring.style === 'solid' &&
+    ring.outline !== ring.bg &&
+    ring.outline !== ring.border &&
+    ringOff.style === 'solid' &&
+    ringOff.outline !== ringOff.bg &&
+    disOpacity === '1' &&
+    dis.bg !== on.bg &&
+    hoverDisabled !== hoverEnabled;
+  return {
+    pass: pass && colorsOk,
+    detail: `off=${JSON.stringify(off)} on=${JSON.stringify(on)} ring=${JSON.stringify(ring)} ringOff=${JSON.stringify(ringOff)} disabledChecked=${JSON.stringify(dis)} disOpacity=${disOpacity} hover=${hoverEnabled}/${hoverDisabled}`,
+  };
 }
 
 const scenarios = [

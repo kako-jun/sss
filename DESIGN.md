@@ -285,8 +285,12 @@ test) before the first radio lands.
   browser overrides background colours to `Canvas`, which would turn a checked box
   into an empty one. `@media (forced-colors: active)` sets
   `forced-color-adjust: none` and uses system colours only: border `ButtonText`,
-  checked fill `Highlight` with a `HighlightText` mark, focus ring `Highlight`,
-  disabled `GrayText`, range track and thumb `ButtonText` (thumb `Highlight` on hover).
+  checked fill `Highlight` with a `HighlightText` mark, focus ring `CanvasText`
+  (a checked box has a `Highlight` fill and border, so a `Highlight` ring would vanish),
+  disabled `GrayText` with opacity back to 1 (`GrayText` is already the dimmed
+  colour; the normal 0.3 would dim it twice), range track and thumb `ButtonText`
+  (thumb `Highlight` on hover). The hover border change applies only to enabled,
+  unchecked boxes (`:hover:not(:disabled):not(:checked)`).
 
 `src/test/inputDark.test.ts` walks the TypeScript syntax tree of `src/**/*.tsx` and
 fails if any checkbox/range lacks its class (a dynamic `className` such as `cn()`, a
