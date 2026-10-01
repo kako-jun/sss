@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScanSection } from './ScanSection';
 import { IntervalSection } from './IntervalSection';
 import { SettingsSection } from './SettingsSection';
@@ -65,6 +65,15 @@ export function Settings({
   // #66 問題9(a11y): 設定モーダルは role=dialog/aria-modal無し・フォーカストラップ
   // 無しだった（Tabで背後の写真オーバーレイへフォーカスが漏れる）。
   useFocusTrap(panelRef, isOpen, openedViaMouse);
+
+  // #109: 狭幅ではタブ行が横スクロールになる。クリックやプログラムからの選択でも
+  // 選択中のタブが見える位置までスクロールさせる（キーボード矢印はfocus()で既に追従）。
+  // block:'nearest' で縦方向（モーダル本体）はスクロールさせない。
+  useEffect(() => {
+    if (!isOpen) return;
+    const el = panelRef.current?.querySelector<HTMLElement>(`#tab-${activeTab}`);
+    el?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
+  }, [isOpen, activeTab]);
 
   if (!isOpen) return null;
 

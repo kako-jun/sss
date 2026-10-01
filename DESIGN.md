@@ -301,6 +301,9 @@ placeholder border on inactive tabs so nothing shifts on selection). Reasons:
   `shrink-0` a tall tab panel shrank the row (39px to 31px at 1280x800, 21px at
   800x600, clipping the label descenders). Row height is verified constant across
   all tabs and sizes in the real browser by the e2e scenario.
+- When the row scrolls horizontally (narrow widths), selecting a tab by click
+  also scrolls it into view (`scrollIntoView({inline:'nearest'})` in an effect on
+  the active tab); arrow keys already did via `focus()`. Verified at 360x640.
 - A sidebar redesign touches the tablist/tabpanel ARIA wiring, the focus trap's
   tab order, and every e2e selector keyed on `.overflow-x-auto` — a much larger
   surface of risk for a lateral (not clearly better) navigation pattern change.

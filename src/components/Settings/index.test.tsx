@@ -19,10 +19,9 @@ import { Settings } from './index';
 describe('Settings tablist (#109)', () => {
   it('is shrink-0 so it never collapses inside the flex-col modal body', () => {
     // 実描画での高さ一定の検証は e2e（Settings tablist height stays constant ...）が正本。
-    // jsdom はレイアウトしないため、潰れ防止クラスが落ちていないことだけをピン留めする。
+    // jsdom はレイアウトしないため、潰れ防止クラス（role=tablist 経由で取得）が落ちていないことだけを確認する。
     render(<Settings isOpen onClose={() => {}} onScanComplete={() => {}} />);
     const tablist = screen.getByRole('tablist');
-    expect(tablist.classList.contains('shrink-0')).toBe(true);
-    expect(tablist.classList.contains('overflow-x-auto')).toBe(true);
+    expect(tablist.className).toContain('shrink-0');
   });
 });

@@ -30,11 +30,11 @@ vitest + jsdom では再現できない、実ブラウザ固有のタイミン�
 npm run e2e
 ```
 
-- リポジトリルートから実行する。
+- リポジトリルートから実行する。他の dev サーバーとポートが衝突する場合は `E2E_PORT=1109 npm run e2e` のようにポートを変える。
 - 結果は全シナリオ終了後にまとめて出力される（実行中は `[e2e] 実行中: {name}` の進捗だけ出る）。
   `E2E_ONLY='(#68),fade'` のようにカンマ区切りの部分文字列を指定すると、名前が一致する
   シナリオだけ実行できる（デバッグ用）。
-- 内部で `vite`（ポート1420）を起動し、終了時に必ず kill する。**先に別の
+- 内部で `vite`（既定ポート1420、`E2E_PORT` で変更可）を起動し、終了時に必ず kill する。**先に別の
   `npm run dev`/`npm run tauri:dev` が動いていると起動に失敗するので閉じてから
   実行すること**（起動前にポート使用中かを検知し、その場合はvite起動を試みず
   即座に分かりやすいエラーで終了する。vite自体が起動直後に落ちた場合もタイム
@@ -46,7 +46,7 @@ npm run e2e
 - `init.js`: `page.addInitScript()` でブラウザへ注入し、
   `window.__TAURI_INTERNALS__`（Tauri の IPC 層）を薄くモックする。これにより
   Tauri ランタイム無しで `vite dev` 単体から `App.tsx` をそのまま動かせる。
-  URLの `#hash` でシナリオを選ぶ（例: `http://localhost:1420/#one`）。
+  URLの `#hash` でシナリオを選ぶ（例: `http://localhost:1420/#one`、ポートは `E2E_PORT` で変更した値）。
 - `run.js`: vite dev サーバーの起動・システムブラウザの起動・各シナリオの実行・
   終了処理（vite dev サーバーの確実な kill）を行う。可視判定は `element.hidden`
   等のプロパティでなく実ブラウザの `getComputedStyle` で行う（CLAUDE.md絶対
@@ -91,7 +91,7 @@ npm run e2e
 - 多言語（#80・#82）: `locale: 'en-US'` でようこそ画面・ウィンドウ周り（終了ボタンのツールチップ）が英語で出る／設定のタブ行が ja・en とも1行表示で 720px 幅でも横スクロールしない
 - 起動時の復元・背景スキャン・設定画面の「スキャン」が引数なしの `restore_playlist`/`rescan_last_directory` で動き、旧 `scan_directory` を呼ばない（#93。`slides` hash）
 - 設定モーダルのレイアウト（#66）: タブを切り替えてもタブ行の上端位置が動かない
-- 設定タブ行の高さ（#109）: ja/en × 1920x1080・1280x800・800x600 × 全 7 タブで `[role="tablist"]` の `getBoundingClientRect().height` が一定（flex-shrink で潰れない）。`E2E_PORT` 環境変数で vite のポートを変えられる（他の dev サーバーと衝突を避ける）
+- 設定タブ行の高さ（#109）: ja/en × 1920x1080・1280x800・800x600・480x800・360x640 × 全 7 タブで `[role="tablist"]` の `getBoundingClientRect().height` が一定（flex-shrink で潰れない）。狭幅（480x800・360x640）では、選択した各タブがクリックだけでタブ行の可視範囲に入る（#109）。`E2E_PORT` 環境変数で vite のポートを変えられる（他の dev サーバーと衝突を避ける）
 
 #66（ESC/Space/F/?・idleでのカーソル非表示・a11y）向けに以下も追加済み: Escapeが
 設定モーダルを閉じるだけでexit_appを呼ばない/何も開いていない時はexit_appを呼ぶ、

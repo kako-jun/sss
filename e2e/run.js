@@ -11,7 +11,8 @@
 // 実行方法: npm run e2e （リポジトリルートから）。
 // - CI には組み込まない（ローカル専用。system Chrome/Edge が要るため）。
 // - vite dev サーバーをこのスクリプトが起動し、終了時に必ず kill する
-//   （既に1420番ポートで別のdevサーバーが動いていると起動に失敗するので、
+//   （既定は1420番ポート、環境変数 E2E_PORT で変更可。そのポートで別のdevサーバーが
+//   動いていると起動に失敗するので、
 //   その場合は先に閉じてから実行すること）。
 // - Tauri IPC は e2e/init.js が window.__TAURI_INTERNALS__ をモックすることで
 //   vite dev 単体（Tauriランタイム無し）で App.tsx をそのまま動かす。
@@ -28,7 +29,7 @@ import net from 'node:net';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, '..');
-const PORT = Number(process.env.E2E_PORT || 1420);
+const PORT = Number(process.env.E2E_PORT) || 1420;
 const BASE_URL = `http://localhost:${PORT}`;
 const INIT_SCRIPT = path.join(__dirname, 'init.js');
 
@@ -1943,12 +1944,15 @@ async function measureSettingsTablistHeights(page) {
   await openSettingsModal(page);
   const tabIds = ['scan', 'options', 'exclude', 'pick', 'history', 'stats', 'info'];
   const rows = {};
+  const notVisible = [];
   let baseline = null;
   let pass = true;
   for (const [w, h] of [
     [1920, 1080],
     [1280, 800],
     [800, 600],
+    [480, 800],
+    [360, 640],
   ]) {
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(250);
@@ -1960,12 +1964,25 @@ async function measureSettingsTablistHeights(page) {
         () => document.querySelector('[role="tablist"]').getBoundingClientRect().height,
       );
       heights.push(height);
+      // 選択タブがタブ行の可視範囲に入っていること（狭幅の横スクロール追従）。
+      const visible = await page.evaluate((i) => {
+        const row = document.querySelector('[role="tablist"]').getBoundingClientRect();
+        const tab = document.getElementById(`tab-${i}`).getBoundingClientRect();
+        return tab.left >= row.left - 1 && tab.right <= row.right + 1;
+      }, id);
+      if (!visible) {
+        pass = false;
+        notVisible.push(`${w}x${h}:${id}`);
+      }
       if (baseline === null) baseline = height;
       if (Math.abs(height - baseline) >= 0.5) pass = false;
     }
     rows[`${w}x${h}`] = heights.map((x) => Math.round(x * 10) / 10);
   }
-  return { pass, detail: `baseline=${baseline} ${JSON.stringify(rows)}` };
+  return {
+    pass,
+    detail: `baseline=${baseline} ${JSON.stringify(rows)} notVisible=${JSON.stringify(notVisible)}`,
+  };
 }
 
 /**
