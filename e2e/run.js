@@ -1940,6 +1940,8 @@ const scenarios = [
  * 1920x1080 で測った基準高と、1280x800・800x600 の全タブが一致すること。
  */
 async function measureSettingsTablistHeights(page) {
+  // 高負荷環境でも初回描画（設定ボタン）を待てるよう、固定待機ではなくセレクタで待つ。
+  await page.waitForSelector('svg.lucide-settings', { timeout: 30000 });
   await page.waitForTimeout(400);
   await openSettingsModal(page);
   const tabIds = ['scan', 'options', 'exclude', 'pick', 'history', 'stats', 'info'];
@@ -1958,7 +1960,24 @@ async function measureSettingsTablistHeights(page) {
     await page.waitForTimeout(250);
     const heights = [];
     for (const id of tabIds) {
-      await page.evaluate((i) => document.getElementById(`tab-${i}`).click(), id);
+      // 実マウスクリック。狭幅で完全に隠れているタブは、まず行を横スクロールして
+      // 端に少し見える状態にし（ユーザーが行をスワイプ/ホイールした状態）、見えている
+      // 部分の中心を page.mouse.click する。追従の effect が無いと、クリック後も
+      // タブが一部しか見えないままになり下の可視判定で FAIL する。
+      const target = await page.evaluate((i) => {
+        const rowEl = document.querySelector('[role="tablist"]');
+        const tabEl = document.getElementById(`tab-${i}`);
+        let row = rowEl.getBoundingClientRect();
+        let tab = tabEl.getBoundingClientRect();
+        if (tab.left >= row.right - 4) rowEl.scrollLeft += tab.left - (row.right - 20);
+        else if (tab.right <= row.left + 4) rowEl.scrollLeft -= row.left + 20 - tab.right;
+        row = rowEl.getBoundingClientRect();
+        tab = tabEl.getBoundingClientRect();
+        const l = Math.max(tab.left, row.left);
+        const r = Math.min(tab.right, row.right);
+        return { x: (l + r) / 2, y: tab.top + tab.height / 2 };
+      }, id);
+      await page.mouse.click(target.x, target.y);
       await page.waitForTimeout(200);
       const height = await page.evaluate(
         () => document.querySelector('[role="tablist"]').getBoundingClientRect().height,
