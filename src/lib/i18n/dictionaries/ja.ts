@@ -172,6 +172,7 @@ export const ja = {
     '除外ルールを解除しました: {pattern}。再スキャンすると、除外されていた写真・動画がスライドショーに戻ります',
   excludeRulesChangedNeedsRescan: '除外ルールを変更しました。反映するには再スキャンが必要です',
   excludeRescanNow: '今すぐ再スキャン',
+  excludeRescanOtherScanRunning: 'フォルダのスキャンが終わるまでお待ちください',
   excludeRescanning: '再スキャン中...',
   excludeRescanDone: '再スキャンしました。除外ルールを反映しました（現在の対象は{count}件）',
 

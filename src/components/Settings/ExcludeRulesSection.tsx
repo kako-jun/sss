@@ -32,6 +32,8 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
         : resolveScanErrorMessage(rescanError.raw, '');
   const notice = rescan?.notice ?? null;
   const rescanning = rescan?.rescanning ?? false;
+  // フォルダタブのスキャン等、除外ルールの再スキャン以外が実行中
+  const otherScanRunning = (rescan?.busy ?? false) && !rescanning;
   const rescanTotal = rescan?.total ?? null;
 
   useEffect(() => {
@@ -120,11 +122,14 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
               {t('excludeRescanDone', { count: rescanTotal.toLocaleString() })}
             </p>
           )}
+          {otherScanRunning && notice !== null && (
+            <p className="text-white/50">{t('excludeRescanOtherScanRunning')}</p>
+          )}
           {rescanErrorMessage && <p className="text-red-400/70">{rescanErrorMessage}</p>}
           {(notice !== null || rescanning) && (
             <button
               onClick={rescan?.rescan}
-              disabled={rescanning}
+              disabled={rescanning || otherScanRunning}
               className="flex items-center gap-2 px-3 py-1.5 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded-lg transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <RefreshCw className={`w-4 h-4 ${rescanning ? 'animate-spin' : ''}`} />

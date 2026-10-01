@@ -51,12 +51,14 @@ const NOW = '今すぐ再スキャン';
 function Host({ onScanComplete }: { onScanComplete: () => void }) {
   const excludeRescan = useExcludeRescan(onScanComplete);
   const [key, setKey] = useState(0);
+  const [open, setOpen] = useState(true);
   return (
     <>
       <button data-testid="reopen" onClick={() => setKey((k) => k + 1)} />
+      <button data-testid="toggle-open" onClick={() => setOpen((o) => !o)} />
       <Settings
         key={key}
-        isOpen
+        isOpen={open}
         onClose={() => {}}
         onScanComplete={onScanComplete}
         excludeRescan={excludeRescan}
@@ -215,5 +217,102 @@ describe('Settings reopen keeps the exclude-rescan state (#111)', () => {
     expect(rescanLastDirectory).toHaveBeenCalledTimes(1);
     resolve(progress(3));
     await waitFor(() => expect(onScanComplete).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('folder-tab scan and exclude-tab rescan share one guard (#111)', () => {
+  async function folderScan() {
+    tab('scan');
+    fireEvent.click(await screen.findByRole('button', { name: 'スキャン' }));
+  }
+  async function addAndShowNotice() {
+    tab('exclude');
+    await addRule('**/a/');
+    await screen.findByRole('button', { name: NOW });
+  }
+
+  it('releases the guard after a successful folder scan: the exclude rescan can run (not scanInProgress)', async () => {
+    rescanLastDirectory.mockResolvedValueOnce(progress(1));
+    setup();
+    await addAndShowNotice();
+    await folderScan();
+    await waitFor(() => expect(rescanLastDirectory).toHaveBeenCalledTimes(1));
+    // フォルダタブのスキャン成功で案内は消えるので、新しい変更を入れてから押す
+    tab('exclude');
+    await addRule('**/b/');
+    rescanLastDirectory.mockResolvedValueOnce(progress(2));
+    fireEvent.click(await screen.findByRole('button', { name: NOW }));
+    await waitFor(() => expect(rescanLastDirectory).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('スキャン実行中です。完了までお待ちください。')).toBeNull();
+  });
+
+  it.each([
+    ['rejects', () => rescanLastDirectory.mockRejectedValueOnce('directoryNotFound:/x')],
+    ['returns null', () => rescanLastDirectory.mockResolvedValueOnce(null)],
+  ])('releases the guard when the folder scan %s', async (_label, arrange) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    setup();
+    await addAndShowNotice();
+    arrange();
+    await folderScan();
+    await waitFor(() => expect(rescanLastDirectory).toHaveBeenCalledTimes(1));
+    tab('exclude');
+    rescanLastDirectory.mockResolvedValueOnce(progress(2));
+    fireEvent.click(await screen.findByRole('button', { name: NOW }));
+    await waitFor(() => expect(rescanLastDirectory).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('スキャン実行中です。完了までお待ちください。')).toBeNull();
+  });
+
+  it('disables the exclude-tab button with an explanation while a folder scan runs, and re-enables it afterwards', async () => {
+    let resolve!: (v: ReturnType<typeof progress>) => void;
+    rescanLastDirectory.mockReturnValue(new Promise((r) => (resolve = r)));
+    setup();
+    await addAndShowNotice();
+    await folderScan();
+    await waitFor(() => expect(rescanLastDirectory).toHaveBeenCalledTimes(1));
+    tab('exclude');
+    const btn = (await screen.findByRole('button', { name: NOW })) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(screen.getByText('フォルダのスキャンが終わるまでお待ちください')).toBeTruthy();
+    fireEvent.click(btn);
+    expect(rescanLastDirectory).toHaveBeenCalledTimes(1);
+    resolve(progress(1));
+    // フォルダタブのスキャン成功で反映待ちが消え、待機表示も無くなる
+    await waitFor(() =>
+      expect(screen.queryByText('フォルダのスキャンが終わるまでお待ちください')).toBeNull(),
+    );
+  });
+
+  it('clears a stale "scan in progress" error once the other scan finishes', async () => {
+    let resolve!: (v: ReturnType<typeof progress>) => void;
+    rescanLastDirectory.mockReturnValue(new Promise((r) => (resolve = r)));
+    setup();
+    await addAndShowNotice();
+    await folderScan();
+    await waitFor(() => expect(rescanLastDirectory).toHaveBeenCalledTimes(1));
+    // フォルダスキャン中に、除外ルール側で変更を入れて案内を出し直す
+    tab('exclude');
+    await addRule('**/c/');
+    resolve(progress(1));
+    await waitFor(() =>
+      expect(screen.queryByText('フォルダのスキャンが終わるまでお待ちください')).toBeNull(),
+    );
+    expect(screen.queryByText('スキャン実行中です。完了までお待ちください。')).toBeNull();
+  });
+});
+
+describe('closing Settings clears a seen completion message (#111)', () => {
+  it('does not show a stale completion message after close and reopen', async () => {
+    rescanLastDirectory.mockResolvedValue(progress(5));
+    setup();
+    tab('exclude');
+    await addRule('**/a/');
+    fireEvent.click(await screen.findByRole('button', { name: NOW }));
+    await screen.findByText(/再スキャンしました。除外ルールを反映しました/);
+    fireEvent.click(screen.getByTestId('toggle-open')); // 閉じる
+    fireEvent.click(screen.getByTestId('toggle-open')); // 開く
+    tab('exclude');
+    await screen.findByPlaceholderText(/パターンを入力/);
+    expect(screen.queryByText(/再スキャンしました/)).toBeNull();
   });
 });

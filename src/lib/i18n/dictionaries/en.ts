@@ -171,6 +171,7 @@ export const en = {
     'Exclude rule removed: {pattern}. Rescan to bring the previously excluded photos and videos back into the slideshow',
   excludeRulesChangedNeedsRescan: 'Exclude rules changed. Rescan to apply the changes',
   excludeRescanNow: 'Rescan now',
+  excludeRescanOtherScanRunning: 'Please wait until the folder scan finishes',
   excludeRescanning: 'Rescanning...',
   excludeRescanDone:
     'Rescanned. The exclude rules are now applied ({count} items in the slideshow now)',

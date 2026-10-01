@@ -21,6 +21,7 @@ import type { ExcludeRescanController } from './useExcludeRescan';
 const excludeRescan: ExcludeRescanController = {
   notice: null,
   rescanning: false,
+  busy: false,
   total: null,
   error: null,
   noteChange: () => {},

@@ -61,6 +61,8 @@ export function useExcludeRescan(onRefreshed: () => void) {
   const [rescanning, setRescanning] = useState(false);
   const [total, setTotal] = useState<number | null>(null);
   const [error, setError] = useState<ExcludeRescanError | null>(null);
+  /** スキャン全般（除外ルールタブの再スキャン・フォルダタブのスキャン）が実行中か。UI の無効化用 */
+  const [busy, setBusy] = useState(false);
   const idRef = useRef(0);
   /** スキャン実行中か（除外ルールタブの再スキャン・フォルダタブのスキャン共通） */
   const runningRef = useRef(false);
@@ -93,6 +95,7 @@ export function useExcludeRescan(onRefreshed: () => void) {
   const begin = useCallback((): number | null => {
     if (runningRef.current) return null;
     runningRef.current = true;
+    if (mountedRef.current) setBusy(true);
     lockedUpToRef.current = idRef.current;
     return idRef.current;
   }, []);
@@ -100,6 +103,11 @@ export function useExcludeRescan(onRefreshed: () => void) {
   const end = useCallback(() => {
     runningRef.current = false;
     lockedUpToRef.current = 0;
+    if (mountedRef.current) {
+      setBusy(false);
+      // 「別のスキャン実行中」の表示は、そのスキャンが終わったら消す
+      setError((prev) => (prev?.kind === 'code' && prev.raw === 'scanInProgress' ? null : prev));
+    }
   }, []);
 
   /** 成功したスキャンが見ていた変更（id <= token）を反映済みとして外す。 */
@@ -150,6 +158,7 @@ export function useExcludeRescan(onRefreshed: () => void) {
   return {
     notice: toNotice(pending),
     rescanning,
+    busy,
     total,
     error,
     noteChange,

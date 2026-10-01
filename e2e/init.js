@@ -247,7 +247,17 @@
         // Reactツリーごとクラッシュしていた（エラーバウンダリが無いため白画面化）。
         // 各タブが単独で開けることを確認するため、空の既定値を返す。
         case 'get_ignore_patterns':
-          return [];
+          // #111: 追加・削除が開き直し（Settings 再マウント）でも一覧に残ることを検証できるよう、状態を持つ。
+          return (window.__e2eIgnoreRules = window.__e2eIgnoreRules || []).map((r) => ({ ...r }));
+        case 'add_ignore_pattern':
+          window.__e2eIgnoreRules = window.__e2eIgnoreRules || [];
+          window.__e2eIgnoreRules.push({ pattern: args.pattern, ruleType: 'glob' });
+          return null;
+        case 'remove_ignore_pattern':
+          window.__e2eIgnoreRules = (window.__e2eIgnoreRules || []).filter(
+            (r) => !(r.pattern === args.pattern && r.ruleType === args.ruleType),
+          );
+          return null;
         case 'get_picked_images':
           // #67: 'thumbs' = 静止画と動画が混在するピック一覧。
           return sc === 'thumbs' ? ['/p/a.png', '/p/v.webm'] : [];

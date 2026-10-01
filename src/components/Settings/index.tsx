@@ -69,6 +69,11 @@ export function Settings({
   const [statsKey, setStatsKey] = useState(0); // 統計グラフの強制再マウント用
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
+  // #111: 閉じるとき、見終えた完了/失敗の表示は消す（次に開いたとき古い結果が残らない）
+  const { clearResult } = excludeRescan;
+  useEffect(() => {
+    if (!isOpen) clearResult();
+  }, [isOpen, clearResult]);
   // #66 問題9(a11y): 設定モーダルは role=dialog/aria-modal無し・フォーカストラップ
   // 無しだった（Tabで背後の写真オーバーレイへフォーカスが漏れる）。
   useFocusTrap(panelRef, isOpen, openedViaMouse);

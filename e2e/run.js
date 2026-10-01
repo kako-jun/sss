@@ -1874,6 +1874,11 @@ const scenarios = [
         );
         return b ? b.disabled : null;
       });
+      // 開き直し後も、追加したルールが一覧に残り（モックの状態保持）、案内も残る
+      const ruleListedAfterReopen = await page.evaluate(() =>
+        (document.querySelector('[role=tabpanel]')?.innerText ?? '').includes('**/thumbs/'),
+      );
+      const noticeAfterReopen = await isVisible(page, '反映するには再スキャンが必要です');
       await page.waitForTimeout(2000);
       const doneShown = await isVisible(page, '再スキャンしました');
       const total = await rescanCalls();
@@ -1885,12 +1890,14 @@ const scenarios = [
         busy !== null &&
         busy.disabled === true &&
         busyReopened === true &&
+        ruleListedAfterReopen &&
+        noticeAfterReopen &&
         total === baseline + 1 &&
         doneShown &&
         buttonGone;
       return {
         pass,
-        detail: `baseline=${baseline} afterAdd=${afterAdd} total=${total} noticeBefore=${noticeBefore} noticeShown=${noticeShown} busy=${JSON.stringify(busy)} busyReopened=${busyReopened} doneShown=${doneShown} buttonGone=${buttonGone}`,
+        detail: `baseline=${baseline} afterAdd=${afterAdd} total=${total} noticeBefore=${noticeBefore} noticeShown=${noticeShown} busy=${JSON.stringify(busy)} busyReopened=${busyReopened} ruleListedAfterReopen=${ruleListedAfterReopen} noticeAfterReopen=${noticeAfterReopen} doneShown=${doneShown} buttonGone=${buttonGone}`,
       };
     },
   },
