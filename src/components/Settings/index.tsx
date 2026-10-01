@@ -157,12 +157,15 @@ export function Settings({
             フォーカスリングの上下端が切れないようにした（負のoffsetでリングを
             要素の内側に描画する）。
             #66 問題9(a11y): role=tablist/tab・aria-selected・ロービング
-            tabIndex・矢印キー移動を追加。 */}
+            tabIndex・矢印キー移動を追加。
+            #109: モーダル本体は flex-col で、overflow-x-auto の行は最小高が0に
+            なるため、タブ内容が長いと flex-shrink で行ごと潰れ（1280x800で
+            39→31px、800x600で21px）ラベル下部が切れた。shrink-0 で潰れを禁止する。 */}
         <div
           role="tablist"
           aria-label={t('settingsTabsLabel')}
           onKeyDown={handleTabRowKeyDown}
-          className="flex gap-1 mb-6 border-b border-white/8 overflow-x-auto"
+          className="flex gap-1 mb-6 border-b border-white/8 overflow-x-auto shrink-0"
         >
           {TAB_ORDER.map(({ id, labelKey }) => {
             const selected = activeTab === id;

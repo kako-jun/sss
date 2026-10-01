@@ -296,6 +296,11 @@ placeholder border on inactive tabs so nothing shifts on selection). Reasons:
   widths (`overflow-x-auto`, `flex-shrink-0`, `whitespace-nowrap` — #82): it
   wraps to horizontal scroll instead of breaking, and was confirmed not to
   regress at 720px before this pass even started.
+- The tablist itself must also be `shrink-0` (#109): it is a child of the modal's
+  `flex-col` body and `overflow-x-auto` gives it a zero min-height, so without
+  `shrink-0` a tall tab panel shrank the row (39px to 31px at 1280x800, 21px at
+  800x600, clipping the label descenders). Row height is verified constant across
+  all tabs and sizes in the real browser by the e2e scenario.
 - A sidebar redesign touches the tablist/tabpanel ARIA wiring, the focus trap's
   tab order, and every e2e selector keyed on `.overflow-x-auto` — a much larger
   surface of risk for a lateral (not clearly better) navigation pattern change.
