@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { rescanLastDirectory } from '../../lib/tauri';
 import type { MessageKey } from '../../lib/i18n';
 
@@ -28,14 +28,19 @@ interface PendingChange extends ExcludeRuleChange {
 
 /**
  * 変更を畳み込む。同じパターンの追加と削除が打ち消し合う（追加→削除で元に戻った場合は
- * 反映待ちが無くなる）。逆向きの変更が複数あれば古い方から相殺する。
+ * 反映待ちが無くなる）。ただし実行中の再スキャンが既に見ていた変更（id <= `lockedUpTo`）とは
+ * 相殺しない: その再スキャンは取り消し前の状態を読んでいる可能性があり、終わった後に
+ * もう一度再スキャンが要る状態を保つ。
  */
 export function applyChange(
   pending: PendingChange[],
   change: ExcludeRuleChange,
   id: number,
+  lockedUpTo = 0,
 ): PendingChange[] {
-  const opposite = pending.findIndex((c) => c.pattern === change.pattern && c.kind !== change.kind);
+  const opposite = pending.findIndex(
+    (c) => c.pattern === change.pattern && c.kind !== change.kind && c.id > lockedUpTo,
+  );
   if (opposite >= 0) return pending.filter((_, i) => i !== opposite);
   return [...pending, { ...change, id }];
 }
@@ -46,62 +51,101 @@ export function toNotice(pending: ExcludeRuleChange[]): ExcludeRescanNotice | nu
   return { kind: 'multiple' };
 }
 
+/**
+ * `App` が1つだけ保持する（`Settings` は開くたびに再マウントされるため、ここに置かないと
+ * 閉じて開き直すだけで案内・実行中フラグ・結果が消える）。スキャン全般の単一ガード
+ * （`begin`/`end`）も兼ね、除外ルールタブの再スキャンとフォルダタブのスキャンが並走しない。
+ */
 export function useExcludeRescan(onRefreshed: () => void) {
   const [pending, setPending] = useState<PendingChange[]>([]);
   const [rescanning, setRescanning] = useState(false);
   const [total, setTotal] = useState<number | null>(null);
   const [error, setError] = useState<ExcludeRescanError | null>(null);
   const idRef = useRef(0);
+  /** スキャン実行中か（除外ルールタブの再スキャン・フォルダタブのスキャン共通） */
   const runningRef = useRef(false);
+  /** 実行中のスキャンが開始時点で見ていた変更 id（実行中でなければ 0） */
+  const lockedUpToRef = useRef(0);
+  const mountedRef = useRef(true);
   const onRefreshedRef = useRef(onRefreshed);
   onRefreshedRef.current = onRefreshed;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const noteChange = useCallback((change: ExcludeRuleChange) => {
     idRef.current += 1;
     const id = idRef.current;
+    const locked = lockedUpToRef.current;
     setTotal(null);
     setError(null);
-    setPending((prev) => applyChange(prev, change, id));
+    setPending((prev) => applyChange(prev, change, id, locked));
   }, []);
 
-  /** 手動スキャン（フォルダタブ）の成功など、再スキャン済みになったとき。 */
-  const clearAll = useCallback(() => {
-    setPending([]);
+  /**
+   * スキャンを始める。既に実行中なら null。戻り値はこの時点までに加えられた変更の id で、
+   * 成功時に `clearUpTo` へ渡す（開始後に加わった変更は未反映なので消さない）。
+   */
+  const begin = useCallback((): number | null => {
+    if (runningRef.current) return null;
+    runningRef.current = true;
+    lockedUpToRef.current = idRef.current;
+    return idRef.current;
+  }, []);
+
+  const end = useCallback(() => {
+    runningRef.current = false;
+    lockedUpToRef.current = 0;
+  }, []);
+
+  /** 成功したスキャンが見ていた変更（id <= token）を反映済みとして外す。 */
+  const clearUpTo = useCallback((token: number) => {
+    if (!mountedRef.current) return;
+    setPending((prev) => prev.filter((c) => c.id > token));
     setTotal(null);
     setError(null);
   }, []);
 
-  /** 完了/失敗の表示だけ消す（除外ルールタブを開き直したとき。反映待ちと実行中は消さない）。 */
+  /** 完了/失敗の表示だけ消す（除外ルールタブを離れたとき。反映待ちと実行中は消さない）。 */
   const clearResult = useCallback(() => {
     setTotal(null);
     setError(null);
   }, []);
 
   const rescan = useCallback(async () => {
-    if (runningRef.current) return;
-    runningRef.current = true;
-    // この再スキャンに間に合っている変更（id が開始時点以下）だけを、成功時に反映済みとして外す。
-    const seenUpTo = idRef.current;
+    const token = begin();
+    if (token === null) {
+      // 別のスキャン（フォルダタブ等）が実行中。並走させず、理由を示す。
+      if (mountedRef.current) setError({ kind: 'code', raw: 'scanInProgress' });
+      return;
+    }
     setRescanning(true);
     setError(null);
     setTotal(null);
     try {
       const progress = await rescanLastDirectory();
+      if (!mountedRef.current) return;
       if (!progress) {
         setError({ kind: 'key', key: 'failedToScanDirectory' });
         return;
       }
       setTotal(progress.totalFiles);
-      setPending((prev) => prev.filter((c) => c.id > seenUpTo));
+      setPending((prev) => prev.filter((c) => c.id > token));
       onRefreshedRef.current();
     } catch (err) {
       console.error('Failed to rescan after exclude rule change:', err);
-      setError({ kind: 'code', raw: err instanceof Error ? err.message : String(err) });
+      if (mountedRef.current) {
+        setError({ kind: 'code', raw: err instanceof Error ? err.message : String(err) });
+      }
     } finally {
-      runningRef.current = false;
-      setRescanning(false);
+      end();
+      if (mountedRef.current) setRescanning(false);
     }
-  }, []);
+  }, [begin, end]);
 
   return {
     notice: toNotice(pending),
@@ -109,7 +153,9 @@ export function useExcludeRescan(onRefreshed: () => void) {
     total,
     error,
     noteChange,
-    clearAll,
+    begin,
+    end,
+    clearUpTo,
     clearResult,
     rescan,
   };

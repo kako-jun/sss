@@ -1811,7 +1811,7 @@ const scenarios = [
   },
   {
     // #111: 除外ルールの追加後に再スキャン案内とボタンが出て、押すと rescan_last_directory が
-    // 1回だけ呼ばれる。再スキャン中に別タブへ往復してもボタンは無効のまま・二重実行されず、
+    // 1回だけ呼ばれる。再スキャン中に別タブへ往復しても、設定を閉じて開き直しても、ボタンは無効のまま・二重実行されず、
     // 完了メッセージは戻ったときに見られる。
     name: 'exclude rule change shows a rescan notice; the button rescans once even across tab round trips (#111)',
     hash: 'exrescan',
@@ -1841,7 +1841,19 @@ const scenarios = [
         return b ? { disabled: b.disabled, display: getComputedStyle(b).display } : null;
       });
       if (busy && !busy.disabled) await page.click('button:has-text("再スキャン中")');
-      await page.waitForTimeout(1000);
+      // 再スキャン中に設定を閉じて開き直す（Settings は再マウントされるが状態は App が保持）
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(400);
+      await openSettingsModal(page);
+      await page.click('#tab-exclude');
+      await page.waitForTimeout(100);
+      const busyReopened = await page.evaluate(() => {
+        const b = [...document.querySelectorAll('button')].find((x) =>
+          x.textContent.includes('再スキャン中'),
+        );
+        return b ? b.disabled : null;
+      });
+      await page.waitForTimeout(2000);
       const doneShown = await isVisible(page, '再スキャンしました');
       const total = await rescanCalls();
       const buttonGone = !(await isVisible(page, '今すぐ再スキャン'));
@@ -1851,12 +1863,13 @@ const scenarios = [
         afterAdd === baseline &&
         busy !== null &&
         busy.disabled === true &&
+        busyReopened === true &&
         total === baseline + 1 &&
         doneShown &&
         buttonGone;
       return {
         pass,
-        detail: `baseline=${baseline} afterAdd=${afterAdd} total=${total} noticeBefore=${noticeBefore} noticeShown=${noticeShown} busy=${JSON.stringify(busy)} doneShown=${doneShown} buttonGone=${buttonGone}`,
+        detail: `baseline=${baseline} afterAdd=${afterAdd} total=${total} noticeBefore=${noticeBefore} noticeShown=${noticeShown} busy=${JSON.stringify(busy)} busyReopened=${busyReopened} doneShown=${doneShown} buttonGone=${buttonGone}`,
       };
     },
   },

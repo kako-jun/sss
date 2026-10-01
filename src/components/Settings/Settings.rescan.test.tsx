@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useState } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { setLanguageSetting } from '../../lib/i18n/store';
@@ -33,6 +34,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import { Settings } from './index';
+import { useExcludeRescan } from './useExcludeRescan';
 
 const progress = (totalFiles: number) => ({
   totalFiles,
@@ -45,11 +47,30 @@ const progress = (totalFiles: number) => ({
 
 const NOW = '今すぐ再スキャン';
 
+// App と同じ配線: 再スキャン状態は Settings の外（App）が持ち、Settings は key で再マウントされる。
+function Host({ onScanComplete }: { onScanComplete: () => void }) {
+  const excludeRescan = useExcludeRescan(onScanComplete);
+  const [key, setKey] = useState(0);
+  return (
+    <>
+      <button data-testid="reopen" onClick={() => setKey((k) => k + 1)} />
+      <Settings
+        key={key}
+        isOpen
+        onClose={() => {}}
+        onScanComplete={onScanComplete}
+        excludeRescan={excludeRescan}
+      />
+    </>
+  );
+}
+
 function setup() {
   const onScanComplete = vi.fn();
-  render(<Settings isOpen onClose={() => {}} onScanComplete={onScanComplete} />);
+  render(<Host onScanComplete={onScanComplete} />);
   return { onScanComplete };
 }
+const reopen = () => fireEvent.click(screen.getByTestId('reopen'));
 const tab = (id: string) => fireEvent.click(document.getElementById(`tab-${id}`)!);
 
 async function addRule(pattern: string) {
@@ -163,5 +184,36 @@ describe('Settings exclude-rescan wiring (#111)', () => {
     tab('exclude');
     expect(await screen.findByText(/除外ルールを追加しました: \/photos\//)).toBeTruthy();
     expect(screen.getByRole('button', { name: NOW })).toBeTruthy();
+  });
+});
+
+describe('Settings reopen keeps the exclude-rescan state (#111)', () => {
+  it('keeps the notice after the Settings component is remounted (closed and reopened)', async () => {
+    setup();
+    tab('exclude');
+    await addRule('**/a/');
+    await screen.findByRole('button', { name: NOW });
+    reopen();
+    // 再マウントで初期タブ(フォルダ)に戻る
+    tab('exclude');
+    expect(await screen.findByRole('button', { name: NOW })).toBeTruthy();
+  });
+
+  it('keeps the running state after reopen: button stays disabled and only one IPC', async () => {
+    let resolve!: (v: ReturnType<typeof progress>) => void;
+    rescanLastDirectory.mockReturnValue(new Promise((r) => (resolve = r)));
+    const { onScanComplete } = setup();
+    tab('exclude');
+    await addRule('**/a/');
+    fireEvent.click(await screen.findByRole('button', { name: NOW }));
+    await screen.findByRole('button', { name: '再スキャン中...' });
+    reopen();
+    tab('exclude');
+    const busy = await screen.findByRole('button', { name: '再スキャン中...' });
+    expect((busy as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(busy);
+    expect(rescanLastDirectory).toHaveBeenCalledTimes(1);
+    resolve(progress(3));
+    await waitFor(() => expect(onScanComplete).toHaveBeenCalledTimes(1));
   });
 });

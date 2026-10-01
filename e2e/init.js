@@ -178,7 +178,7 @@
             errorExamples: [],
           };
         case 'rescan_last_directory':
-          if (sc === 'exrescan') await new Promise((r) => setTimeout(r, 700));
+          if (sc === 'exrescan') await new Promise((r) => setTimeout(r, 1800));
           if (sc === 'unreach') {
             await new Promise((r) => setTimeout(r, 100));
             // #80: 実際のバックエンドはユーザー向け文言でなくエラーコードで返す

@@ -8,7 +8,7 @@ import { VideoSection } from './VideoSection';
 import { ShareDirectorySection } from './ShareDirectorySection';
 import { LanguageSection } from './LanguageSection';
 import { ExcludeRulesSection } from './ExcludeRulesSection';
-import { useExcludeRescan } from './useExcludeRescan';
+import type { ExcludeRescanController } from './useExcludeRescan';
 import { PickSection } from './PickSection';
 import { HistorySection } from './HistorySection';
 import { GraphSection } from './GraphSection';
@@ -22,6 +22,11 @@ interface SettingsProps {
   isOpen: boolean;
   onClose: () => void;
   onScanComplete: () => void;
+  /**
+   * #111: 除外ルール変更後の再スキャン案内・実行状態。Settings は開くたびに再マウントされるため、
+   * 状態は App が保持して渡す（閉じて開き直しても案内・実行中・結果が残る）。
+   */
+  excludeRescan: ExcludeRescanController;
   onIntervalChange?: (interval: number) => void;
   /** #68: 動画の音声ON/OFFが変わったときに、再生中のスライドショーへ即時反映するための通知。 */
   onVideoAudioChange?: (enabled: boolean) => void;
@@ -53,6 +58,7 @@ export function Settings({
   isOpen,
   onClose,
   onScanComplete,
+  excludeRescan,
   onIntervalChange,
   onVideoAudioChange,
   onVideoMaxDurationChange,
@@ -61,8 +67,6 @@ export function Settings({
 }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'scan');
   const [statsKey, setStatsKey] = useState(0); // 統計グラフの強制再マウント用
-  // #111: 除外ルール変更後の再スキャン案内と再スキャンの進行状態。タブを切り替えても保つ。
-  const excludeRescan = useExcludeRescan(onScanComplete);
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
   // #66 問題9(a11y): 設定モーダルは role=dialog/aria-modal無し・フォーカストラップ
@@ -210,13 +214,7 @@ export function Settings({
         <div className="flex-1 overflow-y-auto">
           {activeTab === 'scan' && (
             <div role="tabpanel" id="tabpanel-scan" aria-labelledby="tab-scan" tabIndex={0}>
-              <ScanSection
-                onScanComplete={() => {
-                  // 手動の再スキャンでも除外ルールの変更は反映される
-                  excludeRescan.clearAll();
-                  onScanComplete();
-                }}
-              />
+              <ScanSection onScanComplete={onScanComplete} guard={excludeRescan} />
             </div>
           )}
           {activeTab === 'options' && (
