@@ -66,3 +66,19 @@ afterEach(() => {
   }
   vi.restoreAllMocks();
 });
+
+// #119: 実アプリ（Tauri）では tauri_plugin_dialog が window.confirm/alert/prompt を
+// Promise を返す非同期版に差し替える。Promise は常に truthy なので `if (!confirm())` が
+// 素通りして破壊的操作が確認なしで走った。jsdom でも同じ状況を再現し、コードが
+// window.confirm 等に依存していれば「確認なしで進む」形でテストが落ちるようにする。
+if (typeof window !== 'undefined') {
+  for (const name of ['confirm', 'alert', 'prompt'] as const) {
+    Object.defineProperty(window, name, {
+      configurable: true,
+      writable: true,
+      // 実機は（権限なしで）reject される Promise を返すが、ここでは unhandled rejection を
+      // 避けるため undefined で resolve する Promise にする。肝は「常に truthy な Promise を返す」点。
+      value: () => Promise.resolve(undefined),
+    });
+  }
+}

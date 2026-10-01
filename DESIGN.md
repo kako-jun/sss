@@ -263,6 +263,47 @@ Keep a border only when there's no background difference to rely on (an input
 field on bare black, a thumbnail image that needs a defined edge) — see Input
 Fields below.
 
+### Confirm Modal (#119)
+
+In-app replacement for `window.confirm` (which Tauri turns into an always-truthy
+Promise — never use it). `role="alertdialog"`, `aria-modal="true"`. Same panel as
+other modals on a `bg-black/85 backdrop-blur-md` backdrop, portaled to `body`,
+narrower (`max-w-md`). Message body (`text-sm text-white/70`,
+`whitespace-pre-line`), no visible title — a `sr-only` `<h2>`
+("確認" / "Confirm") is referenced via `aria-labelledby`;
+
+```
+Panel:    bg-neutral-950 rounded-2xl border border-white/10 shadow-2xl p-7 max-w-md w-full mx-8
+Cancel:   Buttons — Standard (bg-white/8 hover:bg-white/15 text-white/60 …)
+Confirm:  bg-red-950/60 hover:bg-red-900/60 text-red-400/70 hover:text-red-400/90 rounded-lg text-sm
+          (the Settings "danger zone" button style; label names the action, never "OK")
+```
+
+Long bodies: the panel is `flex flex-col max-h-[calc(100vh-2rem)]`. The message is
+split on `\n\n`; the **last paragraph is pinned outside the scroll area, right
+above the button row** (`shrink-0`) so the destructive warning ("This cannot be
+undone…") is always readable without scrolling, even on a 360x300 window. Only
+the earlier paragraphs scroll (`min-h-0 overflow-y-auto`), with a bottom fade
+(`h-8 from-neutral-950 via-neutral-950/80 to-transparent`) shown only while more
+text is hidden. The scroll hint (`text-xs text-white/50`, right-aligned,
+"矢印キーで続きを表示" / "Arrow keys: scroll for more"; text only, no icon or
+emoji, part of the accessible text) is its **own row below the scroll area**
+(`shrink-0`), never overlapping the fade or the text; the row's height is reserved
+while the body overflows (text swaps for a blank), so nothing jumps when it
+appears or disappears. On windows shorter than 420px the panel padding and the
+gaps tighten (`[@media(max-height:420px)]`) to leave more body lines; even at
+360x300 the warning and buttons stay pinned and visible. A single-paragraph
+message is all scroll area (no pinned part).
+
+Keyboard access to the scrolling body: **key handler, not `tabIndex=0`.** While the
+body overflows, ↑/↓ (24px), PageUp/PageDown, Home/End on the dialog scroll it;
+Tab/Enter/Space/Esc behave as usual and nothing else is intercepted when it does
+not overflow. Making the body a focusable `region` would put it before Cancel in
+the focus order, so `useFocusTrap` would focus it first and Cancel would no
+longer be the default focus — the safe default for a destructive prompt wins.
+
+Esc / backdrop click = Cancel. No emoji.
+
 ### Settings Section Rhythm (#66)
 
 Every settings tab is a vertical stack of sections (`space-y-8` between them).

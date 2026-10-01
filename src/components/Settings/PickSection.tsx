@@ -2,6 +2,7 @@ import { X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getPickedImages, deletePickedImage } from '../../lib/tauri';
 import { useT } from '../../lib/i18n';
+import { confirmDialog } from '../../lib/confirmDialog';
 import { Thumbnail } from './Thumbnail';
 
 export function PickSection() {
@@ -22,7 +23,11 @@ export function PickSection() {
   }, []);
 
   const handleDelete = async (path: string) => {
-    if (!window.confirm(t('confirmDeletePickedPhoto'))) return;
+    const ok = await confirmDialog({
+      message: t('confirmDeletePickedPhoto'),
+      confirmLabel: t('deleteTooltip'),
+    });
+    if (!ok) return;
     try {
       await deletePickedImage(path);
       setImages((prev) => prev.filter((p) => p !== path));

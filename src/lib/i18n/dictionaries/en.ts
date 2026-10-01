@@ -17,6 +17,9 @@ export const en = {
   windowModeToggleFailed: "Couldn't switch window mode",
   genericErrorTitle: 'Something went wrong',
   closeTooltip: 'Close',
+  cancelButton: 'Cancel',
+  confirmDialogTitle: 'Confirm',
+  confirmDialogMoreHint: 'Arrow keys: scroll for more',
 
   // === Keyboard shortcuts (#66) ===
   shortcutsButtonTooltip: 'Keyboard shortcuts (?)',

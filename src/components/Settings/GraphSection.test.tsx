@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent, within } from '@testing-library/react';
 import { setLanguageSetting } from '../../lib/i18n/store';
 
 // #80: GraphSectionはuPlotでチャートを描画する。src/test/setup.tsに追加した
@@ -16,6 +16,7 @@ vi.mock('../../lib/tauri', () => ({
   resetAllDisplayCounts: (...args: unknown[]) => resetAllDisplayCounts(...args),
 }));
 
+import { ConfirmDialogHost } from '../ConfirmDialog';
 import { GraphSection } from './GraphSection';
 
 beforeEach(() => {
@@ -312,16 +313,23 @@ describe('GraphSection reset flow (#67)', () => {
 
   it('does not reset or reload when the confirmation is cancelled', async () => {
     getDisplayStats.mockResolvedValue(stats);
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
-    render(<GraphSection />);
+    render(
+      <>
+        <GraphSection />
+        <ConfirmDialogHost />
+      </>,
+    );
     await waitFor(() => expect(screen.getByText('表示回数をリセット')).toBeTruthy());
     fireEvent.click(screen.getByText('表示回数をリセット'));
 
-    expect(confirm).toHaveBeenCalledWith('すべての画像の表示回数をリセットしますか？');
+    expect(screen.getByRole('alertdialog').textContent).toContain(
+      'すべての画像の表示回数をリセットしますか？',
+    );
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByText('キャンセル'));
+    await act(async () => {});
     expect(resetAllDisplayCounts).not.toHaveBeenCalled();
     expect(getDisplayStats).toHaveBeenCalledTimes(1);
-    confirm.mockRestore();
   });
 
   it('resets and then reloads the stats: the real backend still returns every playlist member, all in the 0-count bin', async () => {
@@ -333,11 +341,16 @@ describe('GraphSection reset flow (#67)', () => {
       bins: [{ count: 0, files: 2 }],
     });
     resetAllDisplayCounts.mockResolvedValue(undefined);
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    const { container } = render(<GraphSection />);
+    const { container } = render(
+      <>
+        <GraphSection />
+        <ConfirmDialogHost />
+      </>,
+    );
     await waitFor(() => expect(screen.getByText('表示回数をリセット')).toBeTruthy());
     fireEvent.click(screen.getByText('表示回数をリセット'));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByText('表示回数をリセット'));
 
     // 「データがありません」ではなく、0回の単一棒（全員 0 回 = 均等）が出る。
     await waitFor(() => {
@@ -350,6 +363,5 @@ describe('GraphSection reset flow (#67)', () => {
     expect(screen.queryByText('データがありません。スキャンを実行してください。')).toBeNull();
     expect(resetAllDisplayCounts).toHaveBeenCalledTimes(1);
     expect(getDisplayStats).toHaveBeenCalledTimes(2);
-    confirm.mockRestore();
   });
 });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 
 const getPickedImages = vi.fn();
 const deletePickedImage = vi.fn();
@@ -17,6 +17,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import { PickSection } from './PickSection';
+import { ConfirmDialogHost } from '../ConfirmDialog';
 
 beforeEach(() => {
   getPickedImages.mockReset();
@@ -32,7 +33,12 @@ describe('PickSection thumbnails (#67)', () => {
       path.endsWith('.mp4') ? { kind: 'video' } : { kind: 'image', path: '/cache/thumbs/a.jpg' },
     );
 
-    const { container } = render(<PickSection />);
+    const { container } = render(
+      <>
+        <PickSection />
+        <ConfirmDialogHost />
+      </>,
+    );
 
     await waitFor(() => expect(screen.getByText('clip.mp4')).toBeTruthy());
     await waitFor(() => expect(container.querySelectorAll('img').length).toBe(1));
@@ -42,23 +48,38 @@ describe('PickSection thumbnails (#67)', () => {
   });
 
   it('requests no thumbnail while every picked item is outside the viewport', async () => {
+    // #108: observe() は描画後の effect で呼ばれる。呼び出しを待ってから検証し、unmount してからスタブを戻す。
+    const observed: unknown[] = [];
     class NeverVisibleObserver {
-      observe() {}
+      observe(el: unknown) {
+        observed.push(el);
+      }
       disconnect() {}
     }
     vi.stubGlobal('IntersectionObserver', NeverVisibleObserver);
-    getPickedImages.mockResolvedValue(['/pick/a.jpg', '/pick/b.jpg']);
+    const picked = ['/pick/a.jpg', '/pick/b.jpg'];
+    getPickedImages.mockResolvedValue(picked);
 
-    render(<PickSection />);
-    await waitFor(() => expect(screen.getAllByTitle('削除').length).toBe(2));
+    const { unmount } = render(<PickSection />);
+    try {
+      await waitFor(() => expect(screen.getAllByTitle('削除').length).toBe(picked.length));
+      await waitFor(() => expect(observed.length).toBe(picked.length));
 
-    expect(getThumbnail).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
+      expect(getThumbnail).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('shows the empty message and requests no thumbnail when nothing is picked', async () => {
     getPickedImages.mockResolvedValue([]);
-    render(<PickSection />);
+    render(
+      <>
+        <PickSection />
+        <ConfirmDialogHost />
+      </>,
+    );
 
     await waitFor(() => expect(screen.getByText('ピックした写真はありません')).toBeTruthy());
     expect(getThumbnail).not.toHaveBeenCalled();
@@ -72,7 +93,12 @@ describe('PickSection thumbnails (#67)', () => {
       return { kind: 'image', path: '/cache/thumbs/ok.jpg' };
     });
 
-    const { container } = render(<PickSection />);
+    const { container } = render(
+      <>
+        <PickSection />
+        <ConfirmDialogHost />
+      </>,
+    );
 
     await waitFor(() => expect(container.querySelectorAll('img').length).toBe(1));
     expect(spy).toHaveBeenCalled();
@@ -86,29 +112,38 @@ describe('PickSection delete (#67)', () => {
     getPickedImages.mockResolvedValue(['/pick/a.jpg', '/pick/b.jpg']);
     getThumbnail.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/t.jpg' });
     deletePickedImage.mockResolvedValue(undefined);
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    render(<PickSection />);
+    render(
+      <>
+        <PickSection />
+        <ConfirmDialogHost />
+      </>,
+    );
     await waitFor(() => expect(screen.getAllByTitle('削除').length).toBe(2));
     fireEvent.click(screen.getAllByTitle('削除')[0]);
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByText('削除'));
 
     await waitFor(() => expect(screen.getAllByTitle('削除').length).toBe(1));
     expect(deletePickedImage).toHaveBeenCalledWith('/pick/a.jpg');
-    confirm.mockRestore();
   });
 
   it('keeps the item when the confirmation is cancelled', async () => {
     getPickedImages.mockResolvedValue(['/pick/a.jpg']);
     getThumbnail.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/t.jpg' });
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
-    render(<PickSection />);
+    render(
+      <>
+        <PickSection />
+        <ConfirmDialogHost />
+      </>,
+    );
     await waitFor(() => expect(screen.getAllByTitle('削除').length).toBe(1));
     fireEvent.click(screen.getByTitle('削除'));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByText('キャンセル'));
+    await act(async () => {});
 
     expect(deletePickedImage).not.toHaveBeenCalled();
     expect(screen.getAllByTitle('削除').length).toBe(1);
-    confirm.mockRestore();
   });
 
   it('keeps the item when the backend delete fails', async () => {
@@ -116,15 +151,19 @@ describe('PickSection delete (#67)', () => {
     getPickedImages.mockResolvedValue(['/pick/a.jpg']);
     getThumbnail.mockResolvedValue({ kind: 'image', path: '/cache/thumbs/t.jpg' });
     deletePickedImage.mockRejectedValue(new Error('permission denied'));
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    render(<PickSection />);
+    render(
+      <>
+        <PickSection />
+        <ConfirmDialogHost />
+      </>,
+    );
     await waitFor(() => expect(screen.getAllByTitle('削除').length).toBe(1));
     fireEvent.click(screen.getByTitle('削除'));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByText('削除'));
 
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(screen.getAllByTitle('削除').length).toBe(1);
-    confirm.mockRestore();
     spy.mockRestore();
   });
 });
