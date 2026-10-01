@@ -1974,6 +1974,7 @@ const scenarios = [
             parentBottom: parent.bottom,
             parentLeft: parent.left,
             subRight: rect(sub).right,
+            scrollable: sub.scrollHeight > sub.clientHeight,
             hitsBar: hits(b),
             hitsPill: pills.some(hits),
             vh: innerHeight,
@@ -1981,7 +1982,7 @@ const scenarios = [
           };
         });
         // 側方展開（親メニューの左）では、右端が親メニュー枠に食い込まない。
-        // 積み重ね展開（幅420px以下）では対象外。
+        // 積み重ね展開（幅430px以下）では対象外。
         const sideBySide = !!m && m.subRight <= m.parentLeft - 2;
         const stacked = !!m && !sideBySide;
         const ok =
@@ -1992,13 +1993,15 @@ const scenarios = [
           m.right <= m.vw &&
           !m.hitsBar &&
           !m.hitsPill &&
+          // 縦スクロール不要（border 分の数pxでも溢れさせない）
+          !m.scrollable &&
           // 親メニューの縦範囲から大きく外れない（下へ突き抜けない／上へ離れすぎない）
           m.bottom <= m.parentBottom + 4 &&
           m.top >= m.parentTop - 60 &&
           (w <= 430 ? stacked || sideBySide : sideBySide);
         if (!ok) pass = false;
         details.push(
-          `${w}x${h}:${ok ? 'ok' : 'NG'}(${m ? `left=${Math.round(m.left)} right=${Math.round(m.right)} subRight=${Math.round(m.subRight)} top=${Math.round(m.top)} bottom=${Math.round(m.bottom)} parent=${Math.round(m.parentTop)}-${Math.round(m.parentBottom)} parentLeft=${Math.round(m.parentLeft)} barTop=${Math.round(m.barTop)} pill=${m.hitsPill}` : 'items missing'})`,
+          `${w}x${h}:${ok ? 'ok' : 'NG'}(${m ? `left=${Math.round(m.left)} right=${Math.round(m.right)} subRight=${Math.round(m.subRight)} top=${Math.round(m.top)} bottom=${Math.round(m.bottom)} parent=${Math.round(m.parentTop)}-${Math.round(m.parentBottom)} parentLeft=${Math.round(m.parentLeft)} barTop=${Math.round(m.barTop)} pill=${m.hitsPill} scrollable=${m.scrollable}` : 'items missing'})`,
         );
       }
       return { pass, detail: details.join(' ') };

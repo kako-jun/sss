@@ -349,7 +349,7 @@ submenu is anchored by its **bottom** edge (`absolute right-full bottom-0`), not
 `top-0`: it is opened from the last row of the parent menu, and growing downward
 from there would run past the viewport and over the bar (#110). Any new nested
 submenu opened from a bottom-anchored menu follows the same rule. At viewport
-width <= 430px there is no room left of the parent (208 + 192 + 4px > width), so
+width <= 430px there is no room left of the parent (parent right edge at ~231px + 4px gap + 192px submenu + 4px margin = 431px, so it does not fit below 431px), so
 the submenu instead stacks directly above the Exclude row, right-aligned with the
 parent (`max-[430px]:right-0 max-[430px]:bottom-full`). Verified in a real browser
 down to 320px wide.
