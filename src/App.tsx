@@ -815,15 +815,25 @@ function App() {
               {hasDirectory ? t('openSettings') : t('selectFolder')}
             </button>
             {!hasDirectory && (
-              <div className="mt-6 flex items-center justify-center gap-1.5 text-white/50 text-xs">
+              <button
+                type="button"
+                onClick={(e) => {
+                  // 右上のショートカットボタンと同じ経路（#100）。クリック(detail>0)か
+                  // キーボードのEnter/Space起動(detail===0)かをuseFocusTrapへ伝える。
+                  setShortcutsOpenedViaMouse(e.detail > 0);
+                  setIsShortcutsOpen(true);
+                }}
+                aria-keyshortcuts="?"
+                className="group mx-auto -mb-1 mt-5 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1 text-xs text-white/50 transition-colors hover:text-white/80 focus-visible:text-white/80"
+              >
                 <span
-                  className="font-mono px-1.5 py-0.5 bg-white/8 border border-white/10 rounded"
+                  className="rounded border border-white/10 bg-white/8 px-1.5 py-0.5 font-mono transition-colors group-hover:bg-white/15 group-focus-visible:bg-white/15"
                   aria-hidden="true"
                 >
                   ?
                 </span>
                 <span>{t('shortcutsHintWelcome')}</span>
-              </div>
+              </button>
             )}
           </div>
         </div>

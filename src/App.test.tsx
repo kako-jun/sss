@@ -635,6 +635,31 @@ describe('App keyboard shortcuts: Space, F, ? (#66 問題4)', () => {
     expect(invoke).not.toHaveBeenCalledWith('exit_app');
   });
 
+  // #100: ようこそ画面の「?」ヒントはボタンで、クリックでも一覧を開ける。
+  it('opens the shortcuts overlay when the welcome-screen hint button is clicked, and the close button closes it', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    const hint = screen.getByRole('button', { name: 'ショートカット一覧を表示' });
+    expect(hint.getAttribute('type')).toBe('button');
+    expect(hint.getAttribute('aria-keyshortcuts')).toBe('?');
+    expect(screen.queryByText('キーボードショートカット')).toBeNull();
+
+    fireEvent.click(hint, { detail: 1 });
+    await waitFor(() => {
+      expect(screen.getByText('キーボードショートカット')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByLabelText('閉じる'));
+    await waitFor(() => {
+      expect(screen.queryByText('キーボードショートカット')).toBeNull();
+    });
+  });
+
   it('does not toggle pause when Space is pressed while a button has real keyboard (:focus-visible) focus (avoids double-firing the native click)', async () => {
     useRestoredStartupPath();
     getNextImage.mockResolvedValueOnce(foundImage('/a.jpg'));

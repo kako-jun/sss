@@ -167,6 +167,23 @@ rounded-lg
 (no background at rest)
 ```
 
+### Buttons — Inline hint (#100)
+
+A hint that is also a control (the welcome screen's "? Show keyboard shortcuts"):
+Ghost text color with a key-cap chip, no background at rest. Hover/focus-visible only
+brightens the text (`/50` -> `/80`) and the chip (`bg-white/8` -> `bg-white/15`) —
+no borders or fills are added. The chip is `aria-hidden`; the button's accessible
+name comes from its text and `aria-keyshortcuts="?"` exposes the key.
+
+```
+text-white/50 hover:text-white/80 focus-visible:text-white/80
+chip: bg-white/8 group-hover:bg-white/15 group-focus-visible:bg-white/15
+rounded-lg px-2 py-1 text-xs transition-colors
+```
+
+The padding enlarges the click target; offset it with margins (`mt-5 -mb-1` in place
+of the former `mt-6`) so the card's vertical rhythm is unchanged.
+
 ### Input Fields
 
 ```
@@ -181,6 +198,28 @@ Read-only fields that display a filesystem path (scan folder, pick destination)
 add `truncate` and `title={value}` (#66) — a path is often longer than the field,
 and an `<input>` clips it without an ellipsis or a way to read the rest unless
 both are set explicitly.
+
+### Select (Dropdown) (#102)
+
+```
+sss-select  px-2 py-1 bg-black/40 text-white/60
+rounded border border-white/8 text-sm
+focus:outline-none focus:border-white/20
+```
+
+The closed control stays translucent glass (`bg-black/40`), but the popup list
+is drawn by the OS and defaults to a light background (seen on Windows/WebView2),
+which clashes with the dark theme. Every `<select>` MUST carry the shared
+`.sss-select` class (defined in `src/index.css`): it sets `color-scheme: dark`
+and gives `<option>`/`<optgroup>` an opaque `#0a0a0a` background with
+`rgba(255,255,255,0.87)` text (about 14.9:1 contrast, above WCAG AA). The popup
+must be opaque, so never use a `/NN` alpha colour on options.
+`src/test/selectDark.test.ts` scans all components and fails if a `<select>`
+lacks the class.
+
+Caveat: on macOS WKWebView / Linux WebKitGTK the popup is drawn natively and
+the option CSS (and even `color-scheme: dark`) may not take effect; this is
+unverified on real devices. Windows (WebView2) is the primary target.
 
 ### Range Sliders
 
@@ -536,8 +575,9 @@ uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
 - Import custom fonts beyond Inter
 - Use opacity values outside standard increments (/5, /8, /10, /15, /20, /25, /30, etc.).
   Tailwind 3.4's own opacity scale is 5-step (0, 5, 10, ..., 95, 100) — `/8` is the
-  one value on this list that isn't a multiple of 5, and it's only usable because
-  `tailwind.config.js` adds `theme.extend.opacity: { 8: '0.08' }` explicitly
+  one value on this list that isn't a multiple of 5 (besides the background logo's
+  `opacity-2`, #99), and they're only usable because `tailwind.config.js` adds
+  `theme.extend.opacity: { 2: '0.02', 8: '0.08' }` explicitly
   (#66レビューmust3: without that entry, `border-white/8`/`bg-white/8` silently
   generate no CSS at all and fall back to Preflight's default `border-color:
 currentColor`, rendering a visibly brighter border than intended). Adding any
