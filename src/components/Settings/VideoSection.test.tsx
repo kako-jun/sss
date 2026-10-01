@@ -23,6 +23,13 @@ describe('VideoSection (#68)', () => {
     saveSetting.mockResolvedValue(undefined);
   });
 
+  it('select carries the shared dark-popup class (#102)', async () => {
+    render(<VideoSection />);
+    const select = screen.getByLabelText('動画の最大再生時間') as HTMLSelectElement;
+    await waitFor(() => expect(getSetting).toHaveBeenCalledTimes(2));
+    expect(select.classList.contains('sss-select')).toBe(true);
+  });
+
   it('shows the defaults (audio OFF, unlimited) when nothing is saved', async () => {
     render(<VideoSection />);
     const checkbox = screen.getByLabelText('動画の音声を再生する') as HTMLInputElement;

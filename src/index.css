@@ -75,3 +75,18 @@ a:focus-visible,
   outline: 2px solid rgba(255, 255, 255, 0.6);
   outline-offset: 2px;
 }
+
+/* select のポップアップ(選択肢リスト)はOS既定だと明るい背景になり、ダークテーマと
+   不整合になる(Windows/WebView2、#102)。color-scheme: dark でネイティブ部品を
+   ダーク化しつつ、option/optgroup には不透明な背景と明るい文字色を明示する。
+   本体(bg-black/40 の半透明ガラス)は各 select のクラスで指定し、ここでは触らない。
+   全ての <select> はこのクラスを付ける(src/test/selectDark.test.ts が走査で担保)。 */
+.sss-select {
+  color-scheme: dark;
+}
+
+.sss-select option,
+.sss-select optgroup {
+  background-color: #0a0a0a;
+  color: rgba(255, 255, 255, 0.87);
+}
