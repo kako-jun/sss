@@ -86,7 +86,7 @@ describe('InfoSection GitHub link (openUrl)', () => {
   });
 });
 
-// #64: 「設定を初期化」ボタンの 確認→実行 の流れ、および失敗時に日本語メッセージを
+// #64: 「すべてのデータを初期化」ボタンの 確認→実行 の流れ、および失敗時に日本語メッセージを
 // 表示することを固定する。成功時は backend（reset_all_data）が最後にアプリの
 // プロセス自体を再起動するため、フロント側は resetAllData() を呼ぶだけで以降は
 // 何もしない（window.location.reload() 等は呼ばない。プロセスごと終了して
@@ -99,10 +99,10 @@ describe('InfoSection reset button (resetAllData)', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(<InfoSection />);
-    fireEvent.click(screen.getByText('設定を初期化'));
+    fireEvent.click(screen.getByText('すべてのデータを初期化'));
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。完了後アプリが再起動します。',
+      'すべてのデータを初期化しますか？\n\n設定、除外ルール、スキャン済みのファイル情報、プレイリスト、スキャン履歴、表示履歴、キャッシュを削除し、前回のフォルダも忘れます。ピック先の設定は既定（ピクチャフォルダ内の sss-picked）に戻り、ピックタブにはそのフォルダのファイルが表示されます。ピック先を変更していた場合、以前のピック先のファイルは削除されませんがタブには表示されなくなります。ウィンドウの位置・サイズは保持されます。\n\nこの操作は取り消せません。完了後アプリが再起動します。',
     );
     expect(resetAllData).not.toHaveBeenCalled();
 
@@ -117,7 +117,9 @@ describe('InfoSection reset button (resetAllData)', () => {
     resetAllData.mockResolvedValue(undefined);
 
     render(<InfoSection />);
-    const button = screen.getByText('設定を初期化').closest('button') as HTMLButtonElement;
+    const button = screen
+      .getByText('すべてのデータを初期化')
+      .closest('button') as HTMLButtonElement;
     fireEvent.click(button);
 
     // 実行中はボタンが無効化される（重複クリック防止）
@@ -144,7 +146,7 @@ describe('InfoSection reset button (resetAllData)', () => {
     resetAllData.mockRejectedValue('scanInProgress');
 
     render(<InfoSection />);
-    fireEvent.click(screen.getByText('設定を初期化'));
+    fireEvent.click(screen.getByText('すべてのデータを初期化'));
 
     // このリポには @testing-library/jest-dom が導入されていないため toBeInTheDocument() 等は
     // 使わず、getBy*（見つからなければ throw）を waitFor 内で呼ぶだけで存在確認とする
@@ -154,7 +156,9 @@ describe('InfoSection reset button (resetAllData)', () => {
     });
 
     // ボタンが再度クリックできる状態（disabled解除）に戻ること
-    const button = screen.getByText('設定を初期化').closest('button') as HTMLButtonElement;
+    const button = screen
+      .getByText('すべてのデータを初期化')
+      .closest('button') as HTMLButtonElement;
     expect(button.disabled).toBe(false);
 
     consoleError.mockRestore();
@@ -169,7 +173,7 @@ describe('InfoSection reset button (resetAllData)', () => {
     resetAllData.mockRejectedValue('scanInProgress');
 
     render(<InfoSection />);
-    fireEvent.click(screen.getByText('設定を初期化'));
+    fireEvent.click(screen.getByText('すべてのデータを初期化'));
 
     await waitFor(() => {
       expect(screen.getByText('エラー: スキャン実行中です。完了までお待ちください。')).toBeTruthy();
@@ -187,5 +191,24 @@ describe('InfoSection reset button (resetAllData)', () => {
     expect(screen.queryByText('エラー: スキャン実行中です。完了までお待ちください。')).toBeNull();
 
     consoleError.mockRestore();
+  });
+});
+
+// #112: en のボタン・確認ダイアログ文言と、破壊範囲（ピック先フォルダのファイルは残る）の表現を固定する。
+describe('InfoSection reset button in English (#112)', () => {
+  it('shows "Reset All Data" and the full confirmation text', () => {
+    act(() => {
+      setLanguageSetting('en');
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<InfoSection />);
+    fireEvent.click(screen.getByText('Reset All Data'));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Reset all data?\n\nThis deletes your settings, exclude rules, scanned file information, playlist, scan history, display history, and caches, and forgets the last folder. The pick destination setting returns to the default (the sss-picked folder in Pictures), and the Picks tab shows the files in that folder. If you had changed it, files in your previous pick destination are not deleted but no longer appear in the tab. Window position and size are kept.\n\nThis cannot be undone. The app will restart when finished.',
+    );
+    expect(resetAllData).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 });
