@@ -927,6 +927,7 @@ mod tests {
         assert!(!AllowDirRejection::NotYetCreatedUnsafe.is_expected());
     }
 
+    #[cfg(unix)]
     #[test]
     fn classify_missing_with_reports_inaccessible_when_root_is_absent() {
         // 未マウントのドライブ/共有を注入で再現（Unix でも検証できる）
@@ -947,6 +948,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn classify_missing_safe_arbitrary_path_is_not_yet_created() {
         // Pictures 以外の安全な未作成パス（外付け等）は NotYetCreated、秘密領域配下は Unsafe
@@ -959,6 +961,37 @@ mod tests {
             classify_missing_with(Path::new("/home/x/.ssh/x"), Some(home), |_| true),
             AllowDirRejection::NotYetCreatedUnsafe
         );
+    }
+
+    /// Windows 版の `classify_missing_with` 境界テスト（Unix 風パスは Windows では絶対パスでないため別建て）。
+    /// ホームは引数で注入し、`C:` 上のパスだけを使う（`C:\Users` 等は比較時に同じ形へ解決される）。
+    #[cfg(windows)]
+    #[test]
+    fn classify_missing_with_windows_boundaries() {
+        let home = PathBuf::from(r"C:\").join("Users").join("kako");
+        let removable = PathBuf::from(r"C:\").join("sss_test_removable");
+        let pics = removable.join("pics");
+        // ルートが存在しなければアクセス不能、存在すれば安全な未作成
+        assert_eq!(
+            classify_missing_with(&pics, Some(&home), |_| false),
+            AllowDirRejection::Inaccessible
+        );
+        assert_eq!(
+            classify_missing_with(&pics, Some(&home), |_| true),
+            AllowDirRejection::NotYetCreated
+        );
+        assert_eq!(
+            classify_missing_with(&removable, Some(&home), |_| true),
+            AllowDirRejection::NotYetCreated
+        );
+        // ホーム配下の秘密領域は、ルート不在でも存在しても危険
+        let ssh = home.join(".ssh").join("x");
+        for exists in [true, false] {
+            assert_eq!(
+                classify_missing_with(&ssh, Some(&home), |_| exists),
+                AllowDirRejection::NotYetCreatedUnsafe
+            );
+        }
     }
 
     #[cfg(windows)]
