@@ -221,6 +221,8 @@ async function getOverlayBarWrapperOpacity(page) {
  * 800/1280/480 幅のスクリーンショットも保存する。
  */
 async function confirmResetScenario(page, lang) {
+  // vite 初回の依存最適化で再読込が入ることがあるので、設定ボタンが出るまで待つ。
+  await page.waitForSelector('svg.lucide-settings', { timeout: 15000 });
   await page.waitForTimeout(600);
   await openSettingsModal(page);
   await page.evaluate(() => {
@@ -236,7 +238,12 @@ async function confirmResetScenario(page, lang) {
       btn.click();
     });
     await page.waitForSelector('[role="alertdialog"]', { timeout: 2000 });
-    await page.waitForTimeout(150);
+    // useFocusTrap のフォーカス移動は rAF 遅延なので、ダイアログ内へ移るまで待つ（負荷時の揺れ対策）。
+    await page.waitForFunction(
+      () => document.querySelector('[role="alertdialog"]')?.contains(document.activeElement),
+      null,
+      { timeout: 3000 },
+    );
   };
   const dialogState = () =>
     page.evaluate(() => {
