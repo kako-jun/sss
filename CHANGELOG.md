@@ -7,6 +7,10 @@ Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+### Fixed
+
+- 設定画面のドロップダウン(select)を開いたときの選択肢リストがOS既定の明るい背景になり、ダークテーマと不整合で読みにくかった問題を修正。共通クラス `.sss-select` で `color-scheme: dark` と option/optgroup の不透明なダーク背景・明るい文字色を指定し、全 select に適用(主対象は Windows/WebView2。macOS・Linux の WebView では実機未確認)。全 select が付けていることを走査テストで担保 (#102)
+
 ## [1.1.0] - 2026-10-01
 
 ### Added

@@ -182,6 +182,28 @@ add `truncate` and `title={value}` (#66) — a path is often longer than the fie
 and an `<input>` clips it without an ellipsis or a way to read the rest unless
 both are set explicitly.
 
+### Select (Dropdown) (#102)
+
+```
+sss-select  px-2 py-1 bg-black/40 text-white/60
+rounded border border-white/8 text-sm
+focus:outline-none focus:border-white/20
+```
+
+The closed control stays translucent glass (`bg-black/40`), but the popup list
+is drawn by the OS and defaults to a light background (seen on Windows/WebView2),
+which clashes with the dark theme. Every `<select>` MUST carry the shared
+`.sss-select` class (defined in `src/index.css`): it sets `color-scheme: dark`
+and gives `<option>`/`<optgroup>` an opaque `#0a0a0a` background with
+`rgba(255,255,255,0.87)` text (about 14.9:1 contrast, above WCAG AA). The popup
+must be opaque, so never use a `/NN` alpha colour on options.
+`src/test/selectDark.test.ts` scans all components and fails if a `<select>`
+lacks the class.
+
+Caveat: on macOS WKWebView / Linux WebKitGTK the popup is drawn natively and
+the option CSS (and even `color-scheme: dark`) may not take effect; this is
+unverified on real devices. Windows (WebView2) is the primary target.
+
 ### Range Sliders
 
 ```
