@@ -147,14 +147,12 @@ pub async fn pick_image<R: tauri::Runtime>(
     let source_path = crate::pick::ensure_managed_media_path(source_path, &share_directory, known)?;
     let source_path = source_path.as_path();
 
-    if !source_path.exists() {
-        return Err("Image file does not exist".to_string());
-    }
+    // 存在確認（親ディレクトリの権限エラーを「存在しない」と取り違えない）
+    crate::pick::check_source_exists(source_path)?;
 
     // ディレクトリが存在しない場合は作成
     if !share_directory.exists() {
-        fs::create_dir_all(&share_directory)
-            .map_err(|e| format!("Failed to create share directory: {e}"))?;
+        crate::pick::ensure_pick_dir(&share_directory)?;
     }
 
     // 起動時・設定変更時点ではディレクトリが未作成で asset scope 許可に失敗していることが

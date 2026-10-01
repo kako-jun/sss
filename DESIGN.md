@@ -193,6 +193,28 @@ errors `text-red-400/70`. The button is **Standard** (the tab already has its ow
 Primary button), shows `animate-spin` on its icon and is disabled while running.
 Give the block `role="status"`; there is at most one such block per tab.
 
+### Load Error & Inline Failure Notice (#115)
+
+A failure must never look like an empty state or like success. Two components in
+`src/components/Settings/SectionErrors.tsx` cover it:
+
+- **Load error** (`LoadError`): replaces a section's content when its fetch rejects.
+  Panels & Cards surface (`p-4 bg-black/30 rounded-lg text-center`), message
+  `text-red-400/80 text-sm` ("Couldn't load this"), then one **Standard** button with the
+  `RefreshCw` icon ("Retry"). `role="alert"`. It is visually and verbally distinct from the
+  empty-state card (which is `text-white/50` and says "No … yet"); never reuse the empty
+  wording for a failure.
+- **Inline notice** (`InlineError`): one line under the control that failed to save/delete
+  (`text-xs text-red-400/80`, `role="alert"`). The control is rolled back to the last saved
+  value first (`useRollbackSave`). One notice slot per section: repeated failures replace the
+  message instead of stacking. A settings _load_ failure uses the same notice with an
+  underlined "Retry" text button.
+
+Save notices name their target ("Couldn't save the display interval. Reverted to the previous value."), so several failures in one tab never read as a repeated identical line. When the section is already unmounted the same text goes to the top toast. A startup failure that stops the app from knowing its state (last folder unreadable) uses the empty-state glass card with a **Primary** "Retry" and a **Standard** "Select Folder", never the welcome card.
+
+Fetch-on-mount sections use `useAsyncLoad` (`loading | error | ready`), so "ready with no
+rows" and "error" can't be confused.
+
 ### Soft Skip Toast (#120)
 
 Shown at the bottom (`fixed bottom-20`, the same pill as the folder-unavailable /

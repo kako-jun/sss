@@ -68,6 +68,17 @@ export function resolvePickErrorMessage(raw: string): string {
       return t('errorPathNotManaged');
     case 'notMediaFile':
       return t('errorNotMediaFile');
+    // #115: コピー失敗の原因（バックエンド `pick::pick_io_error_code` のコード）
+    case 'pickPermissionDenied':
+      return t('errorPickPermissionDenied');
+    case 'pickDiskFull':
+      return t('errorPickDiskFull');
+    case 'pickDestinationMissing':
+      return t('errorPickDestinationMissing');
+    case 'pickSourceUnreadable':
+      return t('errorPickSourceUnreadable');
+    case 'imageFileNotFound':
+      return t('errorPickSourceMissing');
     default:
       return t('pickCopyFailed');
   }

@@ -15,6 +15,7 @@ export const en = {
   windowModeLabel: 'Windowed',
   fullscreenLabel: 'Fullscreen',
   windowModeToggleFailed: "Couldn't switch window mode",
+  exitFailed: "Couldn't exit the app",
   genericErrorTitle: 'Something went wrong',
   closeTooltip: 'Close',
   cancelButton: 'Cancel',
@@ -89,6 +90,11 @@ export const en = {
   lastDisplayedTooltip: 'Last shown: {when}',
   pickCopyDone: 'Copied to {path}',
   pickCopyFailed: "Couldn't copy the photo",
+  errorPickPermissionDenied: "Couldn't copy: no permission to write to the pick destination",
+  errorPickDiskFull: "Couldn't copy: the pick destination is out of space",
+  errorPickDestinationMissing:
+    "Couldn't copy: the pick destination can't be used (a file with that name exists, or the folder wasn't found)",
+  errorPickSourceMissing: "Couldn't copy: the original photo wasn't found",
   errorPathNotManaged: "This file isn't managed by the slideshow, so it can't be copied",
   errorShareDirectoryInvalid:
     "This folder can't be used as the pick destination (not allowed: root, home folder, relative paths, etc.)",
@@ -114,6 +120,26 @@ export const en = {
 
   // === Settings: shared ===
   loadingLabel: 'Loading...',
+  // #115: failures must not look like "empty" or success, so loads, saves and actions say so
+  loadFailed: "Couldn't load this",
+  retryButton: 'Retry',
+  settingLoadFailed: "Couldn't load the setting. Showing the default.",
+  intervalSaveFailed: "Couldn't save the display interval. Reverted to the previous value.",
+  exifSaveFailed: "Couldn't save the EXIF rotation setting. Reverted to the previous value.",
+  videoSaveFailed: "Couldn't save the video settings. Reverted to the previous value.",
+  languageSaveFailed: "Couldn't save the language setting. Reverted to the previous value.",
+  startupSettingsLoadFailed:
+    "Couldn't load your saved settings. The display interval and video settings are using defaults.",
+  startupInitFailedTitle: "Couldn't finish loading at startup",
+  startupFailedSubtitle: 'Try again, or choose the folder again in Settings.',
+  errorPickSourceUnreadable: "Couldn't copy: the original photo can't be read",
+  removeRuleFailed: 'Couldn\'t remove the exclude rule "{pattern}"',
+  chooseAnotherFolder: 'Choose another folder',
+  deletePickedFailed: 'Couldn\'t delete the picked photo "{name}"',
+  resetDisplayCountsFailed: "Couldn't reset the display counts",
+  openGitHubFailed: "Couldn't open GitHub",
+  versionUnavailable: 'unavailable',
+  errorLastDirectoryLoadFailed: "Couldn't load the last folder",
   selectButtonLabel: 'Select',
   secondsUnit: '{value}s',
   secondsUnitOnly: 's',

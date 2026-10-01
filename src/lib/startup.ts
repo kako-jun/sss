@@ -62,7 +62,18 @@ export interface StartupDeps {
    * 際にパスを補う必要がある。
    */
   onDirectoryError?: (err: unknown, directory: string) => void;
+  /**
+   * 起動シーケンス自体の失敗を利用者に伝える（#115。以前は console.error のみで、
+   * 前回フォルダの取得失敗が「ようこそ（初回）」画面に、設定の取得失敗が既定値の動作に見えていた）。
+   * - `lastDirectory`: 前回フォルダを取得できなかった（フォルダ有無が不明。ようこそ画面にしない）
+   * - `settings`: 表示間隔・動画設定を取得できず既定値で続行する
+   * - `initialize`: 上記以外の想定外の失敗で最初の表示まで進めなかった
+   * 省略時は何もしない（従来どおり console.error のみ）。
+   */
+  onStartupFailure?: (kind: StartupFailureKind, err: unknown) => void;
 }
+
+export type StartupFailureKind = 'lastDirectory' | 'settings' | 'initialize';
 
 /** `rescanLastDirectory` を進捗イベント購読つきで実行するヘルパー（前景/背景どちらでも使う）。 */
 async function runScanWithProgress(
@@ -96,13 +107,21 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     updatePlaylistInfo,
     setHasDirectory,
     onDirectoryError,
+    onStartupFailure,
   } = deps;
 
   try {
     setInitStatus(t('statusLoadingSettings'));
-    const intervalSetting = await getSetting('display_interval');
-    if (intervalSetting) {
-      setDisplayInterval(parseInt(intervalSetting, 10));
+    // 設定の取得失敗で起動全体を止めない（既定値で続行し、失敗は利用者に伝える）。
+    let settingsFailure: unknown = null;
+    try {
+      const intervalSetting = await getSetting('display_interval');
+      if (intervalSetting) {
+        setDisplayInterval(parseInt(intervalSetting, 10));
+      }
+    } catch (err) {
+      console.error('Failed to load display interval:', err);
+      settingsFailure = err;
     }
 
     // #68: 動画設定。読込失敗でも起動全体は止めない（既定のまま続行）。
@@ -116,11 +135,23 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
         setVideoMaxDurationSec?.(parseVideoMaxDuration(maxDurationSetting));
       } catch (err) {
         console.error('Failed to load video settings:', err);
+        settingsFailure = err;
       }
     }
+    if (settingsFailure !== null) onStartupFailure?.('settings', settingsFailure);
 
     setInitStatus(t('statusCheckingLastFolder'));
-    const lastDirectory = await getLastDirectoryPath();
+    let lastDirectory: string | null;
+    try {
+      lastDirectory = await getLastDirectoryPath();
+    } catch (err) {
+      // フォルダが設定済みかどうかが分からない。「ようこそ（初回）」画面に見せず、失敗として伝える。
+      console.error('Failed to load last directory path:', err);
+      onStartupFailure?.('lastDirectory', err);
+      setInitStatus('');
+      setIsInitialized(true);
+      return;
+    }
 
     if (!lastDirectory) {
       // 前回ディレクトリがなければ初回起動として設定画面を開けるようにする
@@ -187,6 +218,10 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     }
   } catch (err) {
     console.error('Failed to initialize:', err);
+    // 防御的な経路: 通常 `initialize`/`updatePlaylistInfo` は内部で失敗を吸収するので到達しにくいが、
+    // 想定外の例外で画像表示の前後どちらに失敗しても、黙って「ようこそ」/空画面に見せないために報告する
+    // （画像が出ていれば App が上部トースト、出ていなければ再試行できる案内画面にする）。
+    onStartupFailure?.('initialize', err);
     setInitStatus('');
     setIsInitialized(true);
   }

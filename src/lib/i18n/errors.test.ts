@@ -109,6 +109,24 @@ describe('backend error code -> message resolution (#80)', () => {
       );
     });
 
+    it('translates the #115 copy-failure causes', () => {
+      expect(resolvePickErrorMessage('pickPermissionDenied')).toBe(
+        'ピック先に書き込む権限がないためコピーできません',
+      );
+      expect(resolvePickErrorMessage('pickDiskFull')).toBe(
+        'ピック先の空き容量が足りないためコピーできません',
+      );
+      expect(resolvePickErrorMessage('pickDestinationMissing')).toBe(
+        'ピック先として使えないためコピーできません（同名のファイルがあるか、フォルダが見つかりません）',
+      );
+      expect(resolvePickErrorMessage('pickSourceUnreadable')).toBe(
+        'コピー元の写真を読み取れないためコピーできません',
+      );
+      expect(resolvePickErrorMessage('imageFileNotFound')).toBe(
+        'コピー元の写真が見つからないためコピーできません',
+      );
+    });
+
     it('falls back to the generic copy-failed message for unknown errors', () => {
       expect(resolvePickErrorMessage('Failed to copy file: disk full')).toBe('エラー: コピー失敗');
     });
