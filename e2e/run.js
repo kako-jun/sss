@@ -220,23 +220,38 @@ async function getOverlayBarWrapperOpacity(page) {
  * exit_app を呼んだりしないことをログで確認する。E2E_SHOT_DIR を指定すると
  * 800/1280/480 幅のスクリーンショットも保存する。
  */
-async function confirmResetScenario(page, lang) {
+const CONFIRM_KINDS = {
+  // 設定 > 情報 > すべてのデータを初期化
+  info: { tab: -1, cmd: 'reset_all_data', trigger: 'svg.lucide-rotate-ccw' },
+  // 設定 > 統計グラフ > 表示回数をリセット（赤い文字ボタン）
+  stats: { tab: 5, cmd: 'reset_all_display_counts', trigger: 'button[class*="text-red-400/60"]' },
+  // 設定 > ピック > サムネイルの削除ボタン（先頭）
+  pick: {
+    tab: 3,
+    cmd: 'delete_picked_image',
+    trigger: 'button[title="削除"], button[title="Delete"]',
+  },
+};
+
+async function confirmResetScenario(page, lang, kind = 'info') {
+  const spec = CONFIRM_KINDS[kind];
   // vite 初回の依存最適化で再読込が入ることがあるので、設定ボタンが出るまで待つ。
   await page.waitForSelector('svg.lucide-settings', { timeout: 15000 });
   await page.waitForTimeout(600);
   await openSettingsModal(page);
-  await page.evaluate(() => {
+  await page.evaluate((tabIndex) => {
     const tabs = [...document.querySelectorAll('[role="tab"]')];
-    tabs[tabs.length - 1].click();
-  });
+    tabs[tabIndex < 0 ? tabs.length + tabIndex : tabIndex].click();
+  }, spec.tab);
+  await page.waitForSelector(spec.trigger, { timeout: 8000 });
   await page.waitForTimeout(300);
   const openDialog = async () => {
-    await page.evaluate(() => {
-      const icon = document.querySelector('svg.lucide-rotate-ccw');
-      const btn = icon && icon.closest('button');
-      if (!btn) throw new Error('初期化ボタンが見つからない');
+    await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const btn = el && el.closest('button');
+      if (!btn) throw new Error('トリガーのボタンが見つからない');
       btn.click();
-    });
+    }, spec.trigger);
     await page.waitForSelector('[role="alertdialog"]', { timeout: 2000 });
     // useFocusTrap のフォーカス移動は rAF 遅延なので、ダイアログ内へ移るまで待つ（負荷時の揺れ対策）。
     await page.waitForFunction(
@@ -257,7 +272,7 @@ async function confirmResetScenario(page, lang) {
           }
         : null;
     });
-  const resets = () => countCalls(page, 'reset_all_data');
+  const resets = () => countCalls(page, spec.cmd);
   const detail = [];
 
   await openDialog();
@@ -271,10 +286,12 @@ async function confirmResetScenario(page, lang) {
       [800, 600],
       [1280, 800],
       [480, 700],
+      [800, 400],
+      [360, 300],
     ]) {
       await page.setViewportSize({ width: w, height: h });
       await page.waitForTimeout(300);
-      await page.screenshot({ path: path.join(shotDir, `confirm-${lang}-${w}.png`) });
+      await page.screenshot({ path: path.join(shotDir, `confirm-${kind}-${lang}-${w}x${h}.png`) });
     }
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.waitForTimeout(200);
@@ -291,7 +308,7 @@ async function confirmResetScenario(page, lang) {
   const afterEsc = {
     resets: await resets(),
     open: !!(await dialogState()),
-    settingsStillOpen: (await page.$('svg.lucide-rotate-ccw')) !== null,
+    settingsStillOpen: (await page.$('[role="dialog"]')) !== null,
     exits: await countCalls(page, 'exit_app'),
   };
   // 3) 背景クリック（パネルの外）
@@ -2026,18 +2043,48 @@ const scenarios = [
     },
   },
   {
-    name: 'reset-all-data uses an in-app alertdialog; cancel/ESC/backdrop never call reset_all_data, OK does (ja) (#119)',
+    name: 'reset-all-data uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (ja) (#119)',
     hash: 'statszero',
     async run(page) {
-      return confirmResetScenario(page, 'ja');
+      return confirmResetScenario(page, 'ja', 'info');
     },
   },
   {
-    name: 'reset-all-data uses an in-app alertdialog; cancel/ESC/backdrop never call reset_all_data, OK does (en) (#119)',
+    name: 'reset-all-data uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (en) (#119)',
     hash: 'statszero',
     locale: 'en-US',
     async run(page) {
-      return confirmResetScenario(page, 'en');
+      return confirmResetScenario(page, 'en', 'info');
+    },
+  },
+  {
+    name: 'display-count reset uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (ja) (#119)',
+    hash: 'statszero',
+    async run(page) {
+      return confirmResetScenario(page, 'ja', 'stats');
+    },
+  },
+  {
+    name: 'display-count reset uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (en) (#119)',
+    hash: 'statszero',
+    locale: 'en-US',
+    async run(page) {
+      return confirmResetScenario(page, 'en', 'stats');
+    },
+  },
+  {
+    name: 'picked-photo delete uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (ja) (#119)',
+    hash: 'thumbs',
+    async run(page) {
+      return confirmResetScenario(page, 'ja', 'pick');
+    },
+  },
+  {
+    name: 'picked-photo delete uses an in-app alertdialog; cancel/ESC/backdrop never call the IPC, OK does (en) (#119)',
+    hash: 'thumbs',
+    locale: 'en-US',
+    async run(page) {
+      return confirmResetScenario(page, 'en', 'pick');
     },
   },
 ];

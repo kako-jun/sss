@@ -18,6 +18,7 @@ export const ja = {
   genericErrorTitle: 'エラーが発生しました',
   closeTooltip: '閉じる',
   cancelButton: 'キャンセル',
+  confirmDialogTitle: '確認',
 
   // === キーボードショートカット一覧（#66） ===
   shortcutsButtonTooltip: 'ショートカット一覧 (?)',
@@ -174,7 +175,7 @@ export const ja = {
   deleteTooltip: '削除',
   // #82レビューshould5: ピック削除は実ファイルの削除であることと、元の写真は
   // 残ることを明示する（実挙動と文言を一致させる）。
-  confirmDeletePickedPhoto: 'ピックフォルダのコピーを削除しますか？元の写真は残ります。',
+  confirmDeletePickedPhoto: 'ピック先フォルダのコピーを削除しますか？元の写真は残ります。',
 
   // === 設定画面: 履歴 ===
   recentHistoryTitle: '最近の表示履歴（最新100件）',
@@ -211,10 +212,10 @@ export const ja = {
   viewOnGitHub: 'GitHubで見る',
   dangerZoneTitle: '危険な操作',
   dangerZoneDescription: '元に戻せない操作です。実行前によく確認してください',
-  resetSettingsButton: '設定を初期化',
+  resetSettingsButton: 'すべてのデータを初期化',
   resettingSettingsLabel: '初期化中...',
   confirmResetAllData:
-    '全ての設定、プレイリスト、表示履歴を完全に削除して初期化しますか？\n\nこの操作は取り消せません。完了後アプリが再起動します。',
+    'すべてのデータを初期化しますか？\n\n設定、除外ルール、スキャン済みのファイル情報、プレイリスト、スキャン履歴、表示履歴、キャッシュを削除し、前回のフォルダも忘れます。ピック先の設定は既定（ピクチャフォルダ内の sss-picked）に戻り、ピックタブにはそのフォルダのファイルが表示されます。ピック先を変更していた場合、以前のピック先のファイルは削除されませんがタブには表示されなくなります。ウィンドウの位置・サイズは保持されます。\n\nこの操作は取り消せません。完了後アプリが再起動します。',
   resettingMessage: '初期化しています。完了後アプリが再起動します。',
   resetErrorPrefix: 'エラー: {detail}',
   errorDbResetFailed: 'データベースの初期化に失敗しました',

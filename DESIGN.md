@@ -256,7 +256,7 @@ Fields below.
 
 ### Confirm Modal (#119)
 
-In-app replacement for `window.confirm` (which Tauri turns into a always-truthy
+In-app replacement for `window.confirm` (which Tauri turns into an always-truthy
 Promise — never use it). `role="alertdialog"`, `aria-modal="true"`. Same panel as
 other modals on a `bg-black/85 backdrop-blur-md` backdrop, portaled to `body`,
 narrower (`max-w-md`). Message only (no title, `text-sm text-white/70`,

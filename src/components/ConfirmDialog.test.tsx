@@ -43,10 +43,27 @@ describe('ConfirmDialogHost (#119)', () => {
     expect(isConfirmDialogOpen()).toBe(false);
   });
 
-  it('focuses the Cancel button by default', async () => {
+  it("focuses the Cancel button by default (after useFocusTrap's rAF has run)", async () => {
     render(<ConfirmDialogHost />);
     const p = open();
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByText('キャンセル')));
+    // useFocusTrap は requestAnimationFrame でフォーカスを移す。それが済む前の状態では
+    // 何も保証できないので、rAF 完了を待ってから確認する。
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    });
+    expect(document.activeElement).toBe(screen.getByText('キャンセル'));
+    expect(document.activeElement).not.toBe(screen.getByText('実行'));
+    fireEvent.click(screen.getByText('キャンセル'));
+    await p;
+  });
+
+  it('labels the dialog with a visually hidden title', async () => {
+    render(<ConfirmDialogHost />);
+    const p = open();
+    const dialog = screen.getByRole('alertdialog');
+    const title = document.getElementById(dialog.getAttribute('aria-labelledby') as string);
+    expect(title?.textContent).toBe('確認');
+    expect(title?.className).toContain('sr-only');
     fireEvent.click(screen.getByText('キャンセル'));
     await p;
   });

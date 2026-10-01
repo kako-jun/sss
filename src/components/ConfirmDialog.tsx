@@ -38,14 +38,11 @@ function ConfirmDialogView() {
     getConfirmDialogRequest,
   );
   const panelRef = useRef<HTMLDivElement>(null);
-  const cancelRef = useRef<HTMLButtonElement>(null);
   useFocusTrap(panelRef, true);
 
-  // useFocusTrap は最初のフォーカス可能要素へ rAF で移すが、DOM 順をキャンセル先頭に
-  // しているので既定でキャンセルに当たる。マウント直後にも明示して取りこぼしを防ぐ。
-  useEffect(() => {
-    cancelRef.current?.focus();
-  }, []);
+  // 既定フォーカス: useFocusTrap が開いた直後（rAF）に最初のフォーカス可能要素へ移す。
+  // キャンセルを DOM 上の先頭ボタンにしているので、既定でキャンセルにフォーカスが当たる
+  // （ボタンの並びを変える時はこの前提と ConfirmDialog.test.tsx を合わせること）。
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -71,23 +68,28 @@ function ConfirmDialogView() {
         ref={panelRef}
         role="alertdialog"
         aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-message"
         tabIndex={-1}
-        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-md w-full mx-8 border border-white/10 !outline-none"
+        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-md w-full mx-8 border border-white/10 !outline-none flex flex-col max-h-[calc(100vh-2rem)]"
         onClick={(e) => e.stopPropagation()}
       >
+        <h2 id="confirm-dialog-title" className="sr-only">
+          {t('confirmDialogTitle')}
+        </h2>
+        {/* 長い本文でも窓が低いとき（800x600, 360x300 等）ボタンが画面外へ出ないよう、
+            本文だけをスクロールさせてボタン行は常に見せる。 */}
         <p
           id="confirm-dialog-message"
-          className="text-sm text-white/70 whitespace-pre-line leading-relaxed"
+          className="min-h-0 overflow-y-auto text-sm text-white/70 whitespace-pre-line leading-relaxed"
         >
           {request.message}
         </p>
-        <div className="mt-6 flex justify-end gap-3">
+        <div className="mt-6 shrink-0 flex justify-end gap-3">
           <button
-            ref={cancelRef}
             type="button"
             onClick={() => settleConfirmDialog(false)}
-            className="px-4 py-2 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded-lg transition-colors text-sm"
+            className="shrink-0 whitespace-nowrap px-4 py-2 bg-white/8 hover:bg-white/15 text-white/60 hover:text-white/80 rounded-lg transition-colors text-sm"
           >
             {t('cancelButton')}
           </button>

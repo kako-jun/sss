@@ -18,6 +18,7 @@ export const en = {
   genericErrorTitle: 'Something went wrong',
   closeTooltip: 'Close',
   cancelButton: 'Cancel',
+  confirmDialogTitle: 'Confirm',
 
   // === Keyboard shortcuts (#66) ===
   shortcutsButtonTooltip: 'Keyboard shortcuts (?)',
@@ -153,7 +154,7 @@ export const en = {
   videoMaxDurationUnlimited: 'Unlimited',
   videoMaxDurationSeconds: '{count}s',
   videoMaxDurationMinutes: '{count} min',
-  pickDestinationTitle: 'Picks Folder',
+  pickDestinationTitle: 'Pick Destination Folder',
 
   // === Settings: Exclude Rules ===
   excludeRulesTitle: 'Exclude Rules',
@@ -173,7 +174,7 @@ export const en = {
   noPickedPhotos: 'No picked photos yet',
   deleteTooltip: 'Delete',
   confirmDeletePickedPhoto:
-    "Delete this copy from your picks folder? The original photo isn't affected.",
+    "Delete this copy from the pick destination folder? The original photo isn't affected.",
 
   // === Settings: History ===
   recentHistoryTitle: 'Recently Shown (last 100)',
@@ -214,7 +215,7 @@ export const en = {
   resetSettingsButton: 'Reset All Data',
   resettingSettingsLabel: 'Resetting...',
   confirmResetAllData:
-    'Permanently delete all settings, playlist state, and display history?\n\nThis cannot be undone. The app will restart when finished.',
+    'Reset all data?\n\nThis deletes your settings, exclude rules, scanned file information, playlist, scan history, display history, and caches, and forgets the last folder. The pick destination setting returns to the default (the sss-picked folder in Pictures), and the Picks tab shows the files in that folder. If you had changed it, files in your previous pick destination are not deleted but no longer appear in the tab. Window position and size are kept.\n\nThis cannot be undone. The app will restart when finished.',
   resettingMessage: 'Resetting. The app will restart when finished.',
   resetErrorPrefix: 'Error: {detail}',
   errorDbResetFailed: 'Failed to reset the database',

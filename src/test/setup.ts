@@ -76,7 +76,9 @@ if (typeof window !== 'undefined') {
     Object.defineProperty(window, name, {
       configurable: true,
       writable: true,
-      value: () => Promise.reject(new Error(`dialog.${name} not allowed`)).catch(() => undefined),
+      // 実機は（権限なしで）reject される Promise を返すが、ここでは unhandled rejection を
+      // 避けるため undefined で resolve する Promise にする。肝は「常に truthy な Promise を返す」点。
+      value: () => Promise.resolve(undefined),
     });
   }
 }

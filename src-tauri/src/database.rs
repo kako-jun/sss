@@ -325,7 +325,7 @@ impl Database {
     /// - `PRAGMA user_version` とスキーマ（`CREATE TABLE` 群）はそのまま維持する
     ///   （`DELETE FROM` はテーブル定義に触れない）。
     /// - `app_settings`（`last_directory_path`/`apply_exif_rotation`/`share_directory_path`/
-    ///   `display_interval`/`sssignore_migrated` 等）も対象に含める。「設定を初期化」ボタンの
+    ///   `display_interval`/`sssignore_migrated` 等）も対象に含める。「すべてのデータを初期化」ボタンの
     ///   名の通り、ユーザー設定も含めて工場出荷状態に戻すのが仕様の意図（Issue #64）で、
     ///   ここだけ除外すると再起動後に「初期化したのに前の間隔設定が残る」ことになる。
     /// - 途中で失敗したら丸ごとロールバックされ、中途半端な空テーブルにはならない。

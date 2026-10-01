@@ -65,10 +65,22 @@ export default [
           message: 'window.confirm/alert/prompt は使用禁止（#119）。confirmDialog() を使う。',
         })),
       ],
+      // JS 側の dialog API（ask/message/confirm 等）は dialog 権限が無く動かない（#93/#119）。
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@tauri-apps/plugin-dialog', '@tauri-apps/plugin-dialog/*'],
+              message: 'JS 側の dialog API は使用禁止（#119）。確認は confirmDialog() を使う。',
+            },
+          ],
+        },
+      ],
       'no-restricted-properties': [
         'error',
         ...['confirm', 'alert', 'prompt'].flatMap((property) =>
-          ['window', 'globalThis', 'self'].map((object) => ({
+          ['window', 'globalThis', 'self', 'top', 'parent'].map((object) => ({
             object,
             property,
             message: 'window.confirm/alert/prompt は使用禁止（#119）。confirmDialog() を使う。',
