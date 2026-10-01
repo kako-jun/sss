@@ -173,10 +173,7 @@ pub async fn pick_image<R: tauri::Runtime>(
             }
         }
         None => {
-            eprintln!(
-                "Refusing to allow unsafe asset scope directory: {}",
-                share_directory.display()
-            );
+            crate::asset_scope::log_refused_allow_dir(&share_directory);
         }
     }
 

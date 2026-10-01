@@ -116,10 +116,7 @@ pub async fn select_share_directory(
             }
             None => {
                 let resolved = resolve_share_directory(&pictures_dir, Some(value.as_str()));
-                eprintln!(
-                    "Refusing to allow unsafe asset scope directory: {}",
-                    resolved.display()
-                );
+                crate::asset_scope::log_refused_allow_dir(&resolved);
             }
         }
     }

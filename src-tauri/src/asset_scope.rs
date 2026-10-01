@@ -227,20 +227,89 @@ pub fn sanitize_allow_dir(path: &Path) -> Option<PathBuf> {
 /// [`sanitize_allow_dir`] のテスト可能なコア実装。ホームディレクトリを引数として
 /// 受け取ることで、実環境の `dirs::home_dir()` に依存せず単体テストできる。
 fn sanitize_allow_dir_with_home(path: &Path, home_dir: Option<&Path>) -> Option<PathBuf> {
+    check_allow_dir_with_home(path, home_dir).ok()
+}
+
+/// asset scope への許可が拒否された理由（#121）。
+/// 「まだ作られていないだけ」の正常系と「危険・不正なパスの拒否」をログで区別するための分類。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllowDirRejection {
+    /// 空文字列
+    Empty,
+    /// 相対パス
+    Relative,
+    /// パスが存在しない。ピック先フォルダが初回 `pick_image` まで未作成なのは正常
+    NotYetCreated,
+    /// 存在するがディレクトリではない（ファイル等。リンク先が無いシンボリックリンクを含む）
+    NotADirectory,
+    /// 状態の取得や正規化（`canonicalize`）に失敗した（権限不足・リンク切れ等）
+    Inaccessible,
+    /// 保護対象のファイルシステムルート（Unix の `/`、ホームと同一ドライブのルート）
+    ProtectedRoot,
+}
+
+impl AllowDirRejection {
+    /// 通常運用で起きうる拒否（警告に値しない）かどうか。未作成のみが該当する。
+    pub fn is_expected(self) -> bool {
+        matches!(self, AllowDirRejection::NotYetCreated)
+    }
+}
+
+/// [`sanitize_allow_dir`] と同じ判定を行い、拒否の理由を返す。
+pub fn check_allow_dir(path: &Path) -> Result<PathBuf, AllowDirRejection> {
+    check_allow_dir_with_home(path, dirs::home_dir().as_deref())
+}
+
+fn check_allow_dir_with_home(
+    path: &Path,
+    home_dir: Option<&Path>,
+) -> Result<PathBuf, AllowDirRejection> {
     if path.as_os_str().is_empty() {
-        return None;
+        return Err(AllowDirRejection::Empty);
     }
     if !path.is_absolute() {
-        return None;
+        return Err(AllowDirRejection::Relative);
+    }
+    // symlink_metadata: リンク自体の存在を見る（リンク切れは「未作成」ではなく不正扱い）
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(AllowDirRejection::NotYetCreated)
+        }
+        Err(_) => return Err(AllowDirRejection::Inaccessible),
     }
     if !path.is_dir() {
-        return None;
+        return Err(AllowDirRejection::NotADirectory);
     }
-    let canonical = path.canonicalize().ok()?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| AllowDirRejection::Inaccessible)?;
     if canonical.parent().is_none() && is_protected_root(&canonical, home_dir) {
-        return None;
+        return Err(AllowDirRejection::ProtectedRoot);
     }
-    Some(canonical)
+    Ok(canonical)
+}
+
+/// `sanitize_allow_dir` が `None` を返したパスのログを出す（#121）。
+/// 未作成（正常）はデバッグビルドでのみ出力し、危険・不正なパスは常に警告として出力する。
+pub fn log_refused_allow_dir(path: &Path) {
+    let reason = match check_allow_dir(path) {
+        Err(reason) => reason,
+        Ok(_) => return,
+    };
+    if reason.is_expected() {
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[debug] asset scope directory not created yet (skipped): {}",
+                path.display()
+            );
+        }
+    } else {
+        eprintln!(
+            "Refusing to allow unsafe asset scope directory ({reason:?}): {}",
+            path.display()
+        );
+    }
 }
 
 /// ファイルシステムルート（`parent()` が `None` になるパス）のうち、
@@ -761,6 +830,62 @@ mod tests {
         let missing = std::env::temp_dir().join("sss_asset_scope_test_does_not_exist_xyz");
         let _ = std::fs::remove_dir_all(&missing);
         assert_eq!(sanitize_allow_dir(&missing), None);
+    }
+
+    #[test]
+    fn check_allow_dir_classifies_rejection_reasons() {
+        // #121: 未作成（正常）と危険・不正パスを区別する
+        let dir = TempDir::new("check_reason_a");
+        let missing = dir.path().join("sss-picked");
+        assert_eq!(
+            check_allow_dir(&missing),
+            Err(AllowDirRejection::NotYetCreated)
+        );
+        assert!(AllowDirRejection::NotYetCreated.is_expected());
+
+        let file_path = dir.path().join("a.txt");
+        std::fs::write(&file_path, b"x").unwrap();
+        assert_eq!(
+            check_allow_dir(&file_path),
+            Err(AllowDirRejection::NotADirectory)
+        );
+
+        assert_eq!(
+            check_allow_dir(Path::new("")),
+            Err(AllowDirRejection::Empty)
+        );
+        assert_eq!(
+            check_allow_dir(Path::new("rel/dir")),
+            Err(AllowDirRejection::Relative)
+        );
+        for r in [
+            AllowDirRejection::Empty,
+            AllowDirRejection::Relative,
+            AllowDirRejection::NotADirectory,
+            AllowDirRejection::Inaccessible,
+            AllowDirRejection::ProtectedRoot,
+        ] {
+            assert!(!r.is_expected(), "{r:?} は警告対象");
+        }
+        // 未作成でも sanitize は従来どおり拒否する（scope に追加されない）
+        assert_eq!(sanitize_allow_dir(&missing), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn check_allow_dir_classifies_root_and_dangling_symlink() {
+        assert_eq!(
+            check_allow_dir_with_home(Path::new("/"), Some(Path::new("/home/x"))),
+            Err(AllowDirRejection::ProtectedRoot)
+        );
+        let dir = TempDir::new("check_reason_b");
+        let link = dir.path().join("dangling");
+        std::os::unix::fs::symlink(dir.path().join("nowhere"), &link).unwrap();
+        // リンク切れは「未作成」ではなく警告対象
+        assert_eq!(
+            check_allow_dir(&link),
+            Err(AllowDirRejection::NotADirectory)
+        );
     }
 
     #[test]

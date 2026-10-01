@@ -136,10 +136,7 @@ pub fn run() {
                         }
                     }
                     None => {
-                        eprintln!(
-                            "Refusing to allow unsafe asset scope directory: {}",
-                            dir.display()
-                        );
+                        crate::asset_scope::log_refused_allow_dir(&dir);
                     }
                 }
             }
