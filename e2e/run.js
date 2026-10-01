@@ -1919,11 +1919,12 @@ const scenarios = [
     hash: 'slides',
     async run(page) {
       await wakeFromIdle(page);
-      await page.click('button[aria-label="メニュー"]');
+      // 言語非依存: 「…」ボタンと除外トリガーは aria-haspopup="menu" で拾い、
+      // サブメニューは除外トリガーの直後の兄弟要素、親メニューはその祖先で辿る。
+      await page.locator('button[aria-haspopup="menu"]').first().click();
       await page.waitForTimeout(300);
-      await page.locator('button').filter({ hasText: /^除外/ }).first().click();
+      await page.locator('button[aria-haspopup="menu"]').nth(1).click();
       await page.waitForTimeout(400);
-      const labels = ['撮影日付で除外', 'フォルダを除外', 'ファイルを除外'];
       const details = [];
       let pass = true;
       for (const [w, h] of [
@@ -1931,43 +1932,58 @@ const scenarios = [
         [1280, 800],
         [800, 600],
         [480, 800],
-        [421, 700],
-        [420, 700],
+        [431, 700],
+        [430, 700],
         [360, 640],
         [360, 300],
         [320, 568],
       ]) {
         await page.setViewportSize({ width: w, height: h });
         await page.waitForTimeout(300);
-        const m = await page.evaluate((labels) => {
+        const m = await page.evaluate(() => {
           const rect = (e) => e.getBoundingClientRect();
-          const items = labels.map((t) =>
-            [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === t),
-          );
-          if (items.some((i) => !i)) return null;
-          let bar = document.querySelector('button[aria-label="メニュー"]');
+          const triggers = [...document.querySelectorAll('button[aria-haspopup="menu"]')];
+          const dots = triggers[0];
+          const trigger = triggers[1];
+          const sub = trigger && trigger.nextElementSibling;
+          if (!sub || sub.children.length !== 3) return null;
+          const rs = [...sub.children].map(rect);
+          const parent = rect(trigger.parentElement.parentElement);
+          let bar = dots;
           while (bar && getComputedStyle(bar).position !== 'fixed') bar = bar.parentElement;
-          const rs = items.map(rect);
           const b = rect(bar);
-          // 親メニュー（「ピックを見る」ボタンを含む箱）との縦の位置関係用
-          const pm = [...document.querySelectorAll('button')]
-            .find((x) => /^(ピックを見る)$/.test(x.textContent.trim()))
-            .parentElement.getBoundingClientRect();
+          const hits = (box) =>
+            rs.some(
+              (r) =>
+                r.bottom > box.top &&
+                r.top < box.bottom &&
+                r.right > box.left &&
+                r.left < box.right,
+            );
+          // 右上のボタン群（ピル）。表示中のものすべてと交差しないこと。
+          const pills = [...document.querySelectorAll('div.fixed.top-4.right-4')]
+            .map(rect)
+            .filter((p) => p.width > 0 && p.height > 0);
           return {
             top: Math.min(...rs.map((r) => r.top)),
             bottom: Math.max(...rs.map((r) => r.bottom)),
             left: Math.min(...rs.map((r) => r.left)),
             right: Math.max(...rs.map((r) => r.right)),
             barTop: b.top,
-            parentTop: pm.top,
-            parentBottom: pm.bottom,
-            hitsBar: rs.some(
-              (r) => r.bottom > b.top && r.top < b.bottom && r.right > b.left && r.left < b.right,
-            ),
+            parentTop: parent.top,
+            parentBottom: parent.bottom,
+            parentLeft: parent.left,
+            subRight: rect(sub).right,
+            hitsBar: hits(b),
+            hitsPill: pills.some(hits),
             vh: innerHeight,
             vw: innerWidth,
           };
-        }, labels);
+        });
+        // 側方展開（親メニューの左）では、右端が親メニュー枠に食い込まない。
+        // 積み重ね展開（幅420px以下）では対象外。
+        const sideBySide = !!m && m.subRight <= m.parentLeft - 2;
+        const stacked = !!m && !sideBySide;
         const ok =
           !!m &&
           m.top >= 0 &&
@@ -1975,12 +1991,14 @@ const scenarios = [
           m.bottom <= m.vh &&
           m.right <= m.vw &&
           !m.hitsBar &&
+          !m.hitsPill &&
           // 親メニューの縦範囲から大きく外れない（下へ突き抜けない／上へ離れすぎない）
           m.bottom <= m.parentBottom + 4 &&
-          m.top >= m.parentTop - 60;
+          m.top >= m.parentTop - 60 &&
+          (w <= 430 ? stacked || sideBySide : sideBySide);
         if (!ok) pass = false;
         details.push(
-          `${w}x${h}:${ok ? 'ok' : 'NG'}(${m ? `top=${Math.round(m.top)} bottom=${Math.round(m.bottom)} barTop=${Math.round(m.barTop)}` : 'items missing'})`,
+          `${w}x${h}:${ok ? 'ok' : 'NG'}(${m ? `left=${Math.round(m.left)} right=${Math.round(m.right)} subRight=${Math.round(m.subRight)} top=${Math.round(m.top)} bottom=${Math.round(m.bottom)} parent=${Math.round(m.parentTop)}-${Math.round(m.parentBottom)} parentLeft=${Math.round(m.parentLeft)} barTop=${Math.round(m.barTop)} pill=${m.hitsPill}` : 'items missing'})`,
         );
       }
       return { pass, detail: details.join(' ') };
