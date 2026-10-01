@@ -75,6 +75,8 @@ export function resolvePickErrorMessage(raw: string): string {
       return t('errorPickDiskFull');
     case 'pickDestinationMissing':
       return t('errorPickDestinationMissing');
+    case 'pickSourceUnreadable':
+      return t('errorPickSourceUnreadable');
     case 'imageFileNotFound':
       return t('errorPickSourceMissing');
     default:

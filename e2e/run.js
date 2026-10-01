@@ -2692,7 +2692,13 @@ const scenarios = [
       const noticeText = await page.evaluate(() =>
         [...document.querySelectorAll('[role=alert]')].map((e) => e.textContent).join(' | '),
       );
-      const noticeVisible = await isVisible(page, '設定を保存できませんでした。元の値に戻しました');
+      // 通知は対象名つきで、同じ文言が並ばない（表示間隔/EXIF回転/動画/言語）
+      const targets = ['表示間隔', 'EXIF回転の設定', '動画の設定', '言語の設定'];
+      const seen = [];
+      for (const target of targets) {
+        seen.push(await isVisible(page, `${target}を保存できませんでした。元の値に戻しました`));
+      }
+      const noticeVisible = seen.every(Boolean);
       const pass =
         exifAfter === exifBefore &&
         exifNotices === 1 &&
@@ -2740,6 +2746,47 @@ const scenarios = [
       const genericShown = await isVisible(page, 'エラー: コピー失敗');
       const pass = causeShown && !genericShown;
       return { pass, detail: `causeShown=${causeShown} genericShown=${genericShown}` };
+    },
+  },
+  {
+    // #115: 起動時に前回フォルダを取得できない(get_last_directory_path が reject)と、
+    // 「ようこそ（初回）」画面でなく失敗の案内と再試行になる。障害が直ってから再試行すると、本当の状態になる。
+    name: 'startup: last folder read failure shows a retryable failure card, not the welcome screen (#115)',
+    hash: 'slides?fail=get_last_directory_path',
+    async run(page) {
+      await page.waitForSelector('text=前回のフォルダを読み込めませんでした');
+      const welcomeShown = await isVisible(page, 'ようこそ SSS へ');
+      const retryShown = await page.evaluate(() =>
+        [...document.querySelectorAll('button')].some((b) => b.textContent.includes('再試行')),
+      );
+      const selectShown = await page.evaluate(() =>
+        [...document.querySelectorAll('button')].some((b) =>
+          b.textContent.includes('フォルダを選択'),
+        ),
+      );
+      await page.evaluate(() => window.__e2eHealFailures());
+      await page.click('button:has-text("再試行")');
+      await page.waitForTimeout(600);
+      // モックは get_last_directory_path が '/p' を返す → 復旧後は通常どおり写真が出る
+      const photoShown = (await page.locator('img').count()) > 0;
+      const cardGone = !(await isVisible(page, '前回のフォルダを読み込めませんでした'));
+      const pass = !welcomeShown && retryShown && selectShown && photoShown && cardGone;
+      return {
+        pass,
+        detail: `welcomeShown=${welcomeShown} retryShown=${retryShown} selectShown=${selectShown} photoShownAfterRetry=${photoShown} cardGone=${cardGone}`,
+      };
+    },
+  },
+  {
+    // #115: 起動時に保存済みの設定を取得できない(get_setting が reject)と、既定値で起動したことを
+    // 画面上部の通知で伝える（黙って既定値に戻らない）。
+    name: 'startup: settings read failure tells the user defaults are in use (#115)',
+    hash: 'slides?fail=get_setting',
+    async run(page) {
+      await page.waitForSelector('text=保存済みの設定を読み込めませんでした');
+      const shown = await isVisible(page, '保存済みの設定を読み込めませんでした');
+      const photoShown = (await page.locator('img').count()) > 0;
+      return { pass: shown && photoShown, detail: `toastShown=${shown} photoShown=${photoShown}` };
     },
   },
   {

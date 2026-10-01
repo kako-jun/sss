@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useAsyncLoad } from '../../hooks/useAsyncLoad';
 import { getDisplayStats, resetAllDisplayCounts } from '../../lib/tauri';
 import type { DisplayStats } from '../../types';
 import { Check } from 'lucide-react';
@@ -16,32 +17,16 @@ export function GraphSection() {
   // 起こす）なので、下のチャート再構築effectを言語切替に追従させるには
   // `locale` 自体を依存配列に含める必要がある。
   const locale = useLocale();
-  const [displayStats, setDisplayStats] = useState<DisplayStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isResetting, setIsResetting] = useState(false);
   // #115: 取得失敗は「データがありません」の空状態と区別してエラー表示＋再試行にする。
-  const [loadFailed, setLoadFailed] = useState(false);
+  // 取得はキャンセル付きの共通 hook に任せる（再試行を連打しても古い応答が後勝ちしない）。
+  const load = useAsyncLoad<DisplayStats>(getDisplayStats, 'display stats');
+  const displayStats = load.state.status === 'ready' ? load.state.data : null;
+  const isLoading = load.state.status === 'loading';
+  const loadFailed = load.state.status === 'error';
+  const [isResetting, setIsResetting] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
-
-  const loadStats = useCallback(async () => {
-    setIsLoading(true);
-    setLoadFailed(false);
-    try {
-      setDisplayStats(await getDisplayStats());
-    } catch (err) {
-      console.error('Failed to load display stats:', err);
-      setDisplayStats(null);
-      setLoadFailed(true);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadStats();
-  }, [loadStats]);
 
   const handleReset = async () => {
     const ok = await confirmDialog({
@@ -60,11 +45,8 @@ export function GraphSection() {
       setIsResetting(false);
       return;
     }
-    try {
-      await loadStats();
-    } finally {
-      setIsResetting(false);
-    }
+    load.reload();
+    setIsResetting(false);
   };
 
   useEffect(() => {
@@ -109,7 +91,7 @@ export function GraphSection() {
   }
 
   if (loadFailed) {
-    return <LoadError onRetry={loadStats} testId="stats-load-error" />;
+    return <LoadError onRetry={load.reload} testId="stats-load-error" />;
   }
 
   if (!displayStats || displayStats.files === 0) {

@@ -10,7 +10,11 @@ export function SettingsSection() {
   // #115: 取得失敗（既定値表示）と保存失敗（巻き戻し）を利用者に伝える。
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const { saveFailed, save, markLoaded } = useRollbackSave<boolean>(setApplyExifRotation, true);
+  const { saveFailed, save, markLoaded } = useRollbackSave<boolean>(
+    setApplyExifRotation,
+    true,
+    'exifSaveFailed',
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -35,7 +39,8 @@ export function SettingsSection() {
 
   const handleExifRotationChange = async (checked: boolean) => {
     setApplyExifRotation(checked);
-    await save(checked, (v) => saveSetting('apply_exif_rotation', v ? 'true' : 'false'));
+    const ok = await save(checked, (v) => saveSetting('apply_exif_rotation', v ? 'true' : 'false'));
+    if (ok) setLoadFailed(false);
   };
 
   return (
@@ -54,7 +59,7 @@ export function SettingsSection() {
         </div>
       </label>
       <InlineError
-        message={saveFailed ? t('settingSaveFailed') : loadFailed ? t('settingLoadFailed') : null}
+        message={saveFailed ? t('exifSaveFailed') : loadFailed ? t('settingLoadFailed') : null}
         onRetry={!saveFailed && loadFailed ? () => setAttempt((n) => n + 1) : undefined}
         testId="exif-error"
       />

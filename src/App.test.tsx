@@ -1339,3 +1339,47 @@ describe('App keeps the exclude-rescan state across Settings close/reopen (#111)
     expect(screen.getByTestId('stub-notice').textContent).toBe('none');
   });
 });
+
+// #115: 起動時の取得失敗が「ようこそ（初回）」画面や既定値に見えず、利用者に伝わる。
+describe('App startup failures (#115)', () => {
+  it('getLastDirectoryPath rejecting shows a retryable failure card, not the welcome screen', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getLastDirectoryPath.mockRejectedValueOnce(new Error('db locked'));
+    render(<App />);
+
+    expect(await screen.findByText('前回のフォルダを読み込めませんでした')).toBeTruthy();
+    expect(screen.queryByText('ようこそ SSS へ')).toBeNull();
+    // フォルダを選び直す導線(設定)も残す
+    expect(screen.getByText('フォルダを選択')).toBeTruthy();
+
+    // 再試行で復旧すれば、本当の未設定としてようこそ画面になる
+    getLastDirectoryPath.mockResolvedValue(null);
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }));
+    expect(await screen.findByText('ようこそ SSS へ')).toBeTruthy();
+    expect(screen.queryByText('前回のフォルダを読み込めませんでした')).toBeNull();
+    spy.mockRestore();
+  });
+
+  it('a failed settings read starts with defaults but tells the user once the app is ready', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getSetting.mockImplementation(async (key: string) => {
+      if (key === 'display_interval') throw new Error('db locked');
+      return null;
+    });
+    render(<App />);
+
+    expect(await screen.findByText(/保存済みの設定を読み込めませんでした/)).toBeTruthy();
+    expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    spy.mockRestore();
+  });
+
+  it('notifyFailure from an unmounted section shows the app-level toast', async () => {
+    const { notifyFailure } = await import('./lib/failureNotice');
+    render(<App />);
+    await screen.findByText('ようこそ SSS へ');
+    act(() => notifyFailure('languageSaveFailed'));
+    expect(
+      await screen.findByText('言語の設定を保存できませんでした。元の値に戻しました'),
+    ).toBeTruthy();
+  });
+});

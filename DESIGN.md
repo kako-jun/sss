@@ -210,6 +210,8 @@ A failure must never look like an empty state or like success. Two components in
   message instead of stacking. A settings _load_ failure uses the same notice with an
   underlined "Retry" text button.
 
+Save notices name their target ("Couldn't save the display interval. Reverted to the previous value."), so several failures in one tab never read as a repeated identical line. When the section is already unmounted the same text goes to the top toast. A startup failure that stops the app from knowing its state (last folder unreadable) uses the empty-state glass card with a **Primary** "Retry" and a **Standard** "Select Folder", never the welcome card.
+
 Fetch-on-mount sections use `useAsyncLoad` (`loading | error | ready`), so "ready with no
 rows" and "error" can't be confused.
 

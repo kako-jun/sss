@@ -32,25 +32,39 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
   useEffect(() => {
     onIntervalChangeRef.current = onIntervalChange;
   });
-  const {
-    saveFailed,
-    save: saveWithRollback,
-    markLoaded,
-  } = useRollbackSave<number>((ms) => {
-    // 保存できなかった値は画面にも再生中のスライドショーにも残さない（DBの値と揃える）。
-    setDisplayInterval(ms);
-    setNumberText(String(ms / 1000));
-    onIntervalChangeRef.current?.(ms);
-  }, DEFAULT_DISPLAY_INTERVAL);
-  const persist = useCallback(
-    (ms: number) => saveWithRollback(ms, (v) => saveSetting('display_interval', v.toString())),
-    [saveWithRollback],
-  );
-
   const saveTimeoutRef = useRef<number | undefined>(undefined);
   // #65レビューS5: debounce中の保存先（ms）を覚えておき、unmount時に破棄せず
   // flushできるようにする。
   const pendingMsRef = useRef<number | undefined>(undefined);
+  const {
+    saveFailed,
+    save: saveWithRollback,
+    markLoaded,
+  } = useRollbackSave<number>(
+    (ms) => {
+      // 保存できなかった値は画面にも再生中のスライドショーにも残さない（DBの値と揃える）。
+      // 巻き戻す前に動かしていたスライダーのdebounce待ちが残っていると、後から保存が成功して
+      // DBだけ新しい値になり、画面は巻き戻した値のままずれるので、待ちは破棄する（#115）。
+      if (saveTimeoutRef.current !== undefined) {
+        window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = undefined;
+      }
+      pendingMsRef.current = undefined;
+      setDisplayInterval(ms);
+      setNumberText(String(ms / 1000));
+      onIntervalChangeRef.current?.(ms);
+    },
+    DEFAULT_DISPLAY_INTERVAL,
+    'intervalSaveFailed',
+  );
+  const persist = useCallback(
+    async (ms: number) => {
+      const ok = await saveWithRollback(ms, (v) => saveSetting('display_interval', v.toString()));
+      // 保存できたなら、DBは正常に書ける。取得失敗の表示（既定値の注記）は役目を終える。
+      if (ok) setLoadFailed(false);
+    },
+    [saveWithRollback],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -181,7 +195,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
         </div>
       </div>
       <InlineError
-        message={saveFailed ? t('settingSaveFailed') : loadFailed ? t('settingLoadFailed') : null}
+        message={saveFailed ? t('intervalSaveFailed') : loadFailed ? t('settingLoadFailed') : null}
         onRetry={!saveFailed && loadFailed ? () => setAttempt((n) => n + 1) : undefined}
         testId="interval-error"
       />

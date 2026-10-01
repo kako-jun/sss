@@ -437,6 +437,36 @@ DBリセット・メモリ状態クリア・キャッシュクリアの中核ロ
   単純な前方一致だと、ジャマイカ・クレオール英語のISO 639-3コード`jam`まで
   日本語と誤判定するため、直後が区切り文字か文字列終端であることも要求する。
 
+### (i) 失敗を「空」や成功に見せない（#115）
+
+IPC（`invoke`）の失敗は、利用者に見える形で伝える。取得は `useAsyncLoad`（`loading | error | ready`）で受け、reject は「読み込みに失敗しました」＋再試行（`LoadError`）にする。「〜はありません」の空状態は `ready` かつ 0 件のときだけ。保存は `useRollbackSave` で、直列化して書き込み、失敗したら最後に保存できた値へ巻き戻してセクション内に1つだけ対象名つきの通知（`InlineError`）を出す。セクションが既にアンマウントされている場合は `lib/failureNotice.ts` 経由で App の上部トーストにも出す（巻き戻しだけが説明なしに起きない）。起動シーケンス（`lib/startup.ts`）の失敗は `onStartupFailure` で App に伝え、前回フォルダの取得失敗・想定外の初期化失敗は「ようこそ」にせず再試行できる案内画面、設定の取得失敗は既定値で続行して上部トーストで知らせる。ピック失敗の原因は Rust の `pick::pick_io_error_code`（書き込み側: `pickPermissionDenied` / `pickDiskFull` / `pickDestinationMissing`）と `pick::pick_source_error_code`（読み取り側: `pickSourceUnreadable` / `imageFileNotFound`）で返し、`resolvePickErrorMessage` が原因別の文言にする。分類は `std::io::ErrorKind` のみで行い、OS の生エラーコードは見ない（OS ごとに意味が違うため。std が ENOSPC や Windows の ERROR_DISK_FULL を `StorageFull` に写す）。
+
+`invoke` の catch が `console.error` のみだった箇所の洗い出しと対応（#115）:
+
+| 箇所                                                                                   | 対応                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ExcludeRulesSection: `get_ignore_patterns`                                             | 修正: 取得失敗のエラー＋再試行（追加フォームは隠す）                                                                                                                                 |
+| ExcludeRulesSection: `remove_ignore_pattern`                                           | 修正: 解除失敗を通知しルールは一覧に残す                                                                                                                                             |
+| PickSection: `get_picked_images` / `delete_picked_image`                               | 修正: エラー＋再試行 / 削除失敗を通知                                                                                                                                                |
+| HistorySection: `get_recent_images`                                                    | 修正: エラー＋再試行                                                                                                                                                                 |
+| GraphSection: `get_display_stats` / `reset_all_display_counts`                         | 修正: エラー＋再試行（`useAsyncLoad`、古い応答が後勝ちしない）/ リセット失敗を通知                                                                                                   |
+| IntervalSection: `save_setting`（debounce・即時・unmount 時 flush）/ `get_setting`     | 修正: 巻き戻し＋対象名つき通知（保留中の debounce 保存は破棄）、unmount 後は上部トースト。取得失敗は既定値の注記＋再試行（保存成功で解除）                                           |
+| SettingsSection（EXIF）/ VideoSection: 保存・取得                                      | 修正: 同上                                                                                                                                                                           |
+| LanguageSection: `save_setting`                                                        | 修正: 言語も保存済みの値へ巻き戻し、通知（unmount 後は上部トースト）                                                                                                                 |
+| InfoSection: バージョン取得 / GitHub を開く                                            | 修正: 「取得できません」表示 / 開けない通知                                                                                                                                          |
+| ScanSection: `get_last_directory_path`（マウント時・スキャン完了後）                   | 修正: 「前回のフォルダを読み込めませんでした」                                                                                                                                       |
+| OverlayUI: `pick_image`                                                                | 修正: 原因別の文言（権限・容量・ピック先・元ファイル）                                                                                                                               |
+| App: `exit_app`                                                                        | 修正: 上部トーストで通知                                                                                                                                                             |
+| startup: `get_last_directory_path`                                                     | 修正: 再試行できる失敗の案内画面（ようこそにしない）                                                                                                                                 |
+| startup: `get_setting`（表示間隔・動画設定）/ 想定外の初期化失敗                       | 修正: 既定値で続行＋上部トースト / 再試行できる案内画面                                                                                                                              |
+| ShareDirectorySection: `get_share_directory` / `select_share_directory`                | 既に画面表示あり（#87）                                                                                                                                                              |
+| OverlayUI: undo / open / exclude、HistorySection: exclude、useExcludeRescan            | 既に画面表示あり                                                                                                                                                                     |
+| Thumbnail: `get_thumbnail`                                                             | 意図的に console のみ: 失敗は ImageOff アイコン＋ファイル名で既に可視                                                                                                                |
+| ShareDirectorySection: `get_default_share_directory`                                   | 意図的に console のみ: 入力欄の placeholder が空になるだけで、実際のピック先は別取得（失敗なら通知済み）                                                                             |
+| App: ウィンドウタイトル更新・フルスクリーン実態の同期・`get_playlist_info`（位置表示） | 意図的に console のみ: 表示の補助で、次の操作・イベントで再同期される。誤解を招く状態を永続化しない                                                                                  |
+| App: `undo_display_count`（`onError` 後の補正）                                        | 意図的に console のみ: 内部の補正で、直後に次の画像へ進む。利用者が操作・判断できる事柄がない                                                                                        |
+| `lib/i18n/store.ts`: 言語設定・OS ロケールの取得                                       | 意図的に console のみ: 取得失敗は `auto`（OS/ブラウザ言語）にフォールバックして必ず起動を続行する（失敗でアプリを止めない契約）。言語設定の _保存_ 失敗は LanguageSection が通知する |
+
 ## 7. テスト
 
 バックエンドは `src-tauri` を **lib+bin 分割**（`[lib] name = "sss_lib"`）しており、芯モジュールはライブラリとして公開されます。これにより:

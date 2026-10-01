@@ -119,6 +119,9 @@ describe('backend error code -> message resolution (#80)', () => {
       expect(resolvePickErrorMessage('pickDestinationMissing')).toBe(
         'ピック先のフォルダが見つからないためコピーできません',
       );
+      expect(resolvePickErrorMessage('pickSourceUnreadable')).toBe(
+        'コピー元の写真を読み取れないためコピーできません',
+      );
       expect(resolvePickErrorMessage('imageFileNotFound')).toBe(
         'コピー元の写真が見つからないためコピーできません',
       );

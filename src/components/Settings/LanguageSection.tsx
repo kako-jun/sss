@@ -21,10 +21,14 @@ export function LanguageSection() {
   const [setting, setSetting] = useState<LanguageSetting>(getLanguageSetting());
   // #115: 保存に失敗したら、画面の言語も保存済みの設定へ巻き戻して失敗を伝える
   // （次回起動で元の言語に戻って初めて気づく、を防ぐ）。
-  const { saveFailed, save } = useRollbackSave<LanguageSetting>((previous) => {
-    setLanguageSetting(previous);
-    setSetting(previous);
-  }, getLanguageSetting());
+  const { saveFailed, save } = useRollbackSave<LanguageSetting>(
+    (previous) => {
+      setLanguageSetting(previous);
+      setSetting(previous);
+    },
+    getLanguageSetting(),
+    'languageSaveFailed',
+  );
 
   const handleChange = async (next: LanguageSetting) => {
     setLanguageSetting(next);
@@ -58,7 +62,7 @@ export function LanguageSection() {
           </button>
         ))}
       </div>
-      <InlineError message={saveFailed ? t('settingSaveFailed') : null} testId="language-error" />
+      <InlineError message={saveFailed ? t('languageSaveFailed') : null} testId="language-error" />
     </div>
   );
 }

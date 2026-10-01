@@ -32,8 +32,14 @@ export function useAsyncLoad<T>(loader: () => Promise<T>, label: string): AsyncL
 
   useEffect(() => {
     let cancelled = false;
-    loaderRef
-      .current()
+    // loader が同期的に throw しても、非同期の reject と同じく error 状態にする。
+    let pending: Promise<T>;
+    try {
+      pending = loaderRef.current();
+    } catch (err) {
+      pending = Promise.reject(err);
+    }
+    pending
       .then((data) => {
         if (!cancelled) setState({ status: 'ready', data });
       })

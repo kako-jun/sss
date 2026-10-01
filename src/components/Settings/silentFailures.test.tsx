@@ -18,6 +18,7 @@ const tauri = {
   getSetting: vi.fn(),
   saveSetting: vi.fn(),
   getLastDirectoryPath: vi.fn(),
+  rescanLastDirectory: vi.fn(),
   resetAllData: vi.fn(),
 };
 
@@ -37,7 +38,7 @@ vi.mock('../../lib/tauri', () => ({
   getLastDirectoryPath: (...a: unknown[]) => tauri.getLastDirectoryPath(...a),
   resetAllData: (...a: unknown[]) => tauri.resetAllData(...a),
   selectAndScan: vi.fn(),
-  rescanLastDirectory: vi.fn(),
+  rescanLastDirectory: (...a: unknown[]) => tauri.rescanLastDirectory(...a),
 }));
 
 const openUrl = vi.fn();
@@ -365,5 +366,170 @@ describe('その他の黙っていた失敗 (#115)', () => {
     tauri.getLastDirectoryPath.mockRejectedValue(new Error('io'));
     render(<ScanSection onScanComplete={() => {}} />);
     expect(await screen.findByText('前回のフォルダを読み込めませんでした')).toBeTruthy();
+  });
+});
+
+describe('レビュー指摘の追加検証 (#115)', () => {
+  it('IntervalSection: 巻き戻しは保留中のスライダー保存を破棄する(DBと画面がずれない)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      tauri.getSetting.mockResolvedValue('10000');
+      render(<IntervalSection />);
+      const input = screen.getByRole('spinbutton') as HTMLInputElement;
+      await waitFor(() => expect(input.value).toBe('10'));
+
+      // B: 数値入力の確定で保存開始(保留のまま)
+      let rejectB!: (e: unknown) => void;
+      tauri.saveSetting.mockImplementationOnce(
+        () =>
+          new Promise<void>((_, rej) => {
+            rejectB = rej;
+          }),
+      );
+      fireEvent.change(input, { target: { value: '30' } });
+      fireEvent.blur(input);
+      await act(async () => {});
+      expect(tauri.saveSetting).toHaveBeenCalledTimes(1);
+
+      // C: B の保存中にスライダーを動かす(debounce 待ち)
+      fireEvent.change(screen.getByRole('slider'), { target: { value: '45' } });
+      expect(input.value).toBe('45');
+
+      // B が失敗 → 保存済み(10)へ巻き戻し、C の保存待ちは破棄される
+      await act(async () => {
+        rejectB(new Error('io'));
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(input.value).toBe('10');
+      expect(tauri.saveSetting).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('IntervalSection: 設定を閉じた後に保存が失敗しても、上部の通知で伝わる', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { subscribeFailureNotice } = await import('../../lib/failureNotice');
+    const listener = vi.fn();
+    const off = subscribeFailureNotice(listener);
+    const onIntervalChange = vi.fn();
+    try {
+      tauri.getSetting.mockResolvedValue('10000');
+      const { unmount } = render(<IntervalSection onIntervalChange={onIntervalChange} />);
+      const input = screen.getByRole('spinbutton') as HTMLInputElement;
+      await waitFor(() => expect(input.value).toBe('10'));
+      tauri.saveSetting.mockRejectedValue(new Error('io'));
+      fireEvent.change(screen.getByRole('slider'), { target: { value: '20' } });
+      unmount(); // debounce 待ちのまま閉じる → unmount 時の flush が失敗する
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(listener).toHaveBeenCalledWith('intervalSaveFailed');
+      expect(onIntervalChange).toHaveBeenLastCalledWith(10000);
+    } finally {
+      off();
+      vi.useRealTimers();
+    }
+  });
+
+  it('VideoSection: 保存が終わる前に閉じて失敗しても、上部の通知で伝わる', async () => {
+    const { subscribeFailureNotice } = await import('../../lib/failureNotice');
+    const listener = vi.fn();
+    const off = subscribeFailureNotice(listener);
+    let rejectSave!: (e: unknown) => void;
+    tauri.saveSetting.mockImplementation(
+      () =>
+        new Promise<void>((_, rej) => {
+          rejectSave = rej;
+        }),
+    );
+    const onAudioChange = vi.fn();
+    const { unmount } = render(<VideoSection onAudioChange={onAudioChange} />);
+    await waitFor(() => expect(tauri.getSetting).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByLabelText('動画の音声を再生する'));
+    await act(async () => {});
+    unmount();
+    await act(async () => {
+      rejectSave(new Error('io'));
+    });
+    expect(listener).toHaveBeenCalledWith('videoSaveFailed');
+    expect(onAudioChange).toHaveBeenLastCalledWith(false);
+    off();
+  });
+
+  it('保存の通知文言に対象名が入る(同じ文言が並ばない)', async () => {
+    tauri.saveSetting.mockRejectedValue(new Error('io'));
+    tauri.getSetting.mockResolvedValue('true');
+    render(<SettingsSection />);
+    const cb = (await screen.findByRole('checkbox')) as HTMLInputElement;
+    await waitFor(() => expect(cb.checked).toBe(true));
+    fireEvent.click(cb);
+    expect(await screen.findByText(/EXIF回転の設定を保存できませんでした/)).toBeTruthy();
+  });
+
+  it('取得失敗の注記は、その後の保存が成功すると消える', async () => {
+    tauri.getSetting.mockRejectedValue(new Error('io'));
+    render(<SettingsSection />);
+    expect(await screen.findByText('設定を読み込めませんでした。表示は既定値です')).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox'));
+    await waitFor(() => expect(screen.queryByTestId('exif-error')).toBeNull());
+  });
+
+  it('ExcludeRulesSection: 取得失敗の間は追加フォーム(入力欄・追加ボタン)を出さない', async () => {
+    tauri.getIgnorePatterns.mockRejectedValue(new Error('io'));
+    render(<ExcludeRulesSection />);
+    await screen.findByTestId('exclude-load-error');
+    expect(screen.queryByPlaceholderText('パターンを入力（例: **/thumbs/）')).toBeNull();
+    expect(screen.queryByRole('button', { name: /追加/ })).toBeNull();
+  });
+
+  it('ScanSection: スキャン完了後の前回フォルダ再取得に失敗しても通知する(2か所目)', async () => {
+    tauri.getLastDirectoryPath
+      .mockResolvedValueOnce('/photos')
+      .mockRejectedValueOnce(new Error('io'));
+    tauri.rescanLastDirectory.mockResolvedValue({
+      totalFiles: 1,
+      newFiles: 1,
+      deletedFiles: 0,
+      durationMs: 10,
+      errorCount: 0,
+      errorExamples: [],
+    });
+    render(<ScanSection onScanComplete={() => {}} />);
+    await waitFor(() =>
+      expect((screen.getByTitle('/photos') as HTMLInputElement).value).toBe('/photos'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /スキャン/ }));
+    expect(await screen.findByText('前回のフォルダを読み込めませんでした')).toBeTruthy();
+  });
+
+  it('useAsyncLoad: loader が同期的に throw してもエラー状態になる', async () => {
+    tauri.getPickedImages.mockImplementation(() => {
+      throw new Error('sync');
+    });
+    render(<PickSection />);
+    expect(await screen.findByTestId('pick-load-error')).toBeTruthy();
+  });
+
+  it('GraphSection: 再試行を連打しても古い応答が後勝ちしない', async () => {
+    const stale = (() => {
+      let resolve!: (v: unknown) => void;
+      const promise = new Promise((r) => (resolve = r));
+      return { promise, resolve };
+    })();
+    tauri.getDisplayStats.mockRejectedValueOnce(new Error('io'));
+    render(<GraphSection />);
+    await screen.findByTestId('stats-load-error');
+    tauri.getDisplayStats.mockReturnValueOnce(stale.promise);
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }));
+    tauri.getDisplayStats.mockResolvedValueOnce({ files: 0, min: 0, max: 0, mean: 0, bins: [] });
+    // 1回目の再試行は読み込み中表示になるため、再度失敗させて2回目を押す経路ではなく、
+    // 古い応答が後から届いても最新(空)の結果が維持されることを見る。
+    stale.resolve({ files: 5, min: 1, max: 1, mean: 1, bins: [{ count: 1, files: 5 }] });
+    await waitFor(() => expect(screen.queryByText('読み込み中...')).toBeNull());
+    expect(screen.queryByTestId('stats-load-error')).toBeNull();
   });
 });

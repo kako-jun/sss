@@ -48,14 +48,22 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
   useEffect(() => {
     onMaxDurationChangeRef.current = onMaxDurationChange;
   });
-  const audioSave = useRollbackSave<boolean>((v) => {
-    setAudioEnabled(v);
-    onAudioChangeRef.current?.(v);
-  }, DEFAULT_VIDEO_AUDIO_ENABLED);
-  const maxDurationSave = useRollbackSave<number>((v) => {
-    setMaxDurationSec(v);
-    onMaxDurationChangeRef.current?.(v);
-  }, DEFAULT_VIDEO_MAX_DURATION_SEC);
+  const audioSave = useRollbackSave<boolean>(
+    (v) => {
+      setAudioEnabled(v);
+      onAudioChangeRef.current?.(v);
+    },
+    DEFAULT_VIDEO_AUDIO_ENABLED,
+    'videoSaveFailed',
+  );
+  const maxDurationSave = useRollbackSave<number>(
+    (v) => {
+      setMaxDurationSec(v);
+      onMaxDurationChangeRef.current?.(v);
+    },
+    DEFAULT_VIDEO_MAX_DURATION_SEC,
+    'videoSaveFailed',
+  );
   const { markLoaded: markAudioLoaded } = audioSave;
   const { markLoaded: markMaxDurationLoaded } = maxDurationSave;
 
@@ -98,9 +106,10 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
     audioTouchedRef.current = true;
     setAudioEnabled(checked);
     onAudioChange?.(checked);
-    await audioSave.save(checked, (v) =>
+    const ok = await audioSave.save(checked, (v) =>
       saveSetting(SETTING_VIDEO_AUDIO_ENABLED, v ? 'true' : 'false'),
     );
+    if (ok) setLoadFailed(false);
   };
 
   const handleMaxDurationChange = async (raw: string) => {
@@ -108,9 +117,10 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
     const sec = normalizeVideoMaxDuration(parseInt(raw, 10));
     setMaxDurationSec(sec);
     onMaxDurationChange?.(sec);
-    await maxDurationSave.save(sec, (v) =>
+    const ok = await maxDurationSave.save(sec, (v) =>
       saveSetting(SETTING_VIDEO_MAX_DURATION_SEC, v.toString()),
     );
+    if (ok) setLoadFailed(false);
   };
 
   const optionLabel = (sec: number): string => {
@@ -167,7 +177,7 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
       <InlineError
         message={
           audioSave.saveFailed || maxDurationSave.saveFailed
-            ? t('settingSaveFailed')
+            ? t('videoSaveFailed')
             : loadFailed
               ? t('settingLoadFailed')
               : null
