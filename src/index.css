@@ -106,3 +106,228 @@ a:focus-visible,
   background-color: #0a0a0a;
   color: rgba(255, 255, 255, 0.87);
 }
+
+/* #122: checkbox / range はOS既定だと、未チェック時に白い箱になる
+   (Linux WebKitGTK で確認。Chrome は color-scheme: dark が効くため差が出ない)。
+   appearance: none で自前描画に統一し、WebKit/Chromium/Firefox で同じ見た目にする。
+   - 枠は rgba(255,255,255,0.5)。bg-neutral-950 (#0a0a0a) に対し約 5:1 で、
+     非文字コントラスト 3:1 (WCAG 1.4.11) を満たす。
+   - チェックマークは CSS (clip-path) のみ。画像・絵文字は使わない。
+   - サイズは 20px (ヒットエリア最小)。フォーカスは :focus-visible のみ。
+   - margin: 0 2px とフォーカスリング outline-offset: 0 は、設定モーダルのスクロール領域の
+     左端でリングが切れないようにするため(大域の 2px オフセットだと欠ける)。縦は 0 にして
+     text-sm のラベル1行目(行高 20px)と箱の中心を揃える。
+   - 強制カラー(Windows ハイコントラスト)では背景色が Canvas に上書きされ、チェック済みが
+     空の箱になるため、末尾の @media (forced-colors: active) でシステムカラーを明示する。
+   - radio は利用箇所が無いので定義しない(必要になったら足し、走査テストの CLASS_FOR も更新する)。
+   全ての <input type="checkbox|range"> はこのクラスを付ける
+   (src/test/inputDark.test.ts が走査で担保)。 */
+.sss-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  color-scheme: dark;
+  position: relative;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0 2px;
+  background-color: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    background-color 150ms,
+    border-color 150ms;
+}
+
+.sss-checkbox:hover:not(:disabled):not(:checked) {
+  border-color: rgba(255, 255, 255, 0.75);
+}
+
+.sss-checkbox:checked {
+  background-color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.9);
+}
+
+.sss-checkbox::after {
+  content: '';
+  position: absolute;
+  display: none;
+  inset: 3px;
+  background-color: #0a0a0a;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0, 43% 62%);
+}
+
+.sss-checkbox:checked::after {
+  display: block;
+}
+
+.sss-checkbox:focus-visible,
+.sss-range:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 0;
+}
+
+/* disabled の不透明度は DESIGN.md の既存規則 (disabled:opacity-30) に揃える。 */
+.sss-checkbox:disabled,
+.sss-range:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* range: トラック 4px (白 25%)、つまみ 20px の白丸。塗り済み部分は描かない
+   (Firefox だけ -moz-range-progress で塗ると見た目が割れるため、全エンジンでトラック色に統一)。
+   フォーカスリングは入力欄全体(幅いっぱい x 高さ 20px)を囲む長い矩形になる(意図)。 */
+.sss-range {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  color-scheme: dark;
+  height: 20px;
+  margin: 0 2px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sss-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+.sss-range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+.sss-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  margin-top: -8px; /* (トラック 4px - つまみ 20px) / 2 */
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.sss-range::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.sss-range:hover:not(:disabled)::-webkit-slider-thumb {
+  background-color: #fff;
+}
+
+.sss-range:hover:not(:disabled)::-moz-range-thumb {
+  background-color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sss-checkbox {
+    transition: none;
+  }
+}
+
+/* 強制カラー(Windows ハイコントラスト、WebView2 に伝わる)。ブラウザが背景色を Canvas に
+   上書きするとチェック済みと未チェックの差が消えるため、forced-color-adjust: none で
+   自前の色を守りつつ、システムカラーだけで差が出るように指定する。
+   -webkit-* と -moz-* の擬似要素は同じセレクタ列に混ぜない(未知の擬似要素を含むと
+   ブラウザは列全体を捨てる)。 */
+@media (forced-colors: active) {
+  .sss-checkbox,
+  .sss-range,
+  .sss-range::-webkit-slider-runnable-track,
+  .sss-range::-webkit-slider-thumb {
+    forced-color-adjust: none;
+  }
+
+  .sss-range::-moz-range-track,
+  .sss-range::-moz-range-thumb {
+    forced-color-adjust: none;
+  }
+
+  .sss-checkbox {
+    background-color: Canvas;
+    border-color: ButtonText;
+  }
+
+  .sss-checkbox:hover:not(:disabled) {
+    border-color: Highlight;
+  }
+
+  .sss-checkbox:checked {
+    background-color: Highlight;
+    border-color: Highlight;
+  }
+
+  .sss-checkbox::after {
+    background-color: HighlightText;
+  }
+
+  /* チェック済みは塗りも枠も Highlight なので、リングは別色(CanvasText)にして区別する。 */
+  .sss-checkbox:focus-visible,
+  .sss-range:focus-visible {
+    outline-color: CanvasText;
+  }
+
+  /* GrayText 自体が減光色なので、通常の opacity 0.3 を重ねて二重に薄くしない。 */
+  .sss-checkbox:disabled,
+  .sss-range:disabled {
+    opacity: 1;
+  }
+
+  .sss-checkbox:disabled {
+    border-color: GrayText;
+  }
+
+  .sss-checkbox:disabled:checked {
+    background-color: GrayText;
+  }
+
+  .sss-range:disabled::-webkit-slider-thumb {
+    background-color: GrayText;
+    border-color: GrayText;
+  }
+
+  .sss-range:disabled::-moz-range-thumb {
+    background-color: GrayText;
+    border-color: GrayText;
+  }
+
+  .sss-range::-webkit-slider-runnable-track {
+    background-color: ButtonText;
+  }
+
+  .sss-range::-moz-range-track {
+    background-color: ButtonText;
+  }
+
+  .sss-range::-webkit-slider-thumb {
+    background-color: ButtonText;
+    border-color: ButtonText;
+  }
+
+  .sss-range::-moz-range-thumb {
+    background-color: ButtonText;
+    border-color: ButtonText;
+  }
+
+  .sss-range:hover:not(:disabled)::-webkit-slider-thumb {
+    background-color: Highlight;
+    border-color: Highlight;
+  }
+
+  .sss-range:hover:not(:disabled)::-moz-range-thumb {
+    background-color: Highlight;
+    border-color: Highlight;
+  }
+}

@@ -36,7 +36,7 @@ export function SettingsSection() {
           type="checkbox"
           checked={applyExifRotation}
           onChange={(e) => handleExifRotationChange(e.target.checked)}
-          className="mt-0.5 w-4 h-4 rounded border-white/20 bg-white/5 text-white/50 focus:ring-0 focus:ring-offset-0 accent-white/50"
+          className="sss-checkbox"
         />
         {/* #66レビュー2巡目nit: /55→/50（他の説明/補助テキストと同じ濃さに統一）。 */}
         <div className="text-white/50 text-sm group-hover:text-white/75 transition-colors">

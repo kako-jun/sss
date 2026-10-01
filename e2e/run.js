@@ -442,6 +442,264 @@ async function confirmResetScenario(page, lang, kind = 'info') {
   return { pass, detail: detail.join(' | ') };
 }
 
+/**
+ * #122: 設定の checkbox / range が自前描画(appearance: none)でダークテーマに合うことを
+ * 全状態(未チェック/チェック/フォーカス/disabled)で computed style から検証する。
+ * E2E_SHOT_DIR を指定すると各状態のスクリーンショットを保存する(目視確認用)。
+ */
+async function inputDarkScenario(page, lang) {
+  const shotDir = process.env.E2E_SHOT_DIR;
+  const shot = async (loc, name) => {
+    if (shotDir) await loc.screenshot({ path: path.join(shotDir, `${lang}-${name}.png`) });
+  };
+  const lum = (rgba) => {
+    const m = rgba.match(/[\d.]+/g).map(Number);
+    return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255;
+  };
+  const read = (el) =>
+    el.evaluate((e) => {
+      const cs = getComputedStyle(e);
+      const after = getComputedStyle(e, '::after');
+      const r = e.getBoundingClientRect();
+      return {
+        appearance: cs.appearance,
+        bg: cs.backgroundColor,
+        border: cs.borderTopColor,
+        w: r.width,
+        h: r.height,
+        outlineStyle: cs.outlineStyle,
+        outlineColor: cs.outlineColor,
+        opacity: cs.opacity,
+        afterDisplay: after.display,
+        afterClip: after.clipPath,
+      };
+    });
+
+  await page.waitForSelector('svg.lucide-settings', { state: 'attached', timeout: 5000 });
+  await openSettingsModal(page);
+  await page.click('#tab-options');
+  // transition を切って最終状態だけを検証する(遷移途中の色は見ない。reduced-motion 相当の副作用は
+  // 承知の上)。設定の非同期読み込み完了も待つ。
+  await page.addStyleTag({ content: '*, *::after { transition: none !important; }' });
+  await page.waitForTimeout(800);
+  const boxes = page.locator('input[type="checkbox"]');
+  const n = await boxes.count();
+  const details = [];
+  let pass = n >= 2;
+  for (let i = 0; i < n; i++) {
+    const box = boxes.nth(i);
+    if (await box.isChecked()) await box.evaluate((e) => e.click());
+    await page.waitForTimeout(250);
+    const off = await read(box);
+    await shot(box, `checkbox${i}-unchecked`);
+    await box.evaluate((e) => e.click());
+    await page.waitForTimeout(250);
+    const on = await read(box);
+    await shot(box, `checkbox${i}-checked`);
+    // キーボード操作でフォーカスさせ :focus-visible を成立させる
+    await box.evaluate((e) => e.blur());
+    await page.keyboard.press('Tab');
+    await box.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(100);
+    const focused = await read(box);
+    await shot(box, `checkbox${i}-focus`);
+    await box.evaluate((e) => (e.disabled = true));
+    const dis = await read(box);
+    await shot(box, `checkbox${i}-disabled`);
+    // hover の枠の明るさ変化は有効時だけ(disabled では効かない)。チェック済みは枠が元から
+    // 明るいので、未チェックに戻して見る。
+    await box.evaluate((e) => {
+      e.disabled = false;
+      e.click();
+    });
+    await page.waitForTimeout(100);
+    const bb = await box.boundingBox();
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    await page.waitForTimeout(100);
+    const hoverEnabled = await box.evaluate((e) => getComputedStyle(e).borderTopColor);
+    await box.evaluate((e) => (e.disabled = true));
+    await page.waitForTimeout(100);
+    const hoverDisabled = await box.evaluate((e) => getComputedStyle(e).borderTopColor);
+    await box.evaluate((e) => (e.disabled = false));
+    await page.mouse.move(0, 0);
+    // 箱の中心とラベル1行目の中心が ±1px に収まる(縦位置のずれ検出)
+    const align = await box.evaluate((e) => {
+      const sib = e.nextElementSibling;
+      const w = document.createTreeWalker(sib, NodeFilter.SHOW_TEXT);
+      let node = w.nextNode();
+      while (node && !node.textContent.trim()) node = w.nextNode();
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const line = range.getClientRects()[0];
+      const b = e.getBoundingClientRect();
+      return Math.abs(b.top + b.height / 2 - (line.top + line.height / 2));
+    });
+    const ok =
+      align <= 1 &&
+      off.appearance === 'none' &&
+      lum(off.bg) < 0.2 &&
+      lum(off.border) > 0.45 && // 枠 vs 黒背景で 3:1 以上
+      off.afterDisplay === 'none' &&
+      on.appearance === 'none' &&
+      lum(on.bg) > 0.8 &&
+      on.afterDisplay === 'block' &&
+      on.afterClip.startsWith('polygon') &&
+      off.w >= 20 &&
+      off.h >= 20 &&
+      focused.outlineStyle === 'solid' &&
+      lum(focused.outlineColor) > 0.5 &&
+      Number(dis.opacity) < 1 &&
+      hoverDisabled === off.border &&
+      hoverEnabled !== off.border;
+    if (!ok) pass = false;
+    details.push(
+      `cb${i}=${ok} align=${align.toFixed(1)} off=${off.bg}/${off.border} on=${on.bg} focus=${focused.outlineStyle}/${focused.outlineColor} dis=${dis.opacity} hover=${hoverEnabled}/${hoverDisabled} size=${off.w}x${off.h}`,
+    );
+  }
+  // range は全タブを巡って探す（所属タブに依存しない）
+  let rangeInfo = 'range not found';
+  const tabIds = await page.$$eval('[role="tab"]', (els) => els.map((e) => e.id));
+  for (const id of tabIds) {
+    await page.click(`#${id}`);
+    await page.waitForTimeout(200);
+    const range = page.locator('input[type="range"]');
+    if ((await range.count()) === 0) continue;
+    const r = await range.first().evaluate((e) => {
+      const cs = getComputedStyle(e);
+      const b = e.getBoundingClientRect();
+      return { appearance: cs.appearance, h: b.height };
+    });
+    await shot(range.first(), 'range');
+    const ok = r.appearance === 'none' && r.h >= 20;
+    if (!ok) pass = false;
+    rangeInfo = `range=${ok} appearance=${r.appearance} h=${r.h}`;
+    break;
+  }
+  if (rangeInfo === 'range not found') pass = false;
+  return { pass, detail: `checkboxes=${n} ${details.join(' ')} ${rangeInfo}` };
+}
+
+/**
+ * #122: 強制カラー(Windows ハイコントラスト、WebView2 に伝わる)でも、チェック済みが空の箱に
+ * ならず、未チェックと視覚的に区別できることを computed style で検証する。
+ * E2E_SHOT_DIR を指定すると設定モーダルのスクリーンショットを保存する(目視確認用)。
+ */
+async function inputForcedColorsScenario(page) {
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.waitForSelector('svg.lucide-settings', { state: 'attached', timeout: 5000 });
+  await openSettingsModal(page);
+  await page.click('#tab-options');
+  await page.addStyleTag({ content: '*, *::after { transition: none !important; }' });
+  await page.waitForTimeout(800);
+  const box = page.locator('input[type="checkbox"]').first();
+  const read = () =>
+    box.evaluate((e) => {
+      const cs = getComputedStyle(e);
+      const a = getComputedStyle(e, '::after');
+      return {
+        bg: cs.backgroundColor,
+        border: cs.borderTopColor,
+        afterBg: a.backgroundColor,
+        afterDisplay: a.display,
+        adjust: cs.forcedColorAdjust,
+        forced: matchMedia('(forced-colors: active)').matches,
+      };
+    });
+  if (await box.isChecked()) await box.evaluate((e) => e.click());
+  await page.waitForTimeout(200);
+  const off = await read();
+  const shotDir = process.env.E2E_SHOT_DIR;
+  if (shotDir) await page.screenshot({ path: path.join(shotDir, 'forced-colors-unchecked.png') });
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(200);
+  const on = await read();
+  if (shotDir) await page.screenshot({ path: path.join(shotDir, 'forced-colors-checked.png') });
+  // チェック済みは背景が未チェックと異なり、チェックマークは背景と異なる色で、表示されている
+  const pass =
+    off.forced &&
+    on.adjust === 'none' &&
+    on.bg !== off.bg &&
+    on.afterDisplay === 'block' &&
+    on.afterBg !== on.bg &&
+    off.afterDisplay === 'none';
+  // チェック済み+キーボードフォーカス: リングが塗り・枠と別色で見える(nit: 同色だと消える)
+  await box.evaluate((e) => e.blur());
+  await page.keyboard.press('Tab');
+  await box.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(100);
+  const ring = await box.evaluate((e) => {
+    const cs = getComputedStyle(e);
+    return {
+      outline: cs.outlineColor,
+      style: cs.outlineStyle,
+      bg: cs.backgroundColor,
+      border: cs.borderTopColor,
+    };
+  });
+  const clip = async (name) => {
+    if (!shotDir) return;
+    const b = await box.boundingBox();
+    await page.screenshot({
+      path: path.join(shotDir, name),
+      clip: { x: b.x - 8, y: b.y - 8, width: b.width + 16, height: b.height + 16 },
+    });
+  };
+  await clip('forced-colors-checked-focus.png');
+  // 未チェック+フォーカス
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(150);
+  const ringOff = await box.evaluate((e) => {
+    const cs = getComputedStyle(e);
+    return {
+      outline: cs.outlineColor,
+      style: cs.outlineStyle,
+      bg: cs.backgroundColor,
+      border: cs.borderTopColor,
+    };
+  });
+  await clip('forced-colors-unchecked-focus.png');
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(150);
+  // checked + disabled: GrayText のまま opacity を重ねて二重に薄くしない
+  await box.evaluate((e) => (e.disabled = true));
+  const dis = await read();
+  const disOpacity = await box.evaluate((e) => getComputedStyle(e).opacity);
+  await clip('forced-colors-checked-disabled.png');
+  await box.evaluate((e) => (e.disabled = false));
+  // disabled では hover の枠変化が効かない(チェック済みは枠が元から Highlight なので未チェックで見る)
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(150);
+  const hoverCheck = async (disabled) => {
+    await box.evaluate((e, d) => (e.disabled = d), disabled);
+    const b = await box.boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.waitForTimeout(150);
+    const border = await box.evaluate((e) => getComputedStyle(e).borderTopColor);
+    await page.mouse.move(0, 0);
+    await box.evaluate((e) => (e.disabled = false));
+    return border;
+  };
+  const hoverEnabled = await hoverCheck(false);
+  const hoverDisabled = await hoverCheck(true);
+  const colorsOk =
+    ring.style === 'solid' &&
+    ring.outline !== ring.bg &&
+    ring.outline !== ring.border &&
+    ringOff.style === 'solid' &&
+    ringOff.outline !== ringOff.bg &&
+    disOpacity === '1' &&
+    dis.bg !== on.bg &&
+    hoverDisabled !== hoverEnabled;
+  return {
+    pass: pass && colorsOk,
+    detail: `off=${JSON.stringify(off)} on=${JSON.stringify(on)} ring=${JSON.stringify(ring)} ringOff=${JSON.stringify(ringOff)} disabledChecked=${JSON.stringify(dis)} disOpacity=${disOpacity} hover=${hoverEnabled}/${hoverDisabled}`,
+  };
+}
+
 const scenarios = [
   {
     // #65レビューM1(must): 画像→動画→動画→画像と回すあいだ、動画が
@@ -2498,6 +2756,31 @@ const scenarios = [
     locale: 'en-US',
     async run(page) {
       return confirmResetScenario(page, 'en', 'pick');
+    },
+  },
+  {
+    // #122: 設定の checkbox / range が appearance: none の自前描画でダークテーマに合う
+    // (WebKitGTK では未チェック時にネイティブの白い箱になっていた)。全状態を computed style で検証。
+    name: 'settings checkbox/range use the explicit dark styling in every state (ja) (#122)',
+    hash: 'slides',
+    async run(page) {
+      return inputDarkScenario(page, 'ja');
+    },
+  },
+  {
+    name: 'settings checkbox/range use the explicit dark styling in every state (en) (#122)',
+    hash: 'slides',
+    locale: 'en-US',
+    async run(page) {
+      return inputDarkScenario(page, 'en');
+    },
+  },
+  {
+    // #122: 強制カラー(ハイコントラスト)でチェック済みが空の箱にならない。
+    name: 'settings checkbox stays distinguishable when checked in forced-colors mode (#122)',
+    hash: 'slides',
+    async run(page) {
+      return inputForcedColorsScenario(page);
     },
   },
   {
