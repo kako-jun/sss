@@ -7,7 +7,11 @@ import { SettingsSection } from './SettingsSection';
 import { VideoSection } from './VideoSection';
 import { ShareDirectorySection } from './ShareDirectorySection';
 import { LanguageSection } from './LanguageSection';
-import { ExcludeRulesSection } from './ExcludeRulesSection';
+import {
+  ExcludeRulesSection,
+  foldExcludeRescanNotice,
+  type ExcludeRescanNotice,
+} from './ExcludeRulesSection';
 import { PickSection } from './PickSection';
 import { HistorySection } from './HistorySection';
 import { GraphSection } from './GraphSection';
@@ -60,6 +64,8 @@ export function Settings({
 }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'scan');
   const [statsKey, setStatsKey] = useState(0); // 統計グラフの強制再マウント用
+  // #111: 除外ルール変更後の「再スキャンが必要」案内。タブを切り替えても残す。
+  const [excludeNotice, setExcludeNotice] = useState<ExcludeRescanNotice | null>(null);
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
   // #66 問題9(a11y): 設定モーダルは role=dialog/aria-modal無し・フォーカストラップ
@@ -204,7 +210,13 @@ export function Settings({
         <div className="flex-1 overflow-y-auto">
           {activeTab === 'scan' && (
             <div role="tabpanel" id="tabpanel-scan" aria-labelledby="tab-scan" tabIndex={0}>
-              <ScanSection onScanComplete={onScanComplete} />
+              <ScanSection
+                onScanComplete={() => {
+                  // 手動の再スキャンでも除外ルールの変更は反映される
+                  setExcludeNotice(null);
+                  onScanComplete();
+                }}
+              />
             </div>
           )}
           {activeTab === 'options' && (
@@ -233,7 +245,16 @@ export function Settings({
               tabIndex={0}
               className="space-y-8"
             >
-              <ExcludeRulesSection />
+              <ExcludeRulesSection
+                notice={excludeNotice}
+                onRuleChanged={(change) =>
+                  setExcludeNotice((prev) => foldExcludeRescanNotice(prev, change))
+                }
+                onRescanned={(applied) => {
+                  if (applied) setExcludeNotice(null);
+                  onScanComplete();
+                }}
+              />
             </div>
           )}
           {activeTab === 'pick' && (
@@ -255,7 +276,11 @@ export function Settings({
               tabIndex={0}
               className="space-y-8"
             >
-              <HistorySection />
+              <HistorySection
+                onRuleChanged={(change) =>
+                  setExcludeNotice((prev) => foldExcludeRescanNotice(prev, change))
+                }
+              />
             </div>
           )}
           {activeTab === 'stats' && (

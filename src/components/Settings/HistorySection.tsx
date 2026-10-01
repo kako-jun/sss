@@ -7,13 +7,23 @@ import { useT } from '../../lib/i18n';
 import { resolveExcludeErrorMessage } from '../../lib/i18n/errors';
 import { Thumbnail } from './Thumbnail';
 
-export function HistorySection() {
+interface HistorySectionProps {
+  /**
+   * #111: ディレクトリ/撮影日除外は再スキャンするまでプレイリストに反映されない。
+   * ルールが追加されて再スキャンが要るとき、「除外ルール」タブの案内（再スキャンボタン付き）へ伝える。
+   */
+  onRuleChanged?: (change: { kind: 'added'; pattern: string }) => void;
+}
+
+export function HistorySection({ onRuleChanged }: HistorySectionProps = {}) {
   const t = useT();
   const [images, setImages] = useState<RecentImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   // #92: 除外失敗（管理外の拒否など）はコンソールだけでなく画面にも出す。
   const [excludeError, setExcludeError] = useState<string | null>(null);
+  // #111: 再スキャンが要る除外（フォルダ/撮影日）をした直後の案内（オーバーレイと同じ文言）。
+  const [rescanHint, setRescanHint] = useState<string | null>(null);
 
   useEffect(() => {
     getRecentImages()
@@ -29,8 +39,13 @@ export function HistorySection() {
 
   const handleExclude = async (path: string, type: 'date' | 'file' | 'directory') => {
     setExcludeError(null);
+    setRescanHint(null);
     try {
-      await excludeImage(path, type);
+      const outcome = await excludeImage(path, type);
+      if (outcome?.needsRescan) {
+        setRescanHint(outcome.pattern);
+        onRuleChanged?.({ kind: 'added', pattern: outcome.pattern });
+      }
       setImages((prev) => prev.filter((img) => img.path !== path));
       setActiveMenu(null);
     } catch (err) {
@@ -48,6 +63,12 @@ export function HistorySection() {
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-medium text-white/70">{t('recentHistoryTitle')}</h3>
+
+      {rescanHint !== null && (
+        <div role="status" className="p-2 bg-black/30 rounded-lg text-white/60 text-xs">
+          {t('excludeAddedNeedsRescan', { pattern: rescanHint })}
+        </div>
+      )}
 
       {excludeError && (
         <div role="alert" className="p-2 bg-black/30 rounded-lg text-red-300/80 text-xs">
