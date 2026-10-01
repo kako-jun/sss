@@ -3,12 +3,16 @@ import { useState, useEffect } from 'react';
 import { selectShareDirectory, getDefaultShareDirectory, getShareDirectory } from '../../lib/tauri';
 import { useT } from '../../lib/i18n';
 import { resolveShareDirectoryErrorMessage } from '../../lib/i18n/errors';
+import { InlineError } from './SectionErrors';
 
 export function ShareDirectorySection() {
   const t = useT();
   const [shareDirectoryPath, setShareDirectoryPath] = useState<string>('');
   const [defaultPath, setDefaultPath] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  // 解決済みピック先の取得失敗(再試行できる)。選択・保存の失敗(error)とは別に持つ。
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -21,16 +25,16 @@ export function ShareDirectorySection() {
       try {
         // 実際に使われる解決済みパスを表示する（保存値が不正なら既定にフォールバック済み）
         setShareDirectoryPath(await getShareDirectory());
+        setLoadFailed(false);
       } catch (err) {
         console.error('Failed to load share directory setting:', err);
-        // 入力欄が空のまま黙らないよう、失敗を表示する
-        setError(t('errorShareDirectoryLoadFailed'));
+        // 入力欄が空のまま黙らないよう、失敗を表示する（再試行できる）
+        setLoadFailed(true);
       }
     };
 
     loadSettings();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attempt]);
 
   const handleSelectDirectory = async () => {
     try {
@@ -48,6 +52,7 @@ export function ShareDirectorySection() {
     try {
       setShareDirectoryPath(await getShareDirectory());
       setError(null);
+      setLoadFailed(false);
     } catch (err) {
       console.error('Failed to refresh share directory:', err);
       setError(t('errorShareDirectoryRefreshFailed'));
@@ -76,10 +81,15 @@ export function ShareDirectorySection() {
         </button>
       </div>
       {error && (
-        <p role="alert" className="text-xs text-red-300/80">
+        <p role="alert" className="text-xs text-red-400/80">
           {error}
         </p>
       )}
+      <InlineError
+        message={loadFailed && !error ? t('errorShareDirectoryLoadFailed') : null}
+        onRetry={() => setAttempt((n) => n + 1)}
+        testId="share-directory-load-error"
+      />
     </div>
   );
 }

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useT, getLanguageSetting, setLanguageSetting } from '../../lib/i18n';
 import type { LanguageSetting } from '../../lib/i18n';
 import { saveSetting } from '../../lib/tauri';
+import { useRollbackSave } from '../../hooks/useRollbackSave';
+import { InlineError } from './SectionErrors';
 
 const OPTIONS: LanguageSetting[] = ['auto', 'ja', 'en'];
 
@@ -17,15 +19,21 @@ export function LanguageSection() {
   // 使っていない）。このボタン群自身の表示言語追従は`t`経由で引き続き効く。
   const t = useT();
   const [setting, setSetting] = useState<LanguageSetting>(getLanguageSetting());
+  // #115: 保存に失敗したら、画面の言語も保存済みの設定へ巻き戻して失敗を伝える
+  // （次回起動で元の言語に戻って初めて気づく、を防ぐ）。
+  const { saveFailed, save } = useRollbackSave<LanguageSetting>(
+    (previous) => {
+      setLanguageSetting(previous);
+      setSetting(previous);
+    },
+    getLanguageSetting(),
+    'languageSaveFailed',
+  );
 
   const handleChange = async (next: LanguageSetting) => {
     setLanguageSetting(next);
     setSetting(next);
-    try {
-      await saveSetting('language', next);
-    } catch (err) {
-      console.error('Failed to save language setting:', err);
-    }
+    await save(next, (v) => saveSetting('language', v));
   };
 
   const labelFor = (option: LanguageSetting): string => {
@@ -54,6 +62,7 @@ export function LanguageSection() {
           </button>
         ))}
       </div>
+      <InlineError message={saveFailed ? t('languageSaveFailed') : null} testId="language-error" />
     </div>
   );
 }

@@ -64,24 +64,19 @@ describe('LanguageSection (#80)', () => {
     expect(saveSetting).toHaveBeenCalledWith('language', 'en');
   });
 
-  it('does not roll back the UI selection when saveSetting rejects, and logs the error', async () => {
+  it('rolls back the UI selection and tells the user when saveSetting rejects (#115)', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     saveSetting.mockRejectedValue('dbWriteFailed');
+    const before = getLanguageSetting();
 
     render(<LanguageSection />);
     fireEvent.click(screen.getByText('English'));
 
-    await waitFor(() => {
-      expect(consoleError).toHaveBeenCalledWith(
-        'Failed to save language setting:',
-        'dbWriteFailed',
-      );
-    });
-
-    // 永続化に失敗しても、切替の即時反映（ストア/選択状態）は戻さない
-    // （LanguageSection.tsx: handleChangeはtry/catchでconsole.errorのみ）。
-    expect(screen.getByText('English').closest('button')!.className).toContain('bg-white/15');
-    expect(getLanguageSetting()).toBe('en');
+    // 保存に失敗したら失敗を通知し、選択もストアも保存済みの設定へ巻き戻す
+    expect(await screen.findByTestId('language-error')).toBeTruthy();
+    expect(getLanguageSetting()).toBe(before);
+    expect(screen.getByText('English').closest('button')!.className).not.toContain('bg-white/15');
+    expect(consoleError).toHaveBeenCalled();
 
     consoleError.mockRestore();
   });

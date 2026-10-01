@@ -77,9 +77,11 @@ vi.mock('./components/Settings', () => ({
   // #111: 除外ルール再スキャンの状態は App が持つ。スタブから props 経由で操作・観測する。
   Settings: ({
     isOpen,
+    onScanComplete,
     excludeRescan,
   }: {
     isOpen: boolean;
+    onScanComplete: () => void;
     excludeRescan: {
       notice: { kind: string } | null;
       rescanning: boolean;
@@ -96,6 +98,7 @@ vi.mock('./components/Settings', () => ({
           onClick={() => excludeRescan.noteChange({ kind: 'added', pattern: '**/t/' })}
         />
         <button data-testid="stub-rescan" onClick={() => excludeRescan.rescan()} />
+        <button data-testid="stub-scan-complete" onClick={() => onScanComplete()} />
       </div>
     ) : null,
 }));
@@ -668,6 +671,22 @@ describe('App Escape key (#66 問題1)', () => {
       expect(invoke).toHaveBeenCalledWith('exit_app');
     });
   });
+
+  it('tells the user when exit_app fails instead of doing nothing (#115)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getLastDirectoryPath.mockResolvedValue(null);
+    invoke.mockRejectedValueOnce(new Error('exit denied'));
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(await screen.findByText('アプリを終了できませんでした')).toBeTruthy();
+    spy.mockRestore();
+  });
 });
 
 // #66 問題4: Space=一時停止/再開、F/F11=フルスクリーン切替、?=ショートカット一覧。
@@ -1138,7 +1157,7 @@ describe('App window mode toggle failure notice: partial failure and repeats (#1
     errorSpy.mockRestore();
   });
 
-  it('keeps the alert for a full 5s after a repeated identical failure', async () => {
+  it('keeps the alert for a full 8s after a repeated identical failure', async () => {
     getLastDirectoryPath.mockResolvedValue(null);
     win.isFullscreen.mockReset().mockResolvedValue(true);
     win.setFullscreen.mockReset().mockRejectedValue(new Error('denied'));
@@ -1161,13 +1180,13 @@ describe('App window mode toggle failure notice: partial failure and repeats (#1
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10);
       });
-      // 1回目の通知から3秒+。2回目の失敗でタイマーが取り直されるので、最初の5秒を過ぎても残る
+      // 1回目の通知から3秒+。2回目の失敗でタイマーが取り直されるので、最初の8秒を過ぎても残る
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3000);
       });
       expect(screen.queryByRole('alert')).not.toBeNull();
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(2500);
+        await vi.advanceTimersByTimeAsync(5500);
       });
       expect(screen.queryByRole('alert')).toBeNull();
     } finally {
@@ -1321,5 +1340,66 @@ describe('App keeps the exclude-rescan state across Settings close/reopen (#111)
     resolve({ totalFiles: 1 });
     await waitFor(() => expect(screen.getByTestId('stub-rescanning').textContent).toBe('false'));
     expect(screen.getByTestId('stub-notice').textContent).toBe('none');
+  });
+});
+
+// #115: 起動時の取得失敗が「ようこそ（初回）」画面や既定値に見えず、利用者に伝わる。
+describe('App startup failures (#115)', () => {
+  it('getLastDirectoryPath rejecting shows a retryable failure card, not the welcome screen', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getLastDirectoryPath.mockRejectedValueOnce(new Error('db locked'));
+    render(<App />);
+
+    expect(await screen.findByText('前回のフォルダを読み込めませんでした')).toBeTruthy();
+    expect(screen.queryByText('ようこそ SSS へ')).toBeNull();
+    // フォルダを選び直す導線(設定)も残す
+    expect(screen.getByText('ほかのフォルダを選ぶ')).toBeTruthy();
+
+    // 再試行で復旧すれば、本当の未設定としてようこそ画面になる
+    getLastDirectoryPath.mockResolvedValue(null);
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }));
+    expect(await screen.findByText('ようこそ SSS へ')).toBeTruthy();
+    expect(screen.queryByText('前回のフォルダを読み込めませんでした')).toBeNull();
+    spy.mockRestore();
+  });
+
+  it('a failed settings read starts with defaults but tells the user once the app is ready', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getSetting.mockImplementation(async (key: string) => {
+      if (key === 'display_interval') throw new Error('db locked');
+      return null;
+    });
+    render(<App />);
+
+    expect(await screen.findByText(/保存済みの設定を読み込めませんでした/)).toBeTruthy();
+    expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    spy.mockRestore();
+  });
+
+  it('clears the startup failure card once a folder is scanned from Settings, even with 0 displayable photos', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getLastDirectoryPath.mockRejectedValueOnce(new Error('db locked'));
+    render(<App />);
+    await screen.findByText('前回のフォルダを読み込めませんでした');
+
+    // 「ほかのフォルダを選ぶ」(設定)から別フォルダをスキャン。表示できる写真は0件のまま。
+    fireEvent.click(screen.getByText('ほかのフォルダを選ぶ'));
+    getNextImage.mockResolvedValue({ kind: 'emptyPlaylist' });
+    fireEvent.click(await screen.findByTestId('stub-scan-complete'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(await screen.findByText('表示できる写真がありません')).toBeTruthy();
+    expect(screen.queryByText('前回のフォルダを読み込めませんでした')).toBeNull();
+    spy.mockRestore();
+  });
+
+  it('notifyFailure from an unmounted section shows the app-level toast', async () => {
+    const { notifyFailure } = await import('./lib/failureNotice');
+    render(<App />);
+    await screen.findByText('ようこそ SSS へ');
+    act(() => notifyFailure('languageSaveFailed'));
+    expect(
+      await screen.findByText('言語の設定を保存できませんでした。元の値に戻しました'),
+    ).toBeTruthy();
   });
 });

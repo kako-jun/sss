@@ -285,16 +285,26 @@ describe('GraphSection summary cards and table (#67)', () => {
     expect(screen.queryByTestId('fairness-badge')).toBeNull();
   });
 
-  it('falls back to the "no data" message and logs when loading fails', async () => {
+  it('shows a load error with retry, distinct from the "no data" state, when loading fails (#115)', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    getDisplayStats.mockRejectedValue(new Error('db locked'));
+    getDisplayStats.mockRejectedValueOnce(new Error('db locked'));
 
     render(<GraphSection />);
 
     await waitFor(() => {
+      expect(screen.getByTestId('stats-load-error')).toBeTruthy();
+    });
+    expect(screen.getByText('読み込みに失敗しました')).toBeTruthy();
+    expect(screen.queryByText('データがありません。スキャンを実行してください。')).toBeNull();
+    expect(spy).toHaveBeenCalled();
+
+    // 再試行で空のデータが返れば、今度は本当に空の状態として表示される
+    getDisplayStats.mockResolvedValue({ files: 0, min: 0, max: 0, mean: 0, bins: [] });
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }));
+    await waitFor(() => {
       expect(screen.getByText('データがありません。スキャンを実行してください。')).toBeTruthy();
     });
-    expect(spy).toHaveBeenCalled();
+    expect(screen.queryByTestId('stats-load-error')).toBeNull();
     spy.mockRestore();
   });
 });
@@ -359,7 +369,9 @@ describe('GraphSection reset flow (#67)', () => {
     expect(container.querySelectorAll('tbody tr').length).toBe(1);
     expect(screen.getByTestId('fairness-badge').textContent).toBe('均等（差は1回以内）');
     expect(container.textContent).toContain('0 / 2');
-    expect(container.querySelector('.u-over')).not.toBeNull();
+    // uPlot のチャートは表の描画とは別の passive effect で後から作られる（reload は loading を
+    // 挟むため、その間隔が広がる）。表の行が出た時点でチャートがあるとは限らないので待つ。
+    await waitFor(() => expect(container.querySelector('.u-over')).not.toBeNull());
     expect(screen.queryByText('データがありません。スキャンを実行してください。')).toBeNull();
     expect(resetAllDisplayCounts).toHaveBeenCalledTimes(1);
     expect(getDisplayStats).toHaveBeenCalledTimes(2);

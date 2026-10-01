@@ -1,9 +1,11 @@
 import { X, Plus, RefreshCw } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { getIgnorePatterns, removeIgnorePattern, addIgnorePattern } from '../../lib/tauri';
 import type { IgnoreRule } from '../../types';
 import { useT, resolveAddPatternErrorMessage, resolveScanErrorMessage } from '../../lib/i18n';
 import type { ExcludeRescanController } from './useExcludeRescan';
+import { useAsyncLoad } from '../../hooks/useAsyncLoad';
+import { LoadError, InlineError } from './SectionErrors';
 
 interface ExcludeRulesSectionProps {
   /**
@@ -15,9 +17,11 @@ interface ExcludeRulesSectionProps {
 
 export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
   const t = useT();
-  const [rules, setRules] = useState<IgnoreRule[]>([]);
+  // #115: 取得失敗は「ルールなし」の空状態と区別してエラー表示＋再試行にする。
+  const load = useAsyncLoad<IgnoreRule[]>(getIgnorePatterns, 'ignore patterns');
+  const rules = load.state.status === 'ready' ? load.state.data : [];
   const [newPattern, setNewPattern] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   // #82レビューshould1: 確定済みの文言でなく生のエラーコードを保持し、
   // レンダーのたびに現在のロケールへ変換する（言語切替中の新旧混在防止）。
   const [addError, setAddError] = useState<string | null>(null);
@@ -36,25 +40,18 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
   const otherScanRunning = (rescan?.busy ?? false) && !rescanning;
   const rescanTotal = rescan?.total ?? null;
 
-  useEffect(() => {
-    getIgnorePatterns()
-      .then((result) => {
-        setRules(result);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error('Failed to load ignore patterns:', err);
-        setLoading(false);
-      });
-  }, []);
-
   const handleRemove = async (pattern: string, ruleType: IgnoreRule['ruleType']) => {
     try {
       await removeIgnorePattern(pattern, ruleType);
-      setRules((prev) => prev.filter((r) => !(r.pattern === pattern && r.ruleType === ruleType)));
+      load.update((prev) =>
+        prev.filter((r) => !(r.pattern === pattern && r.ruleType === ruleType)),
+      );
+      setRemoveError(null);
       rescan?.noteChange({ kind: 'removed', pattern });
     } catch (err) {
       console.error('Failed to remove ignore pattern:', err);
+      // #115: 削除失敗は一覧に残したまま、失敗を伝える（成功したように見せない）。
+      setRemoveError(t('removeRuleFailed', { pattern }));
     }
   };
 
@@ -68,7 +65,7 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
       // 手動追加は常に通常globルールとして扱う（撮影日ルールはオーバーレイの
       // 「撮影日付で除外」からのみ作られる）
       await addIgnorePattern(trimmed);
-      setRules((prev) => [...prev, { pattern: trimmed, ruleType: 'glob' }]);
+      load.update((prev) => [...prev, { pattern: trimmed, ruleType: 'glob' }]);
       setNewPattern('');
       setAddError(null);
       rescan?.noteChange({ kind: 'added', pattern: trimmed });
@@ -90,7 +87,7 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
     }
   };
 
-  if (loading) {
+  if (load.state.status === 'loading') {
     // #66レビュー2巡目nit: /30→/50（他の説明/補助テキストと同じ濃さに統一）。
     return <div className="text-white/50 text-sm">{t('loadingLabel')}</div>;
   }
@@ -139,7 +136,13 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
         </div>
       )}
 
-      {rules.length === 0 ? (
+      <InlineError message={removeError} testId="exclude-remove-error" />
+
+      {load.state.status === 'error' ? (
+        // #115: 一覧を取得できなかった。再スキャン案内（上）は親が持つ状態なので残す。
+        // 一覧が不明なまま追加すると重複判定ができないため、追加欄も出さない。
+        <LoadError onRetry={load.reload} testId="exclude-load-error" />
+      ) : rules.length === 0 ? (
         <div className="text-white/50 text-sm">{t('noExcludeRules')}</div>
       ) : (
         <div className="space-y-1">
@@ -173,28 +176,30 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
         </div>
       )}
 
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={newPattern}
-          onChange={(e) => {
-            setNewPattern(e.target.value);
-            setAddError(null);
-          }}
-          onKeyDown={handleKeyDown}
-          placeholder={t('addPatternPlaceholder')}
-          className="flex-1 px-3 py-2 bg-black/40 text-white/50 rounded-lg border border-white/8 focus:outline-none focus:border-white/20 text-sm"
-        />
-        {/* #66視覚刷新: 主要操作（追加）はDESIGN.md「Buttons — Primary」にする。 */}
-        <button
-          onClick={handleAdd}
-          disabled={!newPattern.trim()}
-          className="flex items-center gap-2 px-4 py-2 bg-white/90 hover:bg-white disabled:bg-white/10 disabled:text-white/30 disabled:cursor-not-allowed text-black font-medium rounded-lg transition-colors shrink-0 text-sm"
-        >
-          <Plus className="w-4 h-4" />
-          {t('addButtonLabel')}
-        </button>
-      </div>
+      {load.state.status === 'ready' && (
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newPattern}
+            onChange={(e) => {
+              setNewPattern(e.target.value);
+              setAddError(null);
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder={t('addPatternPlaceholder')}
+            className="flex-1 px-3 py-2 bg-black/40 text-white/50 rounded-lg border border-white/8 focus:outline-none focus:border-white/20 text-sm"
+          />
+          {/* #66視覚刷新: 主要操作（追加）はDESIGN.md「Buttons — Primary」にする。 */}
+          <button
+            onClick={handleAdd}
+            disabled={!newPattern.trim()}
+            className="flex items-center gap-2 px-4 py-2 bg-white/90 hover:bg-white disabled:bg-white/10 disabled:text-white/30 disabled:cursor-not-allowed text-black font-medium rounded-lg transition-colors shrink-0 text-sm"
+          >
+            <Plus className="w-4 h-4" />
+            {t('addButtonLabel')}
+          </button>
+        </div>
+      )}
       {addErrorMessage && <div className="text-red-400/80 text-sm">{addErrorMessage}</div>}
     </div>
   );

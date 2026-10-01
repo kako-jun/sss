@@ -441,6 +441,264 @@ async function confirmResetScenario(page, lang, kind = 'info') {
   return { pass, detail: detail.join(' | ') };
 }
 
+/**
+ * #122: 設定の checkbox / range が自前描画(appearance: none)でダークテーマに合うことを
+ * 全状態(未チェック/チェック/フォーカス/disabled)で computed style から検証する。
+ * E2E_SHOT_DIR を指定すると各状態のスクリーンショットを保存する(目視確認用)。
+ */
+async function inputDarkScenario(page, lang) {
+  const shotDir = process.env.E2E_SHOT_DIR;
+  const shot = async (loc, name) => {
+    if (shotDir) await loc.screenshot({ path: path.join(shotDir, `${lang}-${name}.png`) });
+  };
+  const lum = (rgba) => {
+    const m = rgba.match(/[\d.]+/g).map(Number);
+    return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255;
+  };
+  const read = (el) =>
+    el.evaluate((e) => {
+      const cs = getComputedStyle(e);
+      const after = getComputedStyle(e, '::after');
+      const r = e.getBoundingClientRect();
+      return {
+        appearance: cs.appearance,
+        bg: cs.backgroundColor,
+        border: cs.borderTopColor,
+        w: r.width,
+        h: r.height,
+        outlineStyle: cs.outlineStyle,
+        outlineColor: cs.outlineColor,
+        opacity: cs.opacity,
+        afterDisplay: after.display,
+        afterClip: after.clipPath,
+      };
+    });
+
+  await page.waitForSelector('svg.lucide-settings', { state: 'attached', timeout: 5000 });
+  await openSettingsModal(page);
+  await page.click('#tab-options');
+  // transition を切って最終状態だけを検証する(遷移途中の色は見ない。reduced-motion 相当の副作用は
+  // 承知の上)。設定の非同期読み込み完了も待つ。
+  await page.addStyleTag({ content: '*, *::after { transition: none !important; }' });
+  await page.waitForTimeout(800);
+  const boxes = page.locator('input[type="checkbox"]');
+  const n = await boxes.count();
+  const details = [];
+  let pass = n >= 2;
+  for (let i = 0; i < n; i++) {
+    const box = boxes.nth(i);
+    if (await box.isChecked()) await box.evaluate((e) => e.click());
+    await page.waitForTimeout(250);
+    const off = await read(box);
+    await shot(box, `checkbox${i}-unchecked`);
+    await box.evaluate((e) => e.click());
+    await page.waitForTimeout(250);
+    const on = await read(box);
+    await shot(box, `checkbox${i}-checked`);
+    // キーボード操作でフォーカスさせ :focus-visible を成立させる
+    await box.evaluate((e) => e.blur());
+    await page.keyboard.press('Tab');
+    await box.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(100);
+    const focused = await read(box);
+    await shot(box, `checkbox${i}-focus`);
+    await box.evaluate((e) => (e.disabled = true));
+    const dis = await read(box);
+    await shot(box, `checkbox${i}-disabled`);
+    // hover の枠の明るさ変化は有効時だけ(disabled では効かない)。チェック済みは枠が元から
+    // 明るいので、未チェックに戻して見る。
+    await box.evaluate((e) => {
+      e.disabled = false;
+      e.click();
+    });
+    await page.waitForTimeout(100);
+    const bb = await box.boundingBox();
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    await page.waitForTimeout(100);
+    const hoverEnabled = await box.evaluate((e) => getComputedStyle(e).borderTopColor);
+    await box.evaluate((e) => (e.disabled = true));
+    await page.waitForTimeout(100);
+    const hoverDisabled = await box.evaluate((e) => getComputedStyle(e).borderTopColor);
+    await box.evaluate((e) => (e.disabled = false));
+    await page.mouse.move(0, 0);
+    // 箱の中心とラベル1行目の中心が ±1px に収まる(縦位置のずれ検出)
+    const align = await box.evaluate((e) => {
+      const sib = e.nextElementSibling;
+      const w = document.createTreeWalker(sib, NodeFilter.SHOW_TEXT);
+      let node = w.nextNode();
+      while (node && !node.textContent.trim()) node = w.nextNode();
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const line = range.getClientRects()[0];
+      const b = e.getBoundingClientRect();
+      return Math.abs(b.top + b.height / 2 - (line.top + line.height / 2));
+    });
+    const ok =
+      align <= 1 &&
+      off.appearance === 'none' &&
+      lum(off.bg) < 0.2 &&
+      lum(off.border) > 0.45 && // 枠 vs 黒背景で 3:1 以上
+      off.afterDisplay === 'none' &&
+      on.appearance === 'none' &&
+      lum(on.bg) > 0.8 &&
+      on.afterDisplay === 'block' &&
+      on.afterClip.startsWith('polygon') &&
+      off.w >= 20 &&
+      off.h >= 20 &&
+      focused.outlineStyle === 'solid' &&
+      lum(focused.outlineColor) > 0.5 &&
+      Number(dis.opacity) < 1 &&
+      hoverDisabled === off.border &&
+      hoverEnabled !== off.border;
+    if (!ok) pass = false;
+    details.push(
+      `cb${i}=${ok} align=${align.toFixed(1)} off=${off.bg}/${off.border} on=${on.bg} focus=${focused.outlineStyle}/${focused.outlineColor} dis=${dis.opacity} hover=${hoverEnabled}/${hoverDisabled} size=${off.w}x${off.h}`,
+    );
+  }
+  // range は全タブを巡って探す（所属タブに依存しない）
+  let rangeInfo = 'range not found';
+  const tabIds = await page.$$eval('[role="tab"]', (els) => els.map((e) => e.id));
+  for (const id of tabIds) {
+    await page.click(`#${id}`);
+    await page.waitForTimeout(200);
+    const range = page.locator('input[type="range"]');
+    if ((await range.count()) === 0) continue;
+    const r = await range.first().evaluate((e) => {
+      const cs = getComputedStyle(e);
+      const b = e.getBoundingClientRect();
+      return { appearance: cs.appearance, h: b.height };
+    });
+    await shot(range.first(), 'range');
+    const ok = r.appearance === 'none' && r.h >= 20;
+    if (!ok) pass = false;
+    rangeInfo = `range=${ok} appearance=${r.appearance} h=${r.h}`;
+    break;
+  }
+  if (rangeInfo === 'range not found') pass = false;
+  return { pass, detail: `checkboxes=${n} ${details.join(' ')} ${rangeInfo}` };
+}
+
+/**
+ * #122: 強制カラー(Windows ハイコントラスト、WebView2 に伝わる)でも、チェック済みが空の箱に
+ * ならず、未チェックと視覚的に区別できることを computed style で検証する。
+ * E2E_SHOT_DIR を指定すると設定モーダルのスクリーンショットを保存する(目視確認用)。
+ */
+async function inputForcedColorsScenario(page) {
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.waitForSelector('svg.lucide-settings', { state: 'attached', timeout: 5000 });
+  await openSettingsModal(page);
+  await page.click('#tab-options');
+  await page.addStyleTag({ content: '*, *::after { transition: none !important; }' });
+  await page.waitForTimeout(800);
+  const box = page.locator('input[type="checkbox"]').first();
+  const read = () =>
+    box.evaluate((e) => {
+      const cs = getComputedStyle(e);
+      const a = getComputedStyle(e, '::after');
+      return {
+        bg: cs.backgroundColor,
+        border: cs.borderTopColor,
+        afterBg: a.backgroundColor,
+        afterDisplay: a.display,
+        adjust: cs.forcedColorAdjust,
+        forced: matchMedia('(forced-colors: active)').matches,
+      };
+    });
+  if (await box.isChecked()) await box.evaluate((e) => e.click());
+  await page.waitForTimeout(200);
+  const off = await read();
+  const shotDir = process.env.E2E_SHOT_DIR;
+  if (shotDir) await page.screenshot({ path: path.join(shotDir, 'forced-colors-unchecked.png') });
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(200);
+  const on = await read();
+  if (shotDir) await page.screenshot({ path: path.join(shotDir, 'forced-colors-checked.png') });
+  // チェック済みは背景が未チェックと異なり、チェックマークは背景と異なる色で、表示されている
+  const pass =
+    off.forced &&
+    on.adjust === 'none' &&
+    on.bg !== off.bg &&
+    on.afterDisplay === 'block' &&
+    on.afterBg !== on.bg &&
+    off.afterDisplay === 'none';
+  // チェック済み+キーボードフォーカス: リングが塗り・枠と別色で見える(nit: 同色だと消える)
+  await box.evaluate((e) => e.blur());
+  await page.keyboard.press('Tab');
+  await box.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(100);
+  const ring = await box.evaluate((e) => {
+    const cs = getComputedStyle(e);
+    return {
+      outline: cs.outlineColor,
+      style: cs.outlineStyle,
+      bg: cs.backgroundColor,
+      border: cs.borderTopColor,
+    };
+  });
+  const clip = async (name) => {
+    if (!shotDir) return;
+    const b = await box.boundingBox();
+    await page.screenshot({
+      path: path.join(shotDir, name),
+      clip: { x: b.x - 8, y: b.y - 8, width: b.width + 16, height: b.height + 16 },
+    });
+  };
+  await clip('forced-colors-checked-focus.png');
+  // 未チェック+フォーカス
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(150);
+  const ringOff = await box.evaluate((e) => {
+    const cs = getComputedStyle(e);
+    return {
+      outline: cs.outlineColor,
+      style: cs.outlineStyle,
+      bg: cs.backgroundColor,
+      border: cs.borderTopColor,
+    };
+  });
+  await clip('forced-colors-unchecked-focus.png');
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(150);
+  // checked + disabled: GrayText のまま opacity を重ねて二重に薄くしない
+  await box.evaluate((e) => (e.disabled = true));
+  const dis = await read();
+  const disOpacity = await box.evaluate((e) => getComputedStyle(e).opacity);
+  await clip('forced-colors-checked-disabled.png');
+  await box.evaluate((e) => (e.disabled = false));
+  // disabled では hover の枠変化が効かない(チェック済みは枠が元から Highlight なので未チェックで見る)
+  await box.evaluate((e) => e.click());
+  await page.waitForTimeout(150);
+  const hoverCheck = async (disabled) => {
+    await box.evaluate((e, d) => (e.disabled = d), disabled);
+    const b = await box.boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.waitForTimeout(150);
+    const border = await box.evaluate((e) => getComputedStyle(e).borderTopColor);
+    await page.mouse.move(0, 0);
+    await box.evaluate((e) => (e.disabled = false));
+    return border;
+  };
+  const hoverEnabled = await hoverCheck(false);
+  const hoverDisabled = await hoverCheck(true);
+  const colorsOk =
+    ring.style === 'solid' &&
+    ring.outline !== ring.bg &&
+    ring.outline !== ring.border &&
+    ringOff.style === 'solid' &&
+    ringOff.outline !== ringOff.bg &&
+    disOpacity === '1' &&
+    dis.bg !== on.bg &&
+    hoverDisabled !== hoverEnabled;
+  return {
+    pass: pass && colorsOk,
+    detail: `off=${JSON.stringify(off)} on=${JSON.stringify(on)} ring=${JSON.stringify(ring)} ringOff=${JSON.stringify(ringOff)} disabledChecked=${JSON.stringify(dis)} disOpacity=${disOpacity} hover=${hoverEnabled}/${hoverDisabled}`,
+  };
+}
+
 const scenarios = [
   {
     // #65レビューM1(must): 画像→動画→動画→画像と回すあいだ、動画が
@@ -2520,6 +2778,31 @@ const scenarios = [
     },
   },
   {
+    // #122: 設定の checkbox / range が appearance: none の自前描画でダークテーマに合う
+    // (WebKitGTK では未チェック時にネイティブの白い箱になっていた)。全状態を computed style で検証。
+    name: 'settings checkbox/range use the explicit dark styling in every state (ja) (#122)',
+    hash: 'slides',
+    async run(page) {
+      return inputDarkScenario(page, 'ja');
+    },
+  },
+  {
+    name: 'settings checkbox/range use the explicit dark styling in every state (en) (#122)',
+    hash: 'slides',
+    locale: 'en-US',
+    async run(page) {
+      return inputDarkScenario(page, 'en');
+    },
+  },
+  {
+    // #122: 強制カラー(ハイコントラスト)でチェック済みが空の箱にならない。
+    name: 'settings checkbox stays distinguishable when checked in forced-colors mode (#122)',
+    hash: 'slides',
+    async run(page) {
+      return inputForcedColorsScenario(page);
+    },
+  },
+  {
     // #110: 「…」メニュー→「除外」サブメニューの3項目が、どの画面サイズでも
     // viewport内に収まり、操作バーと交差しない（以前は top-0 で下へ伸びて
     // 最後の項目が viewport を超え、バーに重なっていた）。
@@ -2613,6 +2896,231 @@ const scenarios = [
         );
       }
       return { pass, detail: details.join(' ') };
+    },
+  },
+  {
+    // #115: 取得失敗（get_ignore_patterns/get_picked_images/get_recent_images/get_display_stats を
+    // reject）は、「〜はありません」の空状態でなく「読み込みに失敗しました」のエラー状態と再試行ボタンになる。
+    name: 'load failures show an error state with retry, not the empty message (#115)',
+    hash: 'slides?fail=get_ignore_patterns,get_picked_images,get_recent_images,get_display_stats',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await openSettingsModal(page);
+      const tabs = [
+        { id: 'exclude', empty: '除外ルールはありません' },
+        { id: 'pick', empty: 'ピックした写真はありません' },
+        { id: 'history', empty: '表示履歴はありません' },
+        { id: 'stats', empty: 'データがありません' },
+      ];
+      const details = [];
+      let pass = true;
+      for (const tab of tabs) {
+        await page.click(`#tab-${tab.id}`);
+        await page.waitForTimeout(300);
+        const errorShown = await isVisible(page, '読み込みに失敗しました');
+        const retryShown = await page.evaluate(() =>
+          [...document.querySelectorAll('[role=tabpanel] [role=alert] button')].some(
+            (b) => b.textContent.includes('再試行') && getComputedStyle(b).display !== 'none',
+          ),
+        );
+        const emptyShown = await isVisible(page, tab.empty);
+        const ok = errorShown && retryShown && !emptyShown;
+        if (!ok) pass = false;
+        details.push(`${tab.id}:error=${errorShown} retry=${retryShown} emptyShown=${emptyShown}`);
+      }
+      return { pass, detail: details.join(' ') };
+    },
+  },
+  {
+    // #115: 失敗していた取得は、障害が直ってから再試行ボタンを押すと回復し、本当に空なら空状態の文言になる。
+    name: 'retry recovers from a load failure and then shows the genuine empty state (#115)',
+    hash: 'slides?fail=get_picked_images',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await openSettingsModal(page);
+      await page.click('#tab-pick');
+      await page.waitForTimeout(300);
+      const errorShown = await isVisible(page, '読み込みに失敗しました');
+      // 再試行の前にバックエンド側の障害が直ったことにする
+      await page.evaluate(() => window.__e2eHealFailures());
+      // dev の StrictMode は mount 時の取得を2回呼ぶので、絶対数でなく再試行ボタンによる増分を見る
+      const callsBefore = await countCalls(page, 'get_picked_images');
+      await page.click('[role=tabpanel] [role=alert] button');
+      await page.waitForTimeout(300);
+      const errorGone = !(await isVisible(page, '読み込みに失敗しました'));
+      const emptyShown = await isVisible(page, 'ピックした写真はありません');
+      const calls = (await countCalls(page, 'get_picked_images')) - callsBefore;
+      const pass = errorShown && errorGone && emptyShown && calls === 1;
+      return {
+        pass,
+        detail: `errorShown=${errorShown} errorGone=${errorGone} emptyShown=${emptyShown} retry calls=${calls}`,
+      };
+    },
+  },
+  {
+    // #115: 保存失敗（save_setting を reject）は、チェックボックス・select・間隔・言語を元の値へ戻し、
+    // 失敗を通知する。同じ失敗を重ねても通知は1つ（積み上がらない）。
+    name: 'save failures roll the control back and show one notice (#115)',
+    hash: 'slides?fail=save_setting',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await openSettingsModal(page);
+      await page.click('#tab-options');
+      await page.waitForTimeout(400);
+      const exif = page.locator('[role=tabpanel] input[type=checkbox]').first();
+      const exifBefore = await exif.isChecked();
+      await exif.click();
+      await exif.click();
+      await exif.click();
+      await page.waitForTimeout(300);
+      const exifAfter = await exif.isChecked();
+      const exifNotices = await page.locator('[data-testid=exif-error]').count();
+
+      const select = page.locator('select').first();
+      const selectBefore = await select.inputValue();
+      await select.selectOption('30');
+      await page.waitForTimeout(300);
+      const selectAfter = await select.inputValue();
+
+      const number = page.locator('input[type=number]');
+      const numberBefore = await number.inputValue();
+      await number.fill('30');
+      await number.blur();
+      await page.waitForTimeout(300);
+      const numberAfter = await number.inputValue();
+
+      await page.click('button:has-text("English")');
+      await page.waitForTimeout(300);
+      const lang = await page.evaluate(() => document.documentElement.lang);
+      const noticeText = await page.evaluate(() =>
+        [...document.querySelectorAll('[role=alert]')].map((e) => e.textContent).join(' | '),
+      );
+      // 通知は対象名つきで、同じ文言が並ばない（表示間隔/EXIF回転/動画/言語）
+      const targets = ['表示間隔', 'EXIF回転の設定', '動画の設定', '言語の設定'];
+      const seen = [];
+      for (const target of targets) {
+        seen.push(await isVisible(page, `${target}を保存できませんでした。元の値に戻しました`));
+      }
+      const noticeVisible = seen.every(Boolean);
+      const pass =
+        exifAfter === exifBefore &&
+        exifNotices === 1 &&
+        selectAfter === selectBefore &&
+        numberAfter === numberBefore &&
+        lang === 'ja' &&
+        noticeVisible;
+      return {
+        pass,
+        detail: `exif ${exifBefore}->${exifAfter} notices=${exifNotices} select ${selectBefore}->${selectAfter} number ${numberBefore}->${numberAfter} htmlLang=${lang} noticeVisible=${noticeVisible} alerts=${noticeText}`,
+      };
+    },
+  },
+  {
+    // #115: 除外ルールの削除失敗は、ルールを一覧に残したまま失敗を通知する（成功に見せない）。
+    name: 'remove failure keeps the exclude rule listed and shows a notice (#115)',
+    hash: 'slides?fail=remove_ignore_pattern',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await openSettingsModal(page);
+      await page.click('#tab-exclude');
+      await page.waitForTimeout(300);
+      await page.fill('input[type=text]', '*.keepme');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(300);
+      await page.click('button[title="解除"]');
+      await page.waitForTimeout(300);
+      const noticeShown = await isVisible(page, '除外ルール「*.keepme」を解除できませんでした');
+      const stillListed = await isVisible(page, '*.keepme');
+      const pass = noticeShown && stillListed;
+      return { pass, detail: `noticeShown=${noticeShown} stillListed=${stillListed}` };
+    },
+  },
+  {
+    // #115: ピックの失敗は原因（空き容量不足）を伝える。「エラー: コピー失敗」だけではない。
+    name: 'pick failure tells the cause (disk full) (#115)',
+    hash: 'slides?fail=pick_image:pickDiskFull',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await wakeFromIdle(page);
+      await page.click('button[title="メニュー"]');
+      await page.click('button[title="ピック（コピー）"]');
+      await page.waitForTimeout(300);
+      const causeShown = await isVisible(page, 'ピック先の空き容量が足りないためコピーできません');
+      const genericShown = await isVisible(page, 'エラー: コピー失敗');
+      const pass = causeShown && !genericShown;
+      return { pass, detail: `causeShown=${causeShown} genericShown=${genericShown}` };
+    },
+  },
+  {
+    // #115: 起動時に前回フォルダを取得できない(get_last_directory_path が reject)と、
+    // 「ようこそ（初回）」画面でなく失敗の案内と再試行になる。障害が直ってから再試行すると、本当の状態になる。
+    name: 'startup: last folder read failure shows a retryable failure card, not the welcome screen (#115)',
+    hash: 'slides?fail=get_last_directory_path',
+    async run(page) {
+      await page.waitForSelector('text=前回のフォルダを読み込めませんでした');
+      const welcomeShown = await isVisible(page, 'ようこそ SSS へ');
+      const retryShown = await page.evaluate(() =>
+        [...document.querySelectorAll('button')].some((b) => b.textContent.includes('再試行')),
+      );
+      const selectShown = await page.evaluate(() =>
+        [...document.querySelectorAll('button')].some((b) =>
+          b.textContent.includes('ほかのフォルダを選ぶ'),
+        ),
+      );
+      await page.evaluate(() => window.__e2eHealFailures());
+      await page.click('button:has-text("再試行")');
+      await page.waitForTimeout(600);
+      // モックは get_last_directory_path が '/p' を返す → 復旧後は通常どおり写真が出る
+      const photoShown = (await page.locator('img').count()) > 0;
+      const cardGone = !(await isVisible(page, '前回のフォルダを読み込めませんでした'));
+      const pass = !welcomeShown && retryShown && selectShown && photoShown && cardGone;
+      return {
+        pass,
+        detail: `welcomeShown=${welcomeShown} retryShown=${retryShown} selectShown=${selectShown} photoShownAfterRetry=${photoShown} cardGone=${cardGone}`,
+      };
+    },
+  },
+  {
+    // #115: 起動時に保存済みの設定を取得できない(get_setting が reject)と、既定値で起動したことを
+    // 画面上部の通知で伝える（黙って既定値に戻らない）。
+    name: 'startup: settings read failure tells the user defaults are in use (#115)',
+    hash: 'slides?fail=get_setting',
+    async run(page) {
+      await page.waitForSelector('text=保存済みの設定を読み込めませんでした');
+      const shown = await isVisible(page, '保存済みの設定を読み込めませんでした');
+      const photoShown = (await page.locator('img').count()) > 0;
+      return { pass: shown && photoShown, detail: `toastShown=${shown} photoShown=${photoShown}` };
+    },
+  },
+  {
+    // #115: 英語ロケールでも失敗の文言が英語で出る（取得失敗・ピック失敗の原因）。
+    name: 'English locale: load failure and pick failure causes render in English (#115)',
+    hash: 'slides?fail=get_picked_images,pick_image:pickPermissionDenied',
+    locale: 'en-US',
+    async run(page) {
+      await page.waitForSelector('svg.lucide-settings');
+      await wakeFromIdle(page);
+      await page.click('button[title="Menu"]');
+      await page.click('button[title="Pick (copy)"]');
+      await page.waitForTimeout(300);
+      const causeShown = await isVisible(
+        page,
+        "Couldn't copy: no permission to write to the pick destination",
+      );
+      await openSettingsModal(page);
+      await page.click('#tab-pick');
+      await page.waitForTimeout(300);
+      const loadErrorShown = await isVisible(page, "Couldn't load this");
+      const retryShown = await page.evaluate(() =>
+        [...document.querySelectorAll('[role=alert] button')].some((b) =>
+          b.textContent.includes('Retry'),
+        ),
+      );
+      const pass = causeShown && loadErrorShown && retryShown;
+      return {
+        pass,
+        detail: `causeShown=${causeShown} loadErrorShown=${loadErrorShown} retryShown=${retryShown}`,
+      };
     },
   },
 ];
