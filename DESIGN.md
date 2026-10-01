@@ -14,17 +14,18 @@ All colors are black or white at varying opacity. This is the entire palette.
 
 ### Backgrounds
 
-| Class         | Value              | Usage              |
-| ------------- | ------------------ | ------------------ |
-| `bg-black`    | `#000000`          | Primary background |
-| `bg-black/20` | `rgba(0,0,0,0.20)` | Subtle panel       |
-| `bg-black/30` | `rgba(0,0,0,0.30)` | Light panel        |
-| `bg-black/40` | `rgba(0,0,0,0.40)` | Standard panel     |
-| `bg-black/50` | `rgba(0,0,0,0.50)` | Medium panel       |
-| `bg-black/70` | `rgba(0,0,0,0.70)` | Hover background   |
-| `bg-black/80` | `rgba(0,0,0,0.80)` | Dark panel         |
-| `bg-black/85` | `rgba(0,0,0,0.85)` | Modal overlay      |
-| `bg-black/90` | `rgba(0,0,0,0.90)` | Tooltips, submenus |
+| Class         | Value              | Usage                               |
+| ------------- | ------------------ | ----------------------------------- |
+| `bg-black`    | `#000000`          | Primary background                  |
+| `bg-black/20` | `rgba(0,0,0,0.20)` | Subtle panel                        |
+| `bg-black/30` | `rgba(0,0,0,0.30)` | Light panel                         |
+| `bg-black/40` | `rgba(0,0,0,0.40)` | Standard panel                      |
+| `bg-black/50` | `rgba(0,0,0,0.50)` | Medium panel                        |
+| `bg-black/70` | `rgba(0,0,0,0.70)` | Hover background                    |
+| `bg-black/75` | `rgba(0,0,0,0.75)` | Floating bar, top-right pill (#113) |
+| `bg-black/80` | `rgba(0,0,0,0.80)` | Dark panel                          |
+| `bg-black/85` | `rgba(0,0,0,0.85)` | Modal overlay                       |
+| `bg-black/90` | `rgba(0,0,0,0.90)` | Tooltips, submenus                  |
 
 ### Text
 
@@ -446,7 +447,7 @@ pill-shaped glass container instead. Buttons inside have no border or background
 of their own at rest — only the pill does:
 
 ```
-Container: flex items-center gap-0.5 bg-black/50 backdrop-blur-md
+Container: flex items-center gap-0.5 bg-black/75 backdrop-blur-md
            rounded-full border border-white/10 p-1 shadow-2xl
 Button:    p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10
 ```
@@ -459,8 +460,8 @@ three flex clusters — info (truncating, `flex-1 min-w-0`) · primary transport
 controls (fixed) · secondary actions (fixed):
 
 ```
-Container: fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-xl
-Bar:       flex items-center gap-1 bg-black/50 backdrop-blur-md
+Container: fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-[max(36rem,40vw)]
+Bar:       flex items-center gap-1 bg-black/75 backdrop-blur-md
            rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl
 ```
 
@@ -470,6 +471,73 @@ date only when EXIF has one. File size, display count, and last-displayed time
 move from always-visible text into the filename's `title` tooltip — still one
 hover away, but not competing for space in the compact bar with the things that
 are always present (filename, position).
+
+**Contrast over bright photos (#113)**: the bar and the top-right pill sit on top
+of the user's photo, so their backdrop is not black. With `bg-black/50` a white
+photo measured filename 3.00:1, date/position 2.18:1 and icons 2.49:1 (WCAG wants
+4.5:1 for text, 3:1 for non-text). The bar/pill background is now `bg-black/75`
+and the date / position text is `text-white/60` (filename `/75`, icons `/60`), which
+measures 4.92:1 or better for every element on any photo from white to black,
+saturated colours, 1px stripes, checker and noise. The glass look (thin border,
+`backdrop-blur-md`, no accent colour) is unchanged; the photo behind the bar is
+dimmed to about 25% instead of 50%. `backdrop-blur` averages high-frequency photos
+to mid grey, so white is the worst case. The 4.92 floor does not depend on the blur
+at all: the foreground is always lighter than the backdrop and darker backdrops only
+raise the ratio monotonically, so a uniformly white backdrop is the upper bound of
+what any photo (blurred or not) can produce. Don't lower the bar/pill background below
+`/75` or the secondary text below `/60` without re-running the e2e `overlay contrast`
+scenarios (they measure the real rendered pixels). Decorative separator dots and the
+disabled "previous" icon are exempt from the ratios. Hover-only tooltips and toasts
+already use `/80`-`/90` backgrounds.
+
+The progress hairline (#113) uses a `bg-black/75` track with a `bg-white/80` fill
+so the 2px line reads on white photos too (fill vs track 7:1, track vs a white
+photo 10:1; on a black photo the fill vs photo is 14:1). It was `bg-white/10` +
+`bg-white/50`, which measured 1.16:1 on a white photo.
+
+**Info cluster layout (#114)**: two lines, not one. Line 1 is the filename and takes
+the cluster's full width; line 2 is `captured date · position n/N`. The old single
+line had date and position at `shrink-0`, so only the filename could shrink and with
+date + map it was squeezed to 0 characters at 480x420 (20 at 800-3840). Shrink order
+is now: the date (`truncate min-w-0`) first, the filename head next; the position
+never shrinks. The filename is split into a head (`overflow-hidden text-ellipsis`,
+shrinks) and a tail (last 4 stem graphemes + extension, never shrinks; split on grapheme
+cluster boundaries so combining marks / ZWJ emoji are not cut; RTL names are not split),
+so a long name
+reads as `Family_Trip_Okinawa_Chur… 23_0.jpg` — a middle ellipsis that always shows
+the extension. The two lines are 32px tall, under the 36px buttons, so the bar does
+not grow. **Selection and copy must give the exact filename (#116)**. The two halves are plain
+inline content, not flex items: a flex/grid child is blockified and the selection
+serialiser puts a newline between the halves (`head\ntail`). Each line is a
+`block overflow-hidden whitespace-nowrap` row; the head is
+`inline-block; max-width: calc(100% - var(--fw))` and the tail (`data-fixed`) is
+inline, with `--fw` set from the tail's measured width by `useFixedWidthVar`
+(ResizeObserver). The separator `·` lives inside line 2 as inline text, so selecting
+the whole cluster never leaves a lone `·` line. The outer filename element carries
+`aria-label` with the full name and the visual halves are `aria-hidden`. Verified in a
+real browser for 10 kinds of names (dots, hidden file, Japanese, emoji, combining
+marks, Hebrew, no extension, 60+ chars) by range / drag / double- / triple-click /
+Ctrl+C. Rejected: a `copy` handler (drag `toString()` stays split) and an overlaid
+invisible full-text layer (selection highlight no longer matches the visible text).
+Japanese time uses a 2-digit hour (`00:30`) so the width does not jump with the hour.
+
+Known limits (RTL names, #114): (1) for a Hebrew/Arabic filename, dragging across the
+whole info cluster from its left edge to its right edge can leave the filename out of
+the selection and select only the date line (a bidi caret-mapping quirk); dragging or
+triple-clicking the filename itself, and Ctrl+C on it, give the exact name.
+(2) At 480px wide an overflowing RTL name can only be drag-selected up to its visible
+part; triple-click and Ctrl+C still give the whole name. (3) The few pixels between the
+`…` and the tail are intentional: the head box is as wide as the room left for it and
+the ellipsis lands on a character boundary, so the leftover (under one glyph) shows as a
+gap; shrinking the box to fit would break the layout of the tail or the copy-exact
+structure, so it is left as is.
+
+Measured visible filename characters for a 60-char name with date + map:
+0 → 33 at 480x420, 20 → 52 at 800/1280, 20 → 60 (whole name) at 1920/3840. The max
+width scales with the screen (`max-w-[max(36rem,40vw)]`: 576px up to 1440px wide,
+768px at 1920, 1536px at 4K). The captured date is locale-formatted (ja
+`2023年8月15日 12:34`, en `Aug 15, 2023, 12:34 PM`); colours (`text-white/75` and
+`/60`), the `bg-black/75` bar and `select-text` (#116) are unchanged.
 
 Progress no longer lives inside the bar. It's an independent full-width hairline
 at the very bottom edge of the screen (`fixed bottom-0 left-0 right-0 h-0.5`),
@@ -649,7 +717,7 @@ pt-[12vh]` rather than vertical centering (#66レビュー2巡目should2): with 
   and tab row pinned in place; only the bottom edge moves as content grows or
   shrinks. `76vh` (rather than `80vh`) leaves a roughly symmetric ~12vh margin
   at the bottom too
-- Floating control bar: `w-[calc(100%-2rem)] max-w-xl` (#66)
+- Floating control bar: `w-[calc(100%-2rem)] max-w-[max(36rem,40vw)]` (#66, #114: 576px minimum cap that grows to 40% of the screen, 1536px on 4K)
 - Icon sizes: `w-4 h-4` (16px) standard, `w-5 h-5` (20px) for the center
   play/pause emphasis
 
@@ -713,6 +781,16 @@ uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
 - Only show information that's actually present — no "No date" / "No location"
   placeholder boxes for absent EXIF data (#66)
 - Set `pointer-events: none` on idle UI (`opacity: 0` when idle)
+- Keep the page non-selectable by default (`body { user-select: none }`, #116) so
+  Ctrl+A never paints the whole screen blue; opt back in with `user-select: text`
+  (Tailwind `select-text`) only where copying is useful — inputs/textareas (global
+  CSS rule), the overlay file name/date/position, the version, stats numbers, error
+  messages, and the confirm modal body
+- Keep the window usable down to the minimum size (`minWidth` 480 / `minHeight` 420 in
+  `tauri.conf.json`, #116): no clipped buttons, no horizontal scroll in the settings body,
+  no overlap, and the Folder tab's path field + "Select" button visible without scrolling and the Exclude Rules tab fitting entirely
+  (the settings tab row scrolling horizontally is the one designed exception; 360px of
+  height is already cramped)
 
 ### Don't
 
@@ -731,6 +809,9 @@ uses `rounded-2xl` or `rounded-full`. Two shapes, not a spectrum — the old
 currentColor`, rendering a visibly brighter border than intended). Adding any
   further non-multiple-of-5 value here requires the same `tailwind.config.js`
   addition, verified against the built `dist/assets/*.css`
+- Expose the WebView's browser chrome: the right-click context menu and the reload/
+  devtools/print/find/zoom shortcuts are suppressed in production (`src/lib/webviewGuards.ts`, #116;
+  decision table in CLAUDE.md). Right-click stays enabled inside text inputs
 - Reach for `rounded` (4px) on anything but a tiny inline badge — buttons/cards
   are `rounded-lg`, floating surfaces are `rounded-2xl`/`rounded-full` (#66)
 

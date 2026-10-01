@@ -154,7 +154,7 @@ function ConfirmDialogView() {
               ref={messageRef}
               tabIndex={-1}
               onScroll={updateMoreBelow}
-              className="min-h-0 overflow-y-auto text-sm text-white/70 whitespace-pre-line leading-relaxed !outline-none"
+              className="select-text min-h-0 overflow-y-auto text-sm text-white/70 whitespace-pre-line leading-relaxed !outline-none"
             >
               {body}
             </div>
@@ -182,7 +182,7 @@ function ConfirmDialogView() {
               {'\n\n'}
               <p
                 data-testid="confirm-dialog-final"
-                className="mt-4 [@media(max-height:420px)]:mt-2 shrink-0 text-sm text-white/70 whitespace-pre-line leading-relaxed"
+                className="select-text mt-4 [@media(max-height:420px)]:mt-2 shrink-0 text-sm text-white/70 whitespace-pre-line leading-relaxed"
               >
                 {finalParagraph}
               </p>

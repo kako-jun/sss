@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { createRef } from 'react';
 import type { OverlayUIHandle } from './OverlayUI';
@@ -29,6 +29,7 @@ vi.mock('../lib/tauri', () => ({
 
 import { OverlayUI } from './OverlayUI';
 import type { ImageInfo } from '../types';
+import { setLanguageSetting } from '../lib/i18n';
 
 function makeImage(overrides: Partial<ImageInfo> = {}): ImageInfo {
   return {
@@ -61,6 +62,13 @@ const requiredProps = {
   onMouseLeave: noop,
   onTogglePause: noop,
 };
+
+/** ファイル名は前半/後半の2要素に分かれるため、外側の data-overlay=filename を全文で引く。 */
+function filenameEl(text: string): HTMLElement {
+  return screen.getByText(
+    (_, el) => el?.getAttribute('data-overlay') === 'filename' && el.textContent === text,
+  );
+}
 
 function clickMapButton() {
   // 地図セルのボタン自体にはラベルが無いため、内側の img
@@ -441,7 +449,7 @@ describe('OverlayUI mousedown guard is scoped to buttons only, not the whole bar
     const image = makeImage({ path: '/photos/selectable-name.jpg' });
     render(<OverlayUI image={image} {...requiredProps} />);
 
-    const fileNameSpan = screen.getByText('selectable-name.jpg');
+    const fileNameSpan = filenameEl('selectable-name.jpg');
     const notCancelled = fireEvent.mouseDown(fileNameSpan);
     expect(notCancelled).toBe(true);
   });
@@ -719,5 +727,211 @@ describe('OverlayUI undo toast (#78)', () => {
       expect(el.className).not.toMatch(/opacity-0/);
       el = el.parentElement;
     }
+  });
+});
+
+// #113: 明るい写真の上でも読めるよう、操作バーの背景は不透明寄り(bg-black/75)にし、
+// 撮影日・位置表示は text-white/60 以上にする。実効コントラスト比そのものは
+// 実ブラウザ e2e（overlay contrast ...）が測る。ここでは退行しやすいクラス指定をピン留めする。
+describe('OverlayUI bar keeps readable contrast over bright photos (#113)', () => {
+  it('uses an opaque-enough bar background and no faint (/50) secondary text', () => {
+    const image = makeImage({
+      exif: {
+        dateTime: '2024:05:01 12:00:00',
+        gpsLatitude: null,
+        gpsLongitude: null,
+      } as ImageInfo['exif'],
+    });
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    const dateEl = screen.getByText('2024年5月1日 12:00');
+    const posEl = screen.getByText('1 / 10');
+    const bar = dateEl.closest('.backdrop-blur-md')!;
+    expect(bar.className).toContain('bg-black/75');
+    expect(bar.className).not.toContain('bg-black/50');
+    for (const el of [dateEl, posEl]) {
+      expect(el.className).toContain('text-white/60');
+      expect(el.className).not.toContain('text-white/50');
+    }
+  });
+});
+
+describe('OverlayUI progress hairline stays visible over bright photos (#113)', () => {
+  it('uses a dark track and a bright fill instead of faint white-on-white', () => {
+    const { container } = render(<OverlayUI image={makeImage()} {...requiredProps} />);
+    const track = container.querySelector('.fixed.bottom-0.left-0.right-0')!;
+    expect(track.className).toContain('bg-black/75');
+    expect(track.className).not.toContain('bg-white/10');
+    expect(track.firstElementChild!.className).toContain('bg-white/80');
+  });
+});
+
+// #114: 撮影日のロケール整形と、ファイル名を優先的に確保するレイアウト。
+// 実描画での可視幅（480〜3840）は実ブラウザ e2e（filename keeps ...）が測る。
+// ここでは退行しやすいクラス指定（どれが縮み、どれが縮まないか）をピン留めする。
+describe('OverlayUI captured date formatting (#114)', () => {
+  const withExif = (dateTime: string | null) =>
+    makeImage({
+      exif: { dateTime, gpsLatitude: null, gpsLongitude: null, width: null, height: null },
+    });
+
+  afterEach(() => {
+    setLanguageSetting('ja');
+  });
+
+  it('formats the date for ja (no raw ISO / T separator)', () => {
+    render(<OverlayUI image={withExif('2023-08-15T12:34:56')} {...requiredProps} />);
+    expect(screen.getByText('2023年8月15日 12:34')).toBeTruthy();
+    expect(screen.queryByText(/T12:34/)).toBeNull();
+  });
+
+  it('formats the date for en', () => {
+    setLanguageSetting('en');
+    render(<OverlayUI image={withExif('2023:08:15 12:34:56')} {...requiredProps} />);
+    expect(screen.getByText('Aug 15, 2023, 12:34 PM')).toBeTruthy();
+  });
+
+  it('shows only the date for a date-only value or midnight', () => {
+    render(<OverlayUI image={withExif('2023-08-15 00:00:00')} {...requiredProps} />);
+    expect(screen.getByText('2023年8月15日')).toBeTruthy();
+  });
+
+  it('renders no date (and no stray separator) for an unparsable value', () => {
+    const { container } = render(
+      <OverlayUI image={withExif('0000:00:00 00:00:00')} {...requiredProps} />,
+    );
+    expect(container.querySelector('[data-overlay="date"]')).toBeNull();
+    // 区切り点は日付があるときだけ（位置表示の前に · が単独で残らない）
+    expect(container.querySelector('[data-overlay="position"]')!.previousElementSibling).toBeNull();
+  });
+
+  it('puts the formatted date into the tooltip as well (it may be truncated on narrow bars)', () => {
+    const { container } = render(
+      <OverlayUI image={withExif('2023-08-15 12:34:56')} {...requiredProps} />,
+    );
+    expect(container.querySelector('div[title]')!.getAttribute('title')).toContain(
+      '2023年8月15日 12:34',
+    );
+  });
+});
+
+describe('OverlayUI info cluster keeps the filename readable (#114)', () => {
+  const gpsImage = (path: string) =>
+    makeImage({
+      path,
+      exif: {
+        dateTime: '2023-08-15 12:34:56',
+        gpsLatitude: 35.6,
+        gpsLongitude: 139.7,
+        width: null,
+        height: null,
+      },
+    });
+
+  it('puts the filename on its own line so date/position cannot take its width', () => {
+    const { container } = render(
+      <OverlayUI
+        image={gpsImage('/p/Family_Trip_Okinawa_2023_08_15_0815.jpg')}
+        {...requiredProps}
+      />,
+    );
+    const info = container.querySelector('div[title]')!;
+    expect(info.className).toContain('flex-col');
+    const name = info.querySelector('[data-overlay="filename"]')!;
+    const meta = info.querySelector('[data-overlay="position"]')!.closest('.block')!;
+    // ファイル名と、日付・位置の行は兄弟（別の行）
+    expect(name.parentElement).toBe(info);
+    expect(meta.parentElement).toBe(info);
+    expect(name).not.toBe(meta);
+  });
+
+  it('shrinks only the date (position is the fixed part) and ellipsizes the filename head', () => {
+    const { container } = render(
+      <OverlayUI
+        image={gpsImage('/p/Family_Trip_Okinawa_2023_08_15_0815.jpg')}
+        {...requiredProps}
+      />,
+    );
+    const date = container.querySelector<HTMLElement>('[data-overlay="date"]')!;
+    const pos = container.querySelector('[data-overlay="position"]')!;
+    expect(date.className).toContain('text-ellipsis');
+    expect(date.className).toContain('overflow-hidden');
+    expect(date.style.maxWidth).toContain('var(--fw');
+    // 位置は data-fixed（縮まない側）の中
+    expect(pos.closest('[data-fixed]')).not.toBeNull();
+    const name = container.querySelector('[data-overlay="filename"]')!;
+    const [head, tail] = Array.from(name.children) as HTMLElement[];
+    expect(head.className).toContain('text-ellipsis');
+    expect(head.style.maxWidth).toContain('var(--fw');
+    expect(tail.hasAttribute('data-fixed')).toBe(true);
+    expect(head.textContent! + tail.textContent!).toBe('Family_Trip_Okinawa_2023_08_15_0815.jpg');
+    expect(tail.textContent).toBe('0815.jpg');
+  });
+
+  // レビュー M1: flex/grid/block の子要素は選択・コピーのシリアライズで改行が入る。
+  // ファイル名・撮影日・位置の行の中身はインライン(inline-block 含む)だけで組む。
+  // （実ブラウザで selection.toString() === ファイル名 になることは e2e が検証する。）
+  it('builds each line from inline pieces only, so a selection never gets a newline inside the name (#116)', () => {
+    const { container } = render(
+      <OverlayUI
+        image={gpsImage('/p/Family_Trip_Okinawa_2023_08_15_0815.jpg')}
+        {...requiredProps}
+      />,
+    );
+    const rows = [
+      container.querySelector('[data-overlay="filename"]')!,
+      container.querySelector('[data-overlay="position"]')!.closest('.block')!,
+    ];
+    for (const row of rows) {
+      for (const el of Array.from(row.querySelectorAll('*'))) {
+        const classes = el.className.toString().split(/\s+/);
+        for (const bad of ['flex', 'inline-flex', 'grid', 'block', 'table', 'flex-col']) {
+          expect(classes, el.outerHTML).not.toContain(bad);
+        }
+      }
+    }
+  });
+
+  it('gives screen readers the whole filename in one piece (aria-label) and hides the visual halves', () => {
+    const { container } = render(
+      <OverlayUI
+        image={gpsImage('/p/Family_Trip_Okinawa_2023_08_15_0815.jpg')}
+        {...requiredProps}
+      />,
+    );
+    const name = container.querySelector('[data-overlay="filename"]')!;
+    expect(name.getAttribute('aria-label')).toBe('Family_Trip_Okinawa_2023_08_15_0815.jpg');
+    for (const half of Array.from(name.children)) {
+      expect(half.getAttribute('aria-hidden')).toBe('true');
+    }
+  });
+
+  it('does not split an RTL filename (dir=auto, no tail)', () => {
+    const rtl = 'שלום_עולם_תמונה_ארוכה_מאוד_2023.jpg';
+    const { container } = render(<OverlayUI image={gpsImage('/p/' + rtl)} {...requiredProps} />);
+    const name = container.querySelector('[data-overlay="filename"]')!;
+    expect(name.children).toHaveLength(1);
+    expect(name.children[0].getAttribute('dir')).toBe('auto');
+    expect(name.textContent).toBe(rtl);
+  });
+
+  it('keeps the colours (#113) and select-text (#116) on the info cluster', () => {
+    const { container } = render(<OverlayUI image={gpsImage('/p/a.jpg')} {...requiredProps} />);
+    const info = container.querySelector('div[title]')!;
+    expect(info.className).toContain('select-text');
+    expect(container.querySelector('[data-overlay="filename"]')!.className).toContain(
+      'text-white/75',
+    );
+    expect(container.querySelector('[data-overlay="date"]')!.className).toContain('text-white/60');
+    expect(container.querySelector('[data-overlay="position"]')!.className).toContain(
+      'text-white/60',
+    );
+  });
+
+  it('widens the bar with the screen (max-w scales with vw) instead of a fixed 576px', () => {
+    const { container } = render(<OverlayUI image={makeImage()} {...requiredProps} />);
+    const bar = container.querySelector('.fixed.bottom-6')!;
+    expect(bar.className).toContain('max-w-[max(36rem,40vw)]');
+    expect(bar.className).not.toContain('max-w-xl');
   });
 });

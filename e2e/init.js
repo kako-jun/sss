@@ -45,6 +45,52 @@
   window.__e2eHealFailures = () => failAlways.clear();
   const log = (window.__e2eLog = []);
 
+  // #113: オーバーレイのコントラスト検証用の背景写真。シナリオ 'bg' は URL の
+  // `#bg?kind=<種別>` で、1280x800 の単色/ストライプ/ノイズ等の PNG（data URL）を
+  // 1枚だけ返す（ビューポートいっぱいに表示されるので、バー・右上ピルの背後は
+  // 常にこの画素になる）。種別: white / light(#e8e8e8) / mid / black / red / green /
+  // blue / stripe（白黒1px縦縞）/ noise（高周波ノイズ）/ checker（8px市松）。
+  const makeBg = (kind) => {
+    const W = 1280;
+    const H = 800;
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const g = c.getContext('2d');
+    const solid = {
+      white: '#ffffff',
+      light: '#e8e8e8',
+      mid: '#808080',
+      black: '#000000',
+      red: '#ff0000',
+      green: '#00ff00',
+      blue: '#0000ff',
+    };
+    if (solid[kind]) {
+      g.fillStyle = solid[kind];
+      g.fillRect(0, 0, W, H);
+    } else {
+      const img = g.createImageData(W, H);
+      let seed = 12345;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          let v;
+          if (kind === 'stripe') v = x % 2 === 0 ? 255 : 0;
+          else if (kind === 'checker') v = ((x >> 3) + (y >> 3)) % 2 === 0 ? 255 : 0;
+          else {
+            seed = (seed * 1664525 + 1013904223) >>> 0;
+            v = (seed >>> 24) & 255;
+          }
+          const i = (y * W + x) * 4;
+          img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+          img.data[i + 3] = 255;
+        }
+      }
+      g.putImageData(img, 0, 0);
+    }
+    return c.toDataURL('image/png');
+  };
+
   // #65レビューM2: 1件だけのプレイリストで同じpathが連続で返るケース（'one'）。
   // #65レビューM1: 画像→動画→動画のように退場アニメーションを挟む連続遷移（'i2v_vv'）。
   // #65レビュー2巡目S8: 一時停止中に動画へ移っても再生されない/再開後に再生される
@@ -112,6 +158,11 @@
     vidend: ['/p/v.webm', '/p/a.png', '/p/b.png'],
     vidblock: ['/p/v.webm', '/p/a.png', '/p/b.png'],
     vidresume: ['/p/v.webm', '/p/a.png', '/p/b.png'],
+    // #113: 背景写真の明るさを変えてオーバーレイのコントラストを測る（`#bg?kind=...`）。
+    bg: ['/p/bg.png'],
+    // #114: 操作バーの情報クラスタ（ファイル名・撮影日・位置・地図）の検証。
+    // `#bar?name=<ファイル名>&date=<EXIF日時>&gps=1&pos=<現在位置>&total=<総数>`。
+    bar: ['/p/' + (hashParams.get('name') || 'IMG_0001.jpg')],
   };
 
   // #68: シナリオごとの保存済み設定の初期値。'vidset' だけは save_setting の結果を
@@ -161,6 +212,8 @@
     }
   }
   media['/p/v2.webm'] = media['/p/v.webm'];
+  if (sc === 'bg') media['/p/bg.png'] = makeBg(hashParams.get('kind') || 'white');
+  if (sc === 'bar') media[seqs.bar[0]] = media['/p/a.png'];
 
   let idx = -1;
   let cb = 0;
@@ -175,6 +228,30 @@
     displayCount: 1,
     lastDisplayed: null,
   });
+  // #113: 'bg' は撮影日つきの EXIF を返し、バーの日付表示（2024-05-01）も測れるようにする。
+  const infoWithExif = (p) => {
+    if (sc === 'bg') {
+      return {
+        ...info(p),
+        exif: { dateTime: '2024:05:01 12:00:00', gpsLatitude: null, gpsLongitude: null },
+      };
+    }
+    if (sc === 'bar') {
+      // #114: date / gps が指定された時だけ EXIF を付ける（無ければ exif なし）。
+      const date = hashParams.get('date');
+      const gps = hashParams.get('gps') === '1';
+      if (!date && !gps) return info(p);
+      return {
+        ...info(p),
+        exif: {
+          dateTime: date || null,
+          gpsLatitude: gps ? 35.6812 : null,
+          gpsLongitude: gps ? 139.7671 : null,
+        },
+      };
+    }
+    return info(p);
+  };
 
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -272,11 +349,18 @@
           // （同じ動画バイト列を使い回しているpath同士は同一srcになり見分けが
           // つかない）に頼らず直接読めるようにする（テスト専用フック）。
           window.__e2eCurrentPath = s[idx];
-          return { kind: 'found', data: info(s[idx]) };
+          return { kind: 'found', data: infoWithExif(s[idx]) };
         }
         case 'get_previous_image':
           return { kind: 'noHistory' };
         case 'get_playlist_info':
+          if (sc === 'bar') {
+            return [
+              Number(hashParams.get('pos')) || idx + 1,
+              Number(hashParams.get('total')) || 1,
+              idx > 0,
+            ];
+          }
           return [idx + 1, (seqs[sc] || seqs.slides).length, idx > 0];
         case 'undo_display_count':
           return null;
@@ -372,6 +456,9 @@
             return { files: 500, min: 0, max: 0, mean: 0, bins: [{ count: 0, files: 500 }] };
           }
           return { files: 0, min: 0, max: 0, mean: 0, bins: [] };
+        case 'get_share_directory':
+          // 実バックエンドは解決済みパス(文字列)を返す。null だと controlled input の警告が出る。
+          return '/tmp/sss-picked';
         case 'get_default_share_directory':
         case 'get_share_directory':
           return '/tmp/sss-picked';

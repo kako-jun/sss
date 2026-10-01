@@ -100,6 +100,25 @@
 #### 通常表示
 
 - 初回起動は全画面（`tauri.conf.json`: `fullscreen: true` / `decorations: false` / 背景 `#000000`）。F / F11 や右上のボタンでウィンドウモードへ切り替えられ、以後は前回の状態を復元する（#78）
+- **ウィンドウの最小サイズ**（#116）: `tauri.conf.json` の `minWidth: 480` / `minHeight: 420`。幅は「設定『フォルダ』タブの『選択』ボタン等が切れず、本文が横スクロールしない」最小値で選んだ（実測: 420px で「選択」が "Se" に切れ本文が横スクロール、440px も本文が横スクロール、460px は英語の『フォルダ』『オプション』タブ本文が 3px 横スクロール、480px で全タブ ja/en とも解消）。**設定のタブ行（`role="tablist"`）の横スクロールは意図した仕様で、最小サイズでも出る**（480 幅で scrollWidth/clientWidth は ja 556/358・en 519/358。720 以上でようやく収まる）ので判定基準にしていない。高さは「フォルダタブの主要操作（パス欄と『選択』ボタン）がスクロール無しで見え、除外ルールタブの追加欄が下端で切れず全体が収まる」最小値で選んだ（実測: 360 では本文領域が 97px でパス欄と『選択』が折り返しの下に隠れ、**360 は既に窮屈**。400 ではフォルダタブは見えるが除外ルールタブは本文 127px に対し内容 130px で追加欄の下端が約3px切れる。420 で本文 142px となり除外ルールタブが収まり、全7タブ ja/en とも最下部までスクロールした時に最後の入力欄/ボタンが切れない）。480x420 では設定の全タブ（ja/en）・確認モーダル・ようこそ/空/エラー案内・オーバーレイ・「…」メニューと除外サブメニューが崩れない。高さ 420 未満は非推奨・未確認。値を下げる場合は e2e の「layout holds at the minimum window size」（`tauri.conf.json` の値を読む）で確認する。`tauri-plugin-window-state` が保存済みの小さいサイズを復元しても、OS のウィンドウマネージャが最小サイズへ丸める想定（Windows の `WM_GETMINMAXINFO`・macOS の `contentMinSize`・GTK のサイズヒント）。Rust 側の補正は入れていない（実機確認項目。初回は `fullscreen: true` なので古い保存サイズからの復元経路を実機で確認する）
+- **ネイティブらしい振る舞い**（#116）: ブラウザのような挙動を出さない。`index.css` の `body` は `user-select: none`（Ctrl+A で画面全体が青くハイライトされず（入力欄の外の Ctrl+A はガードで抑止）、透明な隠しツールチップ等も選択されない）。選択が有用な箇所（コピーしたい文言）は `user-select: text` で許可する: `input`/`textarea`（CSS で全域）、オーバーレイのファイル名・日付・位置、設定の情報タブのバージョン、統計の数値、エラーメッセージ・読み取りエラー例・除外パターン・確認モーダル本文（Tailwind `select-text`）。新しく「コピーしたくなる文言」を足す時は `select-text` を付ける（`src/test/userSelect.test.ts` が「どのファイルのどの要素に付くか」を構文木で検証。e2e がオーバーレイのファイル名の computed style とドラッグ選択も検証）。右クリックメニューとブラウザ系ショートカットの抑止は `src/lib/webviewGuards.ts`（`main.tsx` で登録）:
+
+  | 対象                                                                                                                      | 本番                                                                                                                                                                                                                                                                                           | 開発（`import.meta.env.DEV`）             |
+  | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+  | 右クリック（`contextmenu`）                                                                                               | `preventDefault`。ただし `input`/`textarea`/contentEditable は許可（コピー/貼り付け）                                                                                                                                                                                                          | 抑止しない（devtools の「検証」を使える） |
+  | F5・Ctrl/Cmd+R・Ctrl+Shift+R（再読み込み）                                                                                | 抑止                                                                                                                                                                                                                                                                                           | 抑止しない                                |
+  | F12・Ctrl+Shift+I/J/C（devtools）                                                                                         | 抑止（そもそも release ビルドは `devtools` feature 無し）                                                                                                                                                                                                                                      | 抑止しない                                |
+  | Ctrl+P（印刷）・Ctrl+S（保存）・Ctrl+U（ソース表示）・Ctrl+O（ファイルを開く）                                            | 抑止                                                                                                                                                                                                                                                                                           | 抑止しない                                |
+  | Ctrl+F・Ctrl+G・F3（検索）・F7（キャレットブラウズ）                                                                      | 抑止                                                                                                                                                                                                                                                                                           | 抑止しない                                |
+  | Ctrl + `+`/`-`/`=`/`0`（テンキー含む）・Ctrl+ホイール・ピンチ（ズーム）                                                   | 抑止（`wheel` は `passive:false`）。Tauri 既定の `zoomHotkeysEnabled: false` と二重                                                                                                                                                                                                            | 抑止しない                                |
+  | Alt+←/→（戻る/進む）                                                                                                      | 抑止                                                                                                                                                                                                                                                                                           | 抑止しない                                |
+  | 上記以外のブラウザ accelerator（Ctrl+H/D/N/T/W/L/K/E/B、Ctrl+Shift+Delete/N/P、F6、macOS の Cmd+[ / Cmd+]・Cmd+Opt+I 等） | **抑止していない**。抑止は許可リスト方式で網羅的ではない。Tauri 2.12 には WebView2 の `AreBrowserAcceleratorKeysEnabled` 相当（`browser_accelerator_keys`）の設定項目が無く一括無効化できない。単一ウィンドウの WebView では多くが無害だが、実機で出るものがあれば表へ追加する（実機確認項目） | 抑止しない                                |
+  | Ctrl+A                                                                                                                    | 入力欄の外だけ抑止（`select-text` を付けた箇所だけがハイライトされる半端な見た目を防ぐ）。入力欄の中は通常どおり全選択できる。確認モーダル本文も入力欄の外なので Ctrl+A は不可で、ドラッグ/三連クリックで選択する                                                                              | 触らない                                  |
+  | Ctrl+C/V/X/Z                                                                                                              | 触らない（入力欄の編集・選択済みテキストのコピー用）                                                                                                                                                                                                                                           | 触らない                                  |
+  | F / F11 / Space / ? / 矢印 / Esc、確認モーダルの Esc/Tab/Enter/Space                                                      | 触らない（修飾キー無し、または `preventDefault` のみで `stopPropagation` しないため、既存ハンドラと競合しない）                                                                                                                                                                                | 触らない                                  |
+
+  AltGr 配列（Ctrl+Alt として届く）での文字入力は本表の対象キーとほぼ衝突しないため考慮していない。e2e だけは `VITE_FORCE_WEBVIEW_GUARDS=true`（`e2e/run.js` が vite に渡す）で dev サーバーでも本番と同じ抑止を有効にして検証する。実機（Windows の WebView2）での右クリック/F5/ズームは未確認（PR・Issue の「実機確認項目」）
+
 - 画像/動画を中央に表示（object-fit: contain）
 - 背景: 黒
 - UI非表示（マウスを動かすと表示）
@@ -107,6 +126,7 @@
 #### マウス移動時
 
 - オーバーレイUI表示（グラスモーフィズムデザイン）
+- **明るい写真上のコントラスト**（#113）: 操作バーと右上ピルの背景は `bg-black/75`、撮影日・位置表示は `text-white/60`（ファイル名 `/75`・アイコン `/60`）。白〜黒・高彩度・縞/ノイズのどの背景写真でも実効コントラスト比が文字 4.5:1・アイコン 3:1 以上（実測の最小 4.92:1）。下げる変更をしたら実ブラウザ e2e の `overlay contrast`（`#bg?kind=...`）で再計測する。詳細は `DESIGN.md` の Floating Control Bar
 - 3秒間アイドル状態でUI非表示（オーバーレイ・右上の常設ボタン列（終了・ショートカット・
   ウィンドウモード・設定）・マウスカーソル自体（`cursor-none`）の3つが同時に消える。#66。
   設定モーダルを開いている間はUI操作中のためカーソルは隠さない）
@@ -116,8 +136,9 @@
 
 1. **左: ファイル情報**（情報が無い項目は表示しない。#66）
    - 📍 GPS座標がある画像だけ、小さな地図サムネイル（クリックでGoogleマップ、EXIF: 緯度・経度）
-   - 📅 撮影日（EXIFにある画像だけ）
+   - 📅 撮影日（EXIFにある画像だけ）。**ロケール整形**（#114。ja「2023年8月15日 12:34」（24時間・時は2桁固定で `00:30`）/ en「Aug 15, 2023, 12:34 PM」。`src/lib/formatCapturedDate.ts`）。EXIF の日時はタイムゾーンを持たない壁時計の値なので、`Date` のパース/TZ 変換を通さず年月日時分を取り出して `Intl.DateTimeFormat`（`timeZone: 'UTC'` 固定）で整形する（実行環境の TZ で日付がずれない）。`Z`/`+09:00` が付いていても換算せず書かれたまま出す。時刻が無い・`00:00:00` なら日付だけ。解釈できない値（`0000:00:00 00:00:00`・`unknown`・存在しない日付）は何も出さない
    - 📁 ファイル名 · プレイリスト位置: 現在位置 / 総数（例: 1,234 / 100,000）
+   - **レイアウト（#114）**: 情報クラスタは2行。1行目=ファイル名（クラスタ全幅を使う）、2行目=撮影日 · 位置 n/N。縮む順は「ファイル名の前半（`…` で省略。拡張子と末尾4書記素は縮まない後半として常に残る=中間省略、`src/lib/fileNameParts.ts`）」より前に「撮影日（`…` で省略）」が縮み、区切りと位置は縮まない。分割は書記素クラスタ単位（`Intl.Segmenter`、無ければ結合文字・ZWJ・異体字・肌色・国旗を寄せるフォールバック）なので、結合文字や家族絵文字を head/tail の境で割らない。RTL（ヘブライ語・アラビア語）のファイル名は視覚順が逆転するので分割せず `dir="auto"` の通常の末尾省略。以前は1行に並べて日付・位置が `shrink-0` だったため、日付+地図があるとファイル名の幅が 0 になった（480x420 で 0 文字、800 以上でも 20 文字）。2行の高さ(32px)はボタン(36px)以下でバーは高くならない。バー幅は `max-w-[max(36rem,40vw)]`（576px 以上で画面幅の 40% まで広がり、4K では 1536px）。撮影日が狭幅で省略された時は title ツールチップに全文がある。各要素は `data-overlay="filename|date|position"`（e2e の計測用）。**選択・コピーで元のファイル名に完全一致させるため、各行は flex を使わずインラインで組む**（flex/grid の子はブロック化され、選択のシリアライズで `head\ntail` のように改行が入る=#116 の「ファイル名はコピー可」を壊す）。行は `block overflow-hidden whitespace-nowrap`、前半は `inline-block; max-width: calc(100% - var(--fw))`、後半は `data-fixed` のインライン要素で、`src/hooks/useFixedWidthVar.ts` が後半の実測幅（ResizeObserver で追従）を `--fw` に入れる。区切り点も2行目の中にインラインの `·` として持つので、クラスタ全体を選んでも独立行にならない。スクリーンリーダーにはファイル名の外側要素の `aria-label`（全文）が読まれ、見た目用の前半/後半は `aria-hidden`。検証は実ブラウザ e2e「overlay file name selects and copies as the exact file name」（10種のファイル名 × 要素全選択/ドラッグ/トリプルクリック/ダブルクリック/Ctrl+C=実クリップボード）。他の案（`copy` イベントで全文を差し込む・視覚非表示の全文要素を重ねる）は、ドラッグ選択の `getSelection().toString()` 自体は割れたまま/選択の見た目がずれるため採らなかった
    - 💾 ファイルサイズ・🔢 表示回数・🕒 最新表示（ISO 8601形式）は本文に出さず、ファイル名のtitleツールチップにまとめる
    - 動画の場合: EXIF情報なし、ファイル名・位置のみ表示
 
@@ -256,7 +277,7 @@
 - **バックエンドのユーザー向けエラー**: Rust側は文言でなくエラーコード（`Result<_, String>` のErrに `"directoryNotFound"` や `"invalidPattern:{detail}"` のようなコード文字列）を返す。フロントは `src/lib/i18n/errors.ts` の `resolveScanErrorMessage`/`resolveAddPatternErrorMessage`/`resolveResetAllDataErrorMessage`/`resolveStartupDirectoryError` でロケールに応じた文言へ変換する。ログ専用（`console.error`/`eprintln!`）の文言は英語のままでよく、コード化の対象外
 - **失敗は「空」や成功に見せない（#115）**: 設定画面の取得は `src/hooks/useAsyncLoad.ts`（`loading | error | ready`）で受け、reject は「読み込みに失敗しました」＋再試行（`SectionErrors.tsx` の `LoadError`）にする。「〜はありません」の空状態は `ready` かつ 0 件のときだけ。設定の保存は `src/hooks/useRollbackSave.ts`（書き込みを直列化し、失敗したら最後に保存できた値へ巻き戻す。通知は対象名つきでセクションに1つ。アンマウント後は `src/lib/failureNotice.ts` 経由で App の上部トースト）。起動シーケンスの失敗は `onStartupFailure` で App に伝え、前回フォルダの取得失敗は「ようこそ」にせず再試行できる案内画面にする。ピック失敗の原因は Rust の `pick::pick_io_error_code`（書き込み側: `pickPermissionDenied`/`pickDiskFull`/`pickDestinationMissing`、その他 `pickCopyFailed`）/`pick_source_error_code`（読み取り側: `pickSourceUnreadable`/`imageFileNotFound`）。どちらも `std::io::ErrorKind` のみで分類し、OS の生コードは見ない。**洗い出し表（修正した箇所と、意図的に console のみにした箇所の理由）は `docs/architecture.md` §6-(i) が正本**。新しく `invoke` を呼ぶ箇所を足すときは、失敗を利用者に見せるか、見せない理由を同表に足す
 - **確定文言を状態に持たない**: `App.tsx`の`directoryError`、`ScanSection`の`error`、`ExcludeRulesSection`の`addError`、`InfoSection`の`resetMessage`は、変換済みの表示文言でなく生のエラーコード/辞書キーを状態として保持し、レンダーのたびに現在のロケールへ解決する。`setState`時点で文言に固定すると、表示中に言語を切り替えたときに旧言語のまま固まる（新旧混在）
-- **日付は言語によらず常に `YYYY-MM-DD`**（ISO、スラッシュ不可）。数値の桁区切りは `toLocaleString()` など言語に応じて変えてよい
+- **日付は原則、言語によらず常に `YYYY-MM-DD`**（ISO、スラッシュ不可）。例外はオーバーレイの撮影日で、ロケールに応じた表記（ja「2023年8月15日 12:34」/ en「Aug 15, 2023, 12:34 PM」、#114）。数値の桁区切りは `toLocaleString()` など言語に応じて変えてよい
 - **ウィンドウタイトル・`<html lang>`・ダイアログtitle**もロケールに追従する（`App.tsx`のロケール変更effect、`selectAndScan()`/`selectShareDirectory()`が渡す`t('selectDirectoryDialogTitle')`/`t('selectShareDirectoryDialogTitle')`）
 
 ## データベーススキーマ
@@ -597,6 +618,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 - `tauri.ts`: Tauriコマンドのラッパー関数
 - `startup.ts`: 起動シーケンス（設定読込→`restore_playlist`→バックグラウンドの`rescan_last_directory`）。どちらも引数なし（#93）
 - `keyboardShortcuts.ts`・`photoGestures.ts`: ショートカット判定・写真上のクリック/ホイール判定（純関数）
+- `webviewGuards.ts`: 本番での WebView 既定の右クリックメニュー・ブラウザ系ショートカットの抑止（#116）
 - `displayCountChart.ts`: 統計グラフの目盛り・範囲の純関数
 - `i18n/`: 辞書（ja/en）・`t()`・ロケール状態・バックエンドエラーコードの解決
 

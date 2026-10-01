@@ -28,7 +28,10 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { useT } from '../lib/i18n';
+import { useT, useLocale } from '../lib/i18n';
+import { formatCapturedDate } from '../lib/formatCapturedDate';
+import { splitFileName, isRtlName } from '../lib/fileNameParts';
+import { useFixedWidthVar } from '../hooks/useFixedWidthVar';
 import {
   resolveExcludeErrorMessage,
   resolveOpenInExplorerErrorMessage,
@@ -161,10 +164,14 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   const onExcludeUndoneRef = useRef(onExcludeUndone);
   onExcludeUndoneRef.current = onExcludeUndone;
   const t = useT();
+  const locale = useLocale();
   // #66レビュー3巡目nit: 操作バー内の各ボタンへ個別に付ける
   // onMouseDownガード（コンテナ一括ではなくボタン単位にすることで、
   // ファイル名テキストのドラッグ選択を妨げないようにする）。
   const barContainerRef = useRef<HTMLDivElement>(null);
+  // #114: 情報クラスタの1行目（ファイル名）と2行目（撮影日 · 位置）。後半の実測幅を CSS 変数へ渡す。
+  const nameRowRef = useRef<HTMLElement>(null);
+  const metaRowRef = useRef<HTMLElement>(null);
   const guardButtonMouseDown = useMemo(() => createButtonFocusGuard(barContainerRef), []);
 
   // #66レビューshould: App.tsxのグローバルESCハンドラが「…」メニュー（または
@@ -350,14 +357,6 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
     }
   };
 
-  const formatDateShort = (dateTimeString: string | null): string => {
-    if (!dateTimeString) return '';
-    // EXIF DateTimeは "YYYY:MM:DD HH:MM:SS" 形式。コンパクトなバーでは日付だけ
-    // 見せる（時刻はファイル名のtitleツールチップに残す）。
-    const datePart = dateTimeString.split(' ')[0];
-    return datePart ? datePart.replace(/:/g, '-') : '';
-  };
-
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -374,7 +373,15 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   const hasGps =
     image?.exif != null && image.exif.gpsLatitude !== null && image.exif.gpsLongitude !== null;
 
-  const dateShort = image?.exif?.dateTime ? formatDateShort(image.exif.dateTime) : '';
+  // #114: 撮影日はロケール整形する（ja「2023年8月15日 12:34」/ en「Aug 15, 2023, 12:34 PM」）。
+  // 解釈できない値は空文字で、日付は出さない。
+  const capturedDate = formatCapturedDate(image?.exif?.dateTime, locale);
+  // #114: ファイル名は前半だけが縮み、拡張子と末尾数文字は常に見える（中間省略）。
+  const fileNameParts = splitFileName(fileName);
+  const fileNameRtl = isRtlName(fileName);
+  const positionText = `${currentPosition.toLocaleString()} / ${totalImages.toLocaleString()}`;
+  useFixedWidthVar(nameRowRef, [fileNameParts.tail]);
+  useFixedWidthVar(metaRowRef, [capturedDate, positionText]);
 
   const tileUrl = useMemo(() => {
     if (!hasGps || !image?.exif?.gpsLatitude || !image?.exif?.gpsLongitude) return null;
@@ -437,6 +444,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   // ここでの主目的はホバー時の確認用）。
   const infoTooltip = [
     image.path,
+    capturedDate || null,
     formatFileSize(image.fileSize),
     t('displayCountTooltip', { count: image.displayCount }),
     image.lastDisplayed ? t('lastDisplayedTooltip', { when: image.lastDisplayed }) : null,
@@ -457,10 +465,10 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
           「今フェードして隠すべきか」のboolean一つだけを見るヘルパーなので、
           バーとは別の条件（isIdle && !isPausedByUser）を渡して使い回す）。 */}
       <div
-        className={`fixed bottom-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden z-40 ${idleFadeClassName(isIdle && !isPausedByUser)}`}
+        className={`fixed bottom-0 left-0 right-0 h-0.5 bg-black/75 overflow-hidden z-40 ${idleFadeClassName(isIdle && !isPausedByUser)}`}
       >
         <div
-          className="h-full w-full bg-white/50 origin-left"
+          className="h-full w-full bg-white/80 origin-left"
           style={{
             transform: `scaleX(${Math.max(0, Math.min(100, progress)) / 100})`,
             transition:
@@ -509,11 +517,11 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
             影響を受けず、キーボード操作は従来通り機能する。 */}
         <div
           ref={barContainerRef}
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-xl"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-[max(36rem,40vw)]"
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
         >
-          <div className="flex items-center gap-1 bg-black/50 backdrop-blur-md rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl">
+          <div className="flex items-center gap-1 bg-black/75 backdrop-blur-md rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl">
             {/* 左: 情報クラスタ（GPSサムネ[任意] + ファイル名 · 撮影日 · 位置n/N） */}
             <div className="flex items-center gap-2 min-w-0 flex-1">
               {hasGps && (
@@ -540,20 +548,61 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                 </button>
               )}
 
+              {/* #114: 2行構成。1行目=ファイル名（情報クラスタの全幅を使い、縮む時は前半が
+                  先に `…` で省略され、拡張子と末尾数文字は残る）、2行目=撮影日 · 位置 n/N。
+                  以前は1行に並べ、日付と位置が `shrink-0` でファイル名だけが縮んだため、
+                  日付+地図があるとファイル名の表示幅が 0 になった。2行目のうち縮むのは
+                  撮影日だけ（位置は `shrink-0`）。2行の高さ(32px)は操作ボタンの高さ(36px)
+                  以下なのでバーは高くならない。 */}
               <div
-                className="min-w-0 flex-1 flex items-baseline gap-1.5 text-xs"
+                className="select-text min-w-0 flex-1 flex flex-col text-xs leading-4"
                 title={infoTooltip}
               >
-                <span className="text-white/75 truncate min-w-0">{fileName}</span>
-                {dateShort && (
-                  <>
-                    <span className="text-white/20 shrink-0">·</span>
-                    <span className="text-white/50 font-mono shrink-0">{dateShort}</span>
-                  </>
-                )}
-                <span className="text-white/20 shrink-0">·</span>
-                <span className="text-white/50 font-mono shrink-0 tabular-nums">
-                  {currentPosition.toLocaleString()} / {totalImages.toLocaleString()}
+                {/* 1行目: ファイル名。flex を使わずインラインで組む（flex の子はブロック化されて
+                    選択・コピーに改行が入る）。前半=inline-block で縮み `…` で省略、後半=インライン
+                    （拡張子+末尾数文字）。見た目用の2要素は aria-hidden で、全文は aria-label が担う。 */}
+                <span
+                  ref={nameRowRef}
+                  data-overlay="filename"
+                  role="group"
+                  aria-label={fileName}
+                  className="block min-w-0 overflow-hidden whitespace-nowrap text-white/75"
+                >
+                  <span
+                    aria-hidden="true"
+                    dir={fileNameRtl ? 'auto' : undefined}
+                    className="inline-block align-bottom overflow-hidden text-ellipsis whitespace-pre"
+                    style={{ maxWidth: 'calc(100% - var(--fw, 0px))' }}
+                  >
+                    {fileNameParts.head}
+                  </span>
+                  {fileNameParts.tail && (
+                    <span data-fixed aria-hidden="true" className="whitespace-pre">
+                      {fileNameParts.tail}
+                    </span>
+                  )}
+                </span>
+                {/* 2行目: 撮影日 · 位置。同じくインライン。縮むのは撮影日だけで、区切りと位置は
+                    後半（data-fixed）として縮まない。 */}
+                <span
+                  ref={metaRowRef}
+                  className="block min-w-0 overflow-hidden whitespace-nowrap text-white/60"
+                >
+                  {capturedDate && (
+                    <span
+                      data-overlay="date"
+                      className="inline-block align-bottom overflow-hidden text-ellipsis tabular-nums text-white/60"
+                      style={{ maxWidth: 'calc(100% - var(--fw, 0px))' }}
+                    >
+                      {capturedDate}
+                    </span>
+                  )}
+                  <span data-fixed className="whitespace-pre">
+                    {capturedDate && <span className="text-white/20">{' · '}</span>}
+                    <span data-overlay="position" className="text-white/60 tabular-nums">
+                      {positionText}
+                    </span>
+                  </span>
                 </span>
               </div>
             </div>
