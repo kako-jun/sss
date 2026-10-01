@@ -162,6 +162,7 @@
 - 設定モーダル・ショートカット一覧はどちらも `role="dialog"` `aria-modal="true"`
   を持ち、開くとモーダル内へフォーカストラップする（`Tab`/`Shift+Tab`でモーダルの
   外（背後の写真オーバーレイ等）へフォーカスが漏れない。閉じると元の要素へ戻す）
+- 確認が要る操作（データ初期化（「すべてのデータを初期化」）・表示回数リセット・ピック削除）は `window.confirm` ではなくアプリ内の確認モーダル `ConfirmDialogHost`（`src/components/ConfirmDialog.tsx`、App 直下に1つ）を `await confirmDialog({ message, confirmLabel })`（`src/lib/confirmDialog.ts`）で開く。`role="alertdialog"` `aria-modal="true"` `aria-describedby`（本文）、`useFocusTrap`、既定フォーカスはキャンセル、ESC・背景クリック=キャンセル（ESC は window の capture で先取りし、設定を閉じる/`exit_app` を呼ぶ App のグローバル ESC に届かせない）。表示中は他のショートカットも無効。本文は `\n\n` 区切りで最終段落（「この操作は取り消せません」等）をスクロール外に固定し、あふれる本文は ↑↓/PageUp/PageDown/Home/End でスクロールできる（tabIndex を付けるとフォーカス順でキャンセルの既定フォーカスを奪うためキーハンドラ方式）。Host 未マウント時は false（キャンセル）で解決する。破壊ボタンは赤系（DESIGN.md）。**`window.confirm`/`alert`/`prompt` は使用禁止**（#119。下記セキュリティ設計参照。eslint `no-restricted-globals`/`no-restricted-properties` と `src/test/noNativeDialogs.test.ts` の走査で担保。テスト環境の `window.confirm` は `src/test/setup.ts` で Tauri 実機と同じ Promise 版に差し替えている）
 - 設定タブは `role="tablist"`/`role="tab"`/`aria-selected` を持ち、ロービング
   tabIndexと矢印キー（←/→/Home/End）でのタブ間移動に対応する
 - キーボード操作時のフォーカスリング（`:focus-visible`）は白60%不透明度・2px
@@ -526,6 +527,10 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 - ファイル情報表示
 - 操作ボタン（前へ・⏸/▶・次へ・ピック・「…」メニュー）
 
+### src/components/ConfirmDialog.tsx
+
+アプリ内確認モーダル `ConfirmDialogHost`（#119）。状態は `src/lib/confirmDialog.ts` のストア（`confirmDialog()` → Promise<boolean>）を `useSyncExternalStore` で購読し、`document.body` へ portal（設定モーダルの transform 祖先の影響を受けない）。詳細は「アクセシビリティ」。
+
 ### src/components/ShortcutsOverlay.tsx
 
 - キーボードショートカット一覧モーダル（`?` または右上のボタン）
@@ -580,6 +585,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 - **CSP**（`tauri.conf.json`）: `default-src 'self'`。`img-src` は `'self' asset: https://asset.localhost https://tile.openstreetmap.org data:`、`media-src` は `'self' asset: https://asset.localhost`、`connect-src` は `'self' ipc: http://ipc.localhost https://ipc.localhost`
 - **asset scope**: `tauri.conf.json` の静的 scope は空。キャッシュ・ピック先・スキャン履歴のフォルダ・スキャン対象を、起動時と `select_and_scan`/`rescan_last_directory`/`restore_playlist`/`select_share_directory`/`pick_image` で `sanitize_allow_dir`（相対パス・存在しないパス・ルート等を拒否）を通してから動的に許可する
 - **管理下パス**（#87・#92）: `pick_image`・`get_thumbnail`（静止画）・`open_in_explorer`・`exclude_image`・`undo_exclude` は、DB登録済み（またはピック先フォルダ内）のメディアファイルだけを対象にする。ピック先の設定値もルート・ホーム・システム領域などを拒否する
+- **`window.confirm`/`alert`/`prompt` 禁止**（#119）: `tauri_plugin_dialog::init()` は WebView の `window.confirm/alert/prompt` を `plugin:dialog|*` を呼ぶ非同期（Promise）版に差し替える。dialog 権限を付与しない（#93）ので呼び出しは reject されるが、Promise は常に truthy で `if (!confirm(..))` が素通りし、確認なしで `reset_all_data` が走る事故があった（Tauri debug + WebKitGTK で再現）。確認は `confirmDialog()`（アプリ内モーダル）、エラー通知は画面内の通知（`role="alert"`）で行う。`tauri-plugin-dialog` 自体は Rust 側のフォルダ選択（`select_and_scan` 等）に必須なので残す（差し替えの副作用は上記禁止で封じる）
 - **フォルダ選択はダイアログ経由のみ**（#93）: スキャン対象・ピック先は、Rust 側で開いたダイアログ（`select_and_scan`/`select_share_directory`）で選ばれたパスか、過去にそうして DB に保存されたパス（`rescan_last_directory`/`restore_playlist`。引数なし）だけになる。JS から任意のパス文字列を受け取ってスキャン・asset scope 許可・ピック先にする経路は無い（旧 `scan_directory(directoryPath)` は廃止）。`save_setting` は書き込み許可リスト方式で、DB 保存値（`last_directory_path`/`share_directory_path`）の WebView からの書き換えも塞ぐ。ダイアログ抽象（`DirectoryPicker`）はテスト・e2e の IPC モックで差し替える
 - **脅威モデル**: 防ぐのは、WebView（乗っ取られた場合を含む）から任意パスを渡して、任意ファイルを読む/コピーする/存在確認する、任意フォルダをスキャン・管理下にする・ピック先にする操作（#87・#92・#93）。**残余リスク**: (1) WebView が IPC で `select_and_scan`/`select_share_directory` を呼ぶこと自体は止められない（ネイティブダイアログが開く＝ユーザーに見える操作で、対象はユーザーがダイアログで選んだフォルダだけ。ダイアログを勝手に確定する手段は WebView に無いが、ユーザーを騙してダイアログで選ばせる社会工学は防げない）。(2) ダイアログで選ばれたフォルダは、スキャン対象ならホームドライブのルート以外（`sanitize_allow_dir`）、ピック先ならルート・ホーム・システム領域等以外（`is_acceptable_share_directory`）であればそのまま許可する（allowlist は外付け/NAS を壊すため採らない）。(3) `get_setting` は任意キーを読める（機密は保存していない）。WebView が `select_and_scan` を連打してもダイアログの二重表示はフラグで弾く（`dialogInProgress`）が、閉じるたびに次のダイアログを出し続けることはでき、ユーザーが閉じれば止まる（ダイアログの連続表示）。ダイアログ表示前にスキャン実行中なら `scanInProgress` で弾く（ガードはダイアログを閉じた時点で解放し、スキャン中の二重実行は `ScanGuard` が弾く）。`reset_all_data` はダイアログ表示中でもブロックされないが、選択後に初期化済みの状態へスキャンが入るだけでデータは壊れないので許容する。(4) OS 権限で動く本体プロセスが侵害された場合は対象外。詳細は「Rustモジュール構成 > commands」の 1・11・12・28・29 と CHANGELOG の #87・#92・#93
 

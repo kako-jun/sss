@@ -17,6 +17,9 @@ export const ja = {
   windowModeToggleFailed: 'ウィンドウモードを切り替えられませんでした',
   genericErrorTitle: 'エラーが発生しました',
   closeTooltip: '閉じる',
+  cancelButton: 'キャンセル',
+  confirmDialogTitle: '確認',
+  confirmDialogMoreHint: '矢印キーで続きを表示',
 
   // === キーボードショートカット一覧（#66） ===
   shortcutsButtonTooltip: 'ショートカット一覧 (?)',

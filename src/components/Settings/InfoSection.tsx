@@ -3,6 +3,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { getVersion } from '@tauri-apps/api/app';
 import { useState, useEffect } from 'react';
 import { resetAllData } from '../../lib/tauri';
+import { confirmDialog } from '../../lib/confirmDialog';
 import { useT, resolveResetAllDataErrorMessage } from '../../lib/i18n';
 
 // #82レビューshould1: 確定済みの文言でなく状態種別＋生のエラーコードを保持し、
@@ -40,7 +41,11 @@ export function InfoSection() {
   };
 
   const handleResetSettings = async () => {
-    if (!confirm(t('confirmResetAllData'))) {
+    const ok = await confirmDialog({
+      message: t('confirmResetAllData'),
+      confirmLabel: t('resetSettingsButton'),
+    });
+    if (!ok) {
       return;
     }
 
