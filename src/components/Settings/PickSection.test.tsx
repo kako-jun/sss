@@ -48,23 +48,28 @@ describe('PickSection thumbnails (#67)', () => {
   });
 
   it('requests no thumbnail while every picked item is outside the viewport', async () => {
+    // #108: observe() は描画後の effect で呼ばれる。呼び出しを待ってから検証し、unmount してからスタブを戻す。
+    const observed: unknown[] = [];
     class NeverVisibleObserver {
-      observe() {}
+      observe(el: unknown) {
+        observed.push(el);
+      }
       disconnect() {}
     }
     vi.stubGlobal('IntersectionObserver', NeverVisibleObserver);
-    getPickedImages.mockResolvedValue(['/pick/a.jpg', '/pick/b.jpg']);
+    const picked = ['/pick/a.jpg', '/pick/b.jpg'];
+    getPickedImages.mockResolvedValue(picked);
 
-    render(
-      <>
-        <PickSection />
-        <ConfirmDialogHost />
-      </>,
-    );
-    await waitFor(() => expect(screen.getAllByTitle('削除').length).toBe(2));
+    const { unmount } = render(<PickSection />);
+    try {
+      await waitFor(() => expect(screen.getAllByTitle('削除').length).toBe(picked.length));
+      await waitFor(() => expect(observed.length).toBe(picked.length));
 
-    expect(getThumbnail).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
+      expect(getThumbnail).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('shows the empty message and requests no thumbnail when nothing is picked', async () => {

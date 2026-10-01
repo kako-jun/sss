@@ -224,6 +224,8 @@ describe('ConfirmDialogHost (#119)', () => {
     Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 100 });
     fireEvent.scroll(scroller);
     expect(screen.getByText('矢印キーで続きを表示')).toBeTruthy();
+    // ヒントはスクロール領域の外（独立した行）にある
+    expect(screen.getByTestId('confirm-dialog-hint').closest('.overflow-y-auto')).toBeNull();
     fireEvent.keyDown(screen.getByText('キャンセル'), { key: 'End' });
     expect(screen.queryByText('矢印キーで続きを表示')).toBeNull();
     fireEvent.click(screen.getByText('キャンセル'));

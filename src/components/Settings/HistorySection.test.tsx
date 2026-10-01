@@ -97,18 +97,27 @@ describe('HistorySection thumbnails (#67)', () => {
   });
 
   it('requests no thumbnail while every item is outside the viewport', async () => {
+    // #108: observe() は描画後の effect で呼ばれる。呼び出しを待ってから検証し、unmount してからスタブを戻す。
+    const observed: unknown[] = [];
     class NeverVisibleObserver {
-      observe() {}
+      observe(el: unknown) {
+        observed.push(el);
+      }
       disconnect() {}
     }
     vi.stubGlobal('IntersectionObserver', NeverVisibleObserver);
     getRecentImages.mockResolvedValue(images);
 
-    render(<HistorySection />);
-    await waitFor(() => expect(screen.getAllByTitle('除外').length).toBe(2));
+    const { unmount } = render(<HistorySection />);
+    try {
+      await waitFor(() => expect(screen.getAllByTitle('除外').length).toBe(images.length));
+      await waitFor(() => expect(observed.length).toBe(images.length));
 
-    expect(getThumbnail).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
+      expect(getThumbnail).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('shows the display count over each thumbnail', async () => {

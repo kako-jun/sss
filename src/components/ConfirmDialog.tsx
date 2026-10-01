@@ -46,6 +46,8 @@ function ConfirmDialogView() {
   const messageRef = useRef<HTMLDivElement>(null);
   // 本文がスクロール領域からあふれていて、まだ下に続きがあるか（フェードの手がかり用）。
   const [moreBelow, setMoreBelow] = useState(false);
+  // 本文がスクロール領域からあふれているか（ヒント行の高さを確保するか）。
+  const [overflowing, setOverflowing] = useState(false);
   // 既定フォーカス: useFocusTrap が開いた直後（rAF）に最初のフォーカス可能要素へ移す。
   // キャンセルを DOM 上の先頭ボタンにしているので、既定でキャンセルにフォーカスが当たる
   // （ボタンの並びを変える時はこの前提と ConfirmDialog.test.tsx を合わせること）。
@@ -98,6 +100,7 @@ function ConfirmDialogView() {
     const el = messageRef.current;
     if (!el) return;
     setMoreBelow(el.scrollHeight - el.scrollTop - el.clientHeight > 2);
+    setOverflowing(el.scrollHeight > el.clientHeight);
   };
   useEffect(() => {
     updateMoreBelow();
@@ -132,7 +135,7 @@ function ConfirmDialogView() {
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-message"
         tabIndex={-1}
-        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 max-w-md w-full mx-8 border border-white/10 !outline-none flex flex-col max-h-[calc(100vh-2rem)]"
+        className="bg-neutral-950 rounded-2xl shadow-2xl p-7 [@media(max-height:420px)]:p-4 max-w-md w-full mx-8 border border-white/10 !outline-none flex flex-col max-h-[calc(100vh-2rem)]"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
@@ -157,32 +160,36 @@ function ConfirmDialogView() {
             </div>
             {/* 続きが下にあるときだけ出す、本文下端のフェード（「まだ読み切っていない」手がかり）。 */}
             {moreBelow && (
-              <>
-                <div
-                  data-testid="confirm-dialog-more"
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-neutral-950 via-neutral-950/80 to-transparent"
-                />
-                {/* スクロールの手がかり（読み上げにも含める）。 */}
-                <span className="pointer-events-none absolute bottom-0 right-0 text-xs text-white/50">
-                  {t('confirmDialogMoreHint')}
-                </span>
-              </>
+              <div
+                data-testid="confirm-dialog-more"
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-neutral-950 via-neutral-950/80 to-transparent"
+              />
             )}
           </div>
+          {/* スクロールの手がかり。フェードや本文と重ならないよう、スクロール領域の下の独立した行にする
+              （あふれている間は高さを確保し、出し入れで本文がガタつかない。読み上げにも含める）。 */}
+          {overflowing && (
+            <div
+              data-testid="confirm-dialog-hint"
+              className="shrink-0 mt-1 text-right text-xs leading-4 text-white/50"
+            >
+              {moreBelow ? t('confirmDialogMoreHint') : '\u00a0'}
+            </div>
+          )}
           {finalParagraph !== null && (
             <>
               {'\n\n'}
               <p
                 data-testid="confirm-dialog-final"
-                className="mt-4 shrink-0 text-sm text-white/70 whitespace-pre-line leading-relaxed"
+                className="mt-4 [@media(max-height:420px)]:mt-2 shrink-0 text-sm text-white/70 whitespace-pre-line leading-relaxed"
               >
                 {finalParagraph}
               </p>
             </>
           )}
         </div>
-        <div className="mt-6 shrink-0 flex justify-end gap-3">
+        <div className="mt-6 [@media(max-height:420px)]:mt-3 shrink-0 flex justify-end gap-3">
           <button
             type="button"
             onClick={() => settleConfirmDialog(false)}

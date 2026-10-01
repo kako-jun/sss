@@ -283,14 +283,17 @@ Long bodies: the panel is `flex flex-col max-h-[calc(100vh-2rem)]`. The message 
 split on `\n\n`; the **last paragraph is pinned outside the scroll area, right
 above the button row** (`shrink-0`) so the destructive warning ("This cannot be
 undone…") is always readable without scrolling, even on a 360x300 window. Only
-the earlier paragraphs scroll (`min-h-0 overflow-y-auto`), with a stronger bottom
-fade (`h-14 from-neutral-950 via-neutral-950/80 to-transparent`) shown only while
-more text is hidden, plus a quiet `text-xs text-white/50` hint at its bottom-right
-("矢印キーで続きを表示" / "Arrow keys: scroll for more"; text, no icon or emoji,
-and part of the accessible text so screen-reader users hear it too). On very
-short windows (360x300) only 1–2 lines of the body are visible; that is accepted
-because the warning and buttons are pinned and the fade + hint + key scrolling
-make the rest reachable. A single-paragraph message is all scroll area (no pinned part).
+the earlier paragraphs scroll (`min-h-0 overflow-y-auto`), with a bottom fade
+(`h-8 from-neutral-950 via-neutral-950/80 to-transparent`) shown only while more
+text is hidden. The scroll hint (`text-xs text-white/50`, right-aligned,
+"矢印キーで続きを表示" / "Arrow keys: scroll for more"; text only, no icon or
+emoji, part of the accessible text) is its **own row below the scroll area**
+(`shrink-0`), never overlapping the fade or the text; the row's height is reserved
+while the body overflows (text swaps for a blank), so nothing jumps when it
+appears or disappears. On windows shorter than 420px the panel padding and the
+gaps tighten (`[@media(max-height:420px)]`) to leave more body lines; even at
+360x300 the warning and buttons stay pinned and visible. A single-paragraph
+message is all scroll area (no pinned part).
 
 Keyboard access to the scrolling body: **key handler, not `tabIndex=0`.** While the
 body overflows, ↑/↓ (24px), PageUp/PageDown, Home/End on the dialog scroll it;

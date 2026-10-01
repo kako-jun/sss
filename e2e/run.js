@@ -322,7 +322,20 @@ async function confirmResetScenario(page, lang, kind = 'info') {
         const d = document.querySelector('[role="alertdialog"]');
         const btns = [...d.querySelectorAll('button')];
         const final = d.querySelector('[data-testid="confirm-dialog-final"]');
+        // ヒント行（「矢印キーで続きを表示」）が本文スクロール領域・最終段落・ボタンと矩形交差しないこと。
+        const hint = d.querySelector('[data-testid="confirm-dialog-hint"]');
+        const scroller = d.querySelector('.overflow-y-auto');
+        const hit = (a, b) => {
+          const p = a.getBoundingClientRect();
+          const q = b.getBoundingClientRect();
+          return p.left < q.right && p.right > q.left && p.top < q.bottom && p.bottom > q.top;
+        };
+        const hintOverlaps = hint
+          ? [scroller, final, ...btns].filter(Boolean).some((el) => hit(hint, el))
+          : false;
         return {
+          hintOverlaps,
+          hintShown: hint ? hint.textContent.trim() !== '' : false,
           final: final ? inView(final) : 'none',
           buttons: btns.every(inView),
           panel: inView(d),
@@ -333,7 +346,14 @@ async function confirmResetScenario(page, lang, kind = 'info') {
         };
       });
       fits.push(`${w}x${h}:${JSON.stringify(fit)}`);
-      if (!fit.buttons || fit.final === false || !fit.panel || !fit.cancelLeftOfOk) fitOk = false;
+      if (
+        !fit.buttons ||
+        fit.final === false ||
+        !fit.panel ||
+        !fit.cancelLeftOfOk ||
+        fit.hintOverlaps
+      )
+        fitOk = false;
     }
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.waitForTimeout(200);
