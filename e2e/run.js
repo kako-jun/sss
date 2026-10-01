@@ -172,6 +172,14 @@ async function countCalls(page, cmd) {
 }
 
 /** 設定ボタン（lucideのgearアイコン、ロケール非依存）をクリックして開く。#66用。 */
+/** リサイズ後のレイアウト確定を待つ（リサイズ→再描画の2フレーム + 余裕）。固定 sleep の代わり。 */
+async function settleLayout(page) {
+  await page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+  );
+  await page.waitForTimeout(100);
+}
+
 async function openSettingsModal(page) {
   await page.evaluate(() => {
     const icon = document.querySelector('svg.lucide-settings');
@@ -179,7 +187,25 @@ async function openSettingsModal(page) {
     if (!btn) throw new Error('設定ボタンが見つからない');
     btn.click();
   });
-  await page.waitForTimeout(350);
+  // #124: 固定 350ms 待ちだと、負荷で開閉アニメーション中（タブ行がまだ描画前、または座標が
+  // 移動中）の値を測って揺れる。タブが現れ、モーダルの位置が連続 5 回（約 100ms）変わらなく
+  // なる（アニメーション完了）まで条件待ちする。
+  await page.waitForSelector('[role="tab"]', { timeout: 8000 });
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('[role="tab"]');
+      const y = el ? el.getBoundingClientRect().top : null;
+      const st = (window.__settingsOpenSettle ??= { y: null, n: 0 });
+      st.n = y !== null && y === st.y ? st.n + 1 : 0;
+      st.y = y;
+      return st.n >= 5;
+    },
+    null,
+    { polling: 20, timeout: 8000 },
+  );
+  await page.evaluate(() => {
+    delete window.__settingsOpenSettle;
+  });
 }
 
 /**
@@ -2704,10 +2730,17 @@ const scenarios = [
       await page.mouse.move(640, 300);
       await page.waitForTimeout(400);
       const nextBefore = await countCalls(page, 'get_next_image');
-      await page.mouse.wheel(0, 100);
-      await page.waitForTimeout(50);
-      await page.mouse.wheel(0, 100);
-      await page.mouse.wheel(0, 100);
+      // 連続イベントは1回に畳まれる。実ホイールを間隔50msで送ると、負荷で到達が遅れ
+      // e.timeStamp の差が畳み込み窓を超えて2回に割れる（#124）ため、同一フレーム内に3発を
+      // ページ内から発火して「連続」を決定的にする（実ホイール経路は下の「上=前へ」で検証）。
+      await page.evaluate(() => {
+        const target = document.elementFromPoint(640, 300);
+        for (let i = 0; i < 3; i++) {
+          target.dispatchEvent(
+            new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }),
+          );
+        }
+      });
       await page.waitForTimeout(300);
       const nextAfter = await countCalls(page, 'get_next_image');
 
@@ -3211,20 +3244,8 @@ async function measureSettingsTablistHeights(page) {
  */
 async function measureSettingsTabRowAtWidths(page) {
   await page.waitForTimeout(300);
-  await page.evaluate(() => {
-    // 設定ボタンはlucide-reactの<Settings>アイコン（App.tsx: `Settings as
-    // SettingsIcon`）を持つ唯一のボタン。titleはロケール依存な上、window
-    // モード切替ボタンのtitle（switchToWindowMode等）はja訳だと「ウィンドウ」が
-    // 全角カタカナでASCII "window" を含まないため、title文字列での除外法は
-    // ja/enで挙動が変わり得た（実際にja側で誤ってwindowモード切替ボタンを
-    // クリックしていた）。lucide-reactは`createLucideIcon`でアイコン名から
-    // 機械的に`lucide-settings`等のクラス名を付与するため、ロケールに左右
-    // されないこちらで直接選ぶ。
-    const icon = document.querySelector('svg.lucide-settings');
-    const settingsBtn = icon && icon.closest('button');
-    settingsBtn && settingsBtn.click();
-  });
-  await page.waitForTimeout(400);
+  // #124: 固定 400ms 待ちだと負荷でモーダルが開く前に測って count=0 になるため、条件待ちの共通ヘルパを使う。
+  await openSettingsModal(page);
 
   // #82レビュー3巡目nit: タブ行はoverflow-x-autoでクリップされるため、既定の
   // フォーカスリング（要素の外側にはみ出す）だと上下端が欠けて見える。
@@ -3266,13 +3287,13 @@ async function measureSettingsTabRowAtWidths(page) {
 
   const at1280 = await measure();
   await page.setViewportSize({ width: 720, height: 800 });
-  await page.waitForTimeout(100);
+  await settleLayout(page);
   const at720 = await measure();
   // 3巡目nit: 720/1280が「たまたま横スクロール無しでも全部1行に収まっている」
   // ことの確認に加え、overflow-x-auto自体が壊れて常時スクロール不可になって
   // いないかも極端に狭い幅（320）で確認する。
   await page.setViewportSize({ width: 320, height: 800 });
-  await page.waitForTimeout(100);
+  await settleLayout(page);
   const atNarrow = await measure();
 
   const pass =
@@ -3335,7 +3356,7 @@ async function main() {
       throw err;
     }
 
-    const browser = await launchSystemBrowser();
+    let browser = await launchSystemBrowser();
     const results = [];
     try {
       // E2E_ONLY='(#68)' のようにカンマ区切りの部分文字列を指定すると、名前が一致するシナリオだけ実行する
@@ -3348,18 +3369,36 @@ async function main() {
         // 明示指定が無い既存シナリオは 'ja-JP' に固定してロケール解決を決定的にする
         // （app_settings.language 未設定→'auto'→navigator.languageの経路）。
         // 英語ロケールを検証するシナリオは `locale: 'en-US'` を個別に指定する。
-        const page = await browser.newPage({
-          viewport: scenario.viewport || { width: 1280, height: 800 },
-          locale: scenario.locale || 'ja-JP',
-        });
-        await page.addInitScript({ path: INIT_SCRIPT });
+        // #124: 高負荷・メモリ逼迫でブラウザプロセス自体が落ちる（`Target page, context or
+        // browser has been closed`）ことがあり、1つの browser を使い回していると以後の全シナリオが
+        // 巻き添えになる。ページ作成に失敗したら（またはブラウザが切断されていたら）起動し直して
+        // 1回だけ再試行する（シナリオ自体の FAIL は再試行しない）。
         const consoleErrors = [];
-        page.on('console', (m) => {
-          if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
-        });
-        // #120: goto 前に仕込みが要るシナリオ（応答しないリクエスト等）用。
-        if (scenario.setup) await scenario.setup(page);
-        await page.goto(`${BASE_URL}/#${scenario.hash}`);
+        const openPage = async () => {
+          const pg = await browser.newPage({
+            viewport: scenario.viewport || { width: 1280, height: 800 },
+            locale: scenario.locale || 'ja-JP',
+          });
+          await pg.addInitScript({ path: INIT_SCRIPT });
+          pg.on('console', (m) => {
+            if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
+          });
+          // #120: goto 前に仕込みが要るシナリオ（応答しないリクエスト等）用。
+          if (scenario.setup) await scenario.setup(pg);
+          await pg.goto(`${BASE_URL}/#${scenario.hash}`);
+          return pg;
+        };
+        let page;
+        try {
+          if (!browser.isConnected()) throw new Error('browser disconnected');
+          page = await openPage();
+        } catch (err) {
+          console.warn(`[e2e] ブラウザを再起動して再試行: ${err.message}`);
+          await browser.close().catch(() => {});
+          browser = await launchSystemBrowser();
+          consoleErrors.length = 0;
+          page = await openPage();
+        }
         // #66: 複数ページを同じbrowserで使い回す中、直前のシナリオがフォーカス
         // トラップ（モーダルを開いてフォーカスを奪う）を使うと、後続シナリオの
         // page.keyboard.press()がOSレベルでは非アクティブな古いページに実際の
