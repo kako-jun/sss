@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScanSection } from './ScanSection';
 import { IntervalSection } from './IntervalSection';
 import { SettingsSection } from './SettingsSection';
@@ -72,6 +72,15 @@ export function Settings({
   // #66 問題9(a11y): 設定モーダルは role=dialog/aria-modal無し・フォーカストラップ
   // 無しだった（Tabで背後の写真オーバーレイへフォーカスが漏れる）。
   useFocusTrap(panelRef, isOpen, openedViaMouse);
+
+  // #109: 狭幅ではタブ行が横スクロールになる。クリックやプログラムからの選択でも
+  // 選択中のタブが見える位置までスクロールさせる（キーボード矢印はfocus()で既に追従）。
+  // block:'nearest' で縦方向（モーダル本体）はスクロールさせない。
+  useEffect(() => {
+    if (!isOpen) return;
+    const el = panelRef.current?.querySelector<HTMLElement>(`#tab-${activeTab}`);
+    el?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
+  }, [isOpen, activeTab]);
 
   if (!isOpen) return null;
 
@@ -167,12 +176,15 @@ export function Settings({
             フォーカスリングの上下端が切れないようにした（負のoffsetでリングを
             要素の内側に描画する）。
             #66 問題9(a11y): role=tablist/tab・aria-selected・ロービング
-            tabIndex・矢印キー移動を追加。 */}
+            tabIndex・矢印キー移動を追加。
+            #109: モーダル本体は flex-col で、overflow-x-auto の行は最小高が0に
+            なるため、タブ内容が長いと flex-shrink で行ごと潰れ（1280x800で
+            39→31px、800x600で21px）ラベル下部が切れた。shrink-0 で潰れを禁止する。 */}
         <div
           role="tablist"
           aria-label={t('settingsTabsLabel')}
           onKeyDown={handleTabRowKeyDown}
-          className="flex gap-1 mb-6 border-b border-white/8 overflow-x-auto"
+          className="flex gap-1 mb-6 border-b border-white/8 overflow-x-auto shrink-0"
         >
           {TAB_ORDER.map(({ id, labelKey }) => {
             const selected = activeTab === id;
