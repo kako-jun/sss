@@ -460,7 +460,7 @@ three flex clusters — info (truncating, `flex-1 min-w-0`) · primary transport
 controls (fixed) · secondary actions (fixed):
 
 ```
-Container: fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-xl
+Container: fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-[max(36rem,40vw)]
 Bar:       flex items-center gap-1 bg-black/75 backdrop-blur-md
            rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl
 ```
@@ -494,6 +494,50 @@ The progress hairline (#113) uses a `bg-black/75` track with a `bg-white/80` fil
 so the 2px line reads on white photos too (fill vs track 7:1, track vs a white
 photo 10:1; on a black photo the fill vs photo is 14:1). It was `bg-white/10` +
 `bg-white/50`, which measured 1.16:1 on a white photo.
+
+**Info cluster layout (#114)**: two lines, not one. Line 1 is the filename and takes
+the cluster's full width; line 2 is `captured date · position n/N`. The old single
+line had date and position at `shrink-0`, so only the filename could shrink and with
+date + map it was squeezed to 0 characters at 480x420 (20 at 800-3840). Shrink order
+is now: the date (`truncate min-w-0`) first, the filename head next; the position
+never shrinks. The filename is split into a head (`overflow-hidden text-ellipsis`,
+shrinks) and a tail (last 4 stem graphemes + extension, never shrinks; split on grapheme
+cluster boundaries so combining marks / ZWJ emoji are not cut; RTL names are not split),
+so a long name
+reads as `Family_Trip_Okinawa_Chur… 23_0.jpg` — a middle ellipsis that always shows
+the extension. The two lines are 32px tall, under the 36px buttons, so the bar does
+not grow. **Selection and copy must give the exact filename (#116)**. The two halves are plain
+inline content, not flex items: a flex/grid child is blockified and the selection
+serialiser puts a newline between the halves (`head\ntail`). Each line is a
+`block overflow-hidden whitespace-nowrap` row; the head is
+`inline-block; max-width: calc(100% - var(--fw))` and the tail (`data-fixed`) is
+inline, with `--fw` set from the tail's measured width by `useFixedWidthVar`
+(ResizeObserver). The separator `·` lives inside line 2 as inline text, so selecting
+the whole cluster never leaves a lone `·` line. The outer filename element carries
+`aria-label` with the full name and the visual halves are `aria-hidden`. Verified in a
+real browser for 10 kinds of names (dots, hidden file, Japanese, emoji, combining
+marks, Hebrew, no extension, 60+ chars) by range / drag / double- / triple-click /
+Ctrl+C. Rejected: a `copy` handler (drag `toString()` stays split) and an overlaid
+invisible full-text layer (selection highlight no longer matches the visible text).
+Japanese time uses a 2-digit hour (`00:30`) so the width does not jump with the hour.
+
+Known limits (RTL names, #114): (1) for a Hebrew/Arabic filename, dragging across the
+whole info cluster from its left edge to its right edge can leave the filename out of
+the selection and select only the date line (a bidi caret-mapping quirk); dragging or
+triple-clicking the filename itself, and Ctrl+C on it, give the exact name.
+(2) At 480px wide an overflowing RTL name can only be drag-selected up to its visible
+part; triple-click and Ctrl+C still give the whole name. (3) The few pixels between the
+`…` and the tail are intentional: the head box is as wide as the room left for it and
+the ellipsis lands on a character boundary, so the leftover (under one glyph) shows as a
+gap; shrinking the box to fit would break the layout of the tail or the copy-exact
+structure, so it is left as is.
+
+Measured visible filename characters for a 60-char name with date + map:
+0 → 33 at 480x420, 20 → 52 at 800/1280, 20 → 60 (whole name) at 1920/3840. The max
+width scales with the screen (`max-w-[max(36rem,40vw)]`: 576px up to 1440px wide,
+768px at 1920, 1536px at 4K). The captured date is locale-formatted (ja
+`2023年8月15日 12:34`, en `Aug 15, 2023, 12:34 PM`); colours (`text-white/75` and
+`/60`), the `bg-black/75` bar and `select-text` (#116) are unchanged.
 
 Progress no longer lives inside the bar. It's an independent full-width hairline
 at the very bottom edge of the screen (`fixed bottom-0 left-0 right-0 h-0.5`),
@@ -673,7 +717,7 @@ pt-[12vh]` rather than vertical centering (#66レビュー2巡目should2): with 
   and tab row pinned in place; only the bottom edge moves as content grows or
   shrinks. `76vh` (rather than `80vh`) leaves a roughly symmetric ~12vh margin
   at the bottom too
-- Floating control bar: `w-[calc(100%-2rem)] max-w-xl` (#66)
+- Floating control bar: `w-[calc(100%-2rem)] max-w-[max(36rem,40vw)]` (#66, #114: 576px minimum cap that grows to 40% of the screen, 1536px on 4K)
 - Icon sizes: `w-4 h-4` (16px) standard, `w-5 h-5` (20px) for the center
   play/pause emphasis
 

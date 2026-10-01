@@ -136,8 +136,9 @@
 
 1. **左: ファイル情報**（情報が無い項目は表示しない。#66）
    - 📍 GPS座標がある画像だけ、小さな地図サムネイル（クリックでGoogleマップ、EXIF: 緯度・経度）
-   - 📅 撮影日（EXIFにある画像だけ）
+   - 📅 撮影日（EXIFにある画像だけ）。**ロケール整形**（#114。ja「2023年8月15日 12:34」（24時間・時は2桁固定で `00:30`）/ en「Aug 15, 2023, 12:34 PM」。`src/lib/formatCapturedDate.ts`）。EXIF の日時はタイムゾーンを持たない壁時計の値なので、`Date` のパース/TZ 変換を通さず年月日時分を取り出して `Intl.DateTimeFormat`（`timeZone: 'UTC'` 固定）で整形する（実行環境の TZ で日付がずれない）。`Z`/`+09:00` が付いていても換算せず書かれたまま出す。時刻が無い・`00:00:00` なら日付だけ。解釈できない値（`0000:00:00 00:00:00`・`unknown`・存在しない日付）は何も出さない
    - 📁 ファイル名 · プレイリスト位置: 現在位置 / 総数（例: 1,234 / 100,000）
+   - **レイアウト（#114）**: 情報クラスタは2行。1行目=ファイル名（クラスタ全幅を使う）、2行目=撮影日 · 位置 n/N。縮む順は「ファイル名の前半（`…` で省略。拡張子と末尾4書記素は縮まない後半として常に残る=中間省略、`src/lib/fileNameParts.ts`）」より前に「撮影日（`…` で省略）」が縮み、区切りと位置は縮まない。分割は書記素クラスタ単位（`Intl.Segmenter`、無ければ結合文字・ZWJ・異体字・肌色・国旗を寄せるフォールバック）なので、結合文字や家族絵文字を head/tail の境で割らない。RTL（ヘブライ語・アラビア語）のファイル名は視覚順が逆転するので分割せず `dir="auto"` の通常の末尾省略。以前は1行に並べて日付・位置が `shrink-0` だったため、日付+地図があるとファイル名の幅が 0 になった（480x420 で 0 文字、800 以上でも 20 文字）。2行の高さ(32px)はボタン(36px)以下でバーは高くならない。バー幅は `max-w-[max(36rem,40vw)]`（576px 以上で画面幅の 40% まで広がり、4K では 1536px）。撮影日が狭幅で省略された時は title ツールチップに全文がある。各要素は `data-overlay="filename|date|position"`（e2e の計測用）。**選択・コピーで元のファイル名に完全一致させるため、各行は flex を使わずインラインで組む**（flex/grid の子はブロック化され、選択のシリアライズで `head\ntail` のように改行が入る=#116 の「ファイル名はコピー可」を壊す）。行は `block overflow-hidden whitespace-nowrap`、前半は `inline-block; max-width: calc(100% - var(--fw))`、後半は `data-fixed` のインライン要素で、`src/hooks/useFixedWidthVar.ts` が後半の実測幅（ResizeObserver で追従）を `--fw` に入れる。区切り点も2行目の中にインラインの `·` として持つので、クラスタ全体を選んでも独立行にならない。スクリーンリーダーにはファイル名の外側要素の `aria-label`（全文）が読まれ、見た目用の前半/後半は `aria-hidden`。検証は実ブラウザ e2e「overlay file name selects and copies as the exact file name」（10種のファイル名 × 要素全選択/ドラッグ/トリプルクリック/ダブルクリック/Ctrl+C=実クリップボード）。他の案（`copy` イベントで全文を差し込む・視覚非表示の全文要素を重ねる）は、ドラッグ選択の `getSelection().toString()` 自体は割れたまま/選択の見た目がずれるため採らなかった
    - 💾 ファイルサイズ・🔢 表示回数・🕒 最新表示（ISO 8601形式）は本文に出さず、ファイル名のtitleツールチップにまとめる
    - 動画の場合: EXIF情報なし、ファイル名・位置のみ表示
 
@@ -276,7 +277,7 @@
 - **バックエンドのユーザー向けエラー**: Rust側は文言でなくエラーコード（`Result<_, String>` のErrに `"directoryNotFound"` や `"invalidPattern:{detail}"` のようなコード文字列）を返す。フロントは `src/lib/i18n/errors.ts` の `resolveScanErrorMessage`/`resolveAddPatternErrorMessage`/`resolveResetAllDataErrorMessage`/`resolveStartupDirectoryError` でロケールに応じた文言へ変換する。ログ専用（`console.error`/`eprintln!`）の文言は英語のままでよく、コード化の対象外
 - **失敗は「空」や成功に見せない（#115）**: 設定画面の取得は `src/hooks/useAsyncLoad.ts`（`loading | error | ready`）で受け、reject は「読み込みに失敗しました」＋再試行（`SectionErrors.tsx` の `LoadError`）にする。「〜はありません」の空状態は `ready` かつ 0 件のときだけ。設定の保存は `src/hooks/useRollbackSave.ts`（書き込みを直列化し、失敗したら最後に保存できた値へ巻き戻す。通知は対象名つきでセクションに1つ。アンマウント後は `src/lib/failureNotice.ts` 経由で App の上部トースト）。起動シーケンスの失敗は `onStartupFailure` で App に伝え、前回フォルダの取得失敗は「ようこそ」にせず再試行できる案内画面にする。ピック失敗の原因は Rust の `pick::pick_io_error_code`（書き込み側: `pickPermissionDenied`/`pickDiskFull`/`pickDestinationMissing`、その他 `pickCopyFailed`）/`pick_source_error_code`（読み取り側: `pickSourceUnreadable`/`imageFileNotFound`）。どちらも `std::io::ErrorKind` のみで分類し、OS の生コードは見ない。**洗い出し表（修正した箇所と、意図的に console のみにした箇所の理由）は `docs/architecture.md` §6-(i) が正本**。新しく `invoke` を呼ぶ箇所を足すときは、失敗を利用者に見せるか、見せない理由を同表に足す
 - **確定文言を状態に持たない**: `App.tsx`の`directoryError`、`ScanSection`の`error`、`ExcludeRulesSection`の`addError`、`InfoSection`の`resetMessage`は、変換済みの表示文言でなく生のエラーコード/辞書キーを状態として保持し、レンダーのたびに現在のロケールへ解決する。`setState`時点で文言に固定すると、表示中に言語を切り替えたときに旧言語のまま固まる（新旧混在）
-- **日付は言語によらず常に `YYYY-MM-DD`**（ISO、スラッシュ不可）。数値の桁区切りは `toLocaleString()` など言語に応じて変えてよい
+- **日付は原則、言語によらず常に `YYYY-MM-DD`**（ISO、スラッシュ不可）。例外はオーバーレイの撮影日で、ロケールに応じた表記（ja「2023年8月15日 12:34」/ en「Aug 15, 2023, 12:34 PM」、#114）。数値の桁区切りは `toLocaleString()` など言語に応じて変えてよい
 - **ウィンドウタイトル・`<html lang>`・ダイアログtitle**もロケールに追従する（`App.tsx`のロケール変更effect、`selectAndScan()`/`selectShareDirectory()`が渡す`t('selectDirectoryDialogTitle')`/`t('selectShareDirectoryDialogTitle')`）
 
 ## データベーススキーマ

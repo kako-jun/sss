@@ -53,7 +53,8 @@ describe('user-select (#116)', () => {
     ['components/Settings/InfoSection.tsx', "t('versionLabel'"],
     ['components/Settings/GraphSection.tsx', '{meanText}'],
     ['components/Settings/GraphSection.tsx', 'displayStats.bins'],
-    ['components/OverlayUI.tsx', '{fileName}'],
+    ['components/OverlayUI.tsx', '{fileNameParts.head}'],
+    ['components/OverlayUI.tsx', '{capturedDate}'],
     ['App.tsx', '{directoryErrorMessage}'],
   ];
 

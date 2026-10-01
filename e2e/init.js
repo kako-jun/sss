@@ -160,6 +160,9 @@
     vidresume: ['/p/v.webm', '/p/a.png', '/p/b.png'],
     // #113: 背景写真の明るさを変えてオーバーレイのコントラストを測る（`#bg?kind=...`）。
     bg: ['/p/bg.png'],
+    // #114: 操作バーの情報クラスタ（ファイル名・撮影日・位置・地図）の検証。
+    // `#bar?name=<ファイル名>&date=<EXIF日時>&gps=1&pos=<現在位置>&total=<総数>`。
+    bar: ['/p/' + (hashParams.get('name') || 'IMG_0001.jpg')],
   };
 
   // #68: シナリオごとの保存済み設定の初期値。'vidset' だけは save_setting の結果を
@@ -210,6 +213,7 @@
   }
   media['/p/v2.webm'] = media['/p/v.webm'];
   if (sc === 'bg') media['/p/bg.png'] = makeBg(hashParams.get('kind') || 'white');
+  if (sc === 'bar') media[seqs.bar[0]] = media['/p/a.png'];
 
   let idx = -1;
   let cb = 0;
@@ -225,13 +229,29 @@
     lastDisplayed: null,
   });
   // #113: 'bg' は撮影日つきの EXIF を返し、バーの日付表示（2024-05-01）も測れるようにする。
-  const infoWithExif = (p) =>
-    sc === 'bg'
-      ? {
-          ...info(p),
-          exif: { dateTime: '2024:05:01 12:00:00', gpsLatitude: null, gpsLongitude: null },
-        }
-      : info(p);
+  const infoWithExif = (p) => {
+    if (sc === 'bg') {
+      return {
+        ...info(p),
+        exif: { dateTime: '2024:05:01 12:00:00', gpsLatitude: null, gpsLongitude: null },
+      };
+    }
+    if (sc === 'bar') {
+      // #114: date / gps が指定された時だけ EXIF を付ける（無ければ exif なし）。
+      const date = hashParams.get('date');
+      const gps = hashParams.get('gps') === '1';
+      if (!date && !gps) return info(p);
+      return {
+        ...info(p),
+        exif: {
+          dateTime: date || null,
+          gpsLatitude: gps ? 35.6812 : null,
+          gpsLongitude: gps ? 139.7671 : null,
+        },
+      };
+    }
+    return info(p);
+  };
 
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -328,6 +348,13 @@
         case 'get_previous_image':
           return { kind: 'noHistory' };
         case 'get_playlist_info':
+          if (sc === 'bar') {
+            return [
+              Number(hashParams.get('pos')) || idx + 1,
+              Number(hashParams.get('total')) || 1,
+              idx > 0,
+            ];
+          }
           return [idx + 1, (seqs[sc] || seqs.slides).length, idx > 0];
         case 'undo_display_count':
           return null;
