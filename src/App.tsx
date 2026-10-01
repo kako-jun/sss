@@ -341,9 +341,12 @@ function App() {
         const actual = await win.isFullscreen();
         setIsFullscreen(actual);
         // setFullscreen だけ成功した部分失敗に備え、装飾も実態に合わせる（失敗は握りつぶす）
-        await win.setDecorations(!actual).catch(() => {});
-      } catch {
+        await win.setDecorations(!actual).catch((decErr) => {
+          console.error('Failed to re-sync window decorations:', decErr);
+        });
+      } catch (syncErr) {
         // 実態も取れなければ現状維持
+        console.error('Failed to re-sync window mode:', syncErr);
       }
     }
   };
@@ -705,7 +708,8 @@ function App() {
       {windowModeError && (
         <div
           role="alert"
-          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 max-w-[90vw]"
+          // 他のトースト/通知（bottom-20 中央、z-40/z-50）の上に積み、同時表示でも重ならないようにする
+          className="fixed bottom-36 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10 max-w-[90vw]"
         >
           {windowModeError.text}
         </div>

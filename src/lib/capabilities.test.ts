@@ -97,15 +97,26 @@ const WINDOW_MODULES = ['@tauri-apps/api/window', '@tauri-apps/api/webviewWindow
  * - 変数名に依らず、対応表にある（=明示権限が要る）メソッド名の `.xxx(` 呼び出し
  */
 export function scanWindowMethods(text: string): string[] {
+  const WS = '\\s*';
   const factories = ['getCurrentWindow', 'getCurrentWebviewWindow'];
+  const classes = ['Window', 'WebviewWindow'];
+  // `import { getCurrentWindow as gw, Window as W }`
   for (const m of text.matchAll(/\b(getCurrentWindow|getCurrentWebviewWindow)\s+as\s+(\w+)/g)) {
     factories.push(m[2]);
   }
-  const factoryAlt = factories.join('|');
-  const call = `(?:(?:${factoryAlt})\\s*\\(\\s*\\)|(?:Window|WebviewWindow)\\s*\\.\\s*getCurrent\\s*\\(\\s*\\))`;
+  for (const m of text.matchAll(/\b(Window|WebviewWindow)\s+as\s+(\w+)/g)) classes.push(m[2]);
+  // `import * as w from '@tauri-apps/api/window'` → `w.getCurrentWindow()` / `w.Window`
+  const nsRe = /import\s*\*\s*as\s+(\w+)\s+from\s+'@tauri-apps\/api\/(?:window|webviewWindow)'/g;
+  for (const m of text.matchAll(nsRe)) {
+    for (const f of ['getCurrentWindow', 'getCurrentWebviewWindow']) {
+      factories.push(`${m[1]}${WS}\\.${WS}${f}`);
+    }
+    for (const c of ['Window', 'WebviewWindow']) classes.push(`${m[1]}${WS}\\.${WS}${c}`);
+  }
+  const call = `(?:(?:${factories.join('|')})${WS}\\(${WS}\\)|(?:${classes.join('|')})${WS}\\.${WS}getCurrent${WS}\\(${WS}\\))`;
   const vars = new Set<string>(['win']);
   const assign = new RegExp(
-    `(?:\\b(?:const|let|var)\\s+(\\w+)|\\b(\\w+))\\s*=\\s*(?:await\\s+)?(?:${call}|new\\s+(?:Window|WebviewWindow)\\s*\\()`,
+    `(?:\\b(?:const|let|var)\\s+(\\w+)|\\b(\\w+))\\s*=\\s*(?:await\\s+)?(?:${call}|new\\s+(?:${classes.join('|')})\\s*\\()`,
     'g',
   );
   for (const m of text.matchAll(assign)) vars.add(m[1] ?? m[2]);
@@ -116,6 +127,17 @@ export function scanWindowMethods(text: string): string[] {
     'g',
   );
   for (const m of text.matchAll(chained)) found.push(m[1]);
+  // 分割代入: `const { setFullscreen, setTitle: st } = win` / `= getCurrentWindow()`
+  const destructure = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{([^}]*)\\}\\s*=\\s*(?:await\\s+)?(?:\\b(?:${[...vars].join('|')})\\b|${call})`,
+    'g',
+  );
+  for (const m of text.matchAll(destructure)) {
+    for (const part of m[1].split(',')) {
+      const name = part.split(':')[0].split('=')[0].trim();
+      if (name) found.push(name);
+    }
+  }
   const known = Object.keys(WINDOW_METHOD_PERMISSIONS).filter(
     (k) => WINDOW_METHOD_PERMISSIONS[k] !== 'default',
   );
@@ -160,9 +182,45 @@ describe('scanWindowMethods (#103 スキャナ自体の検証)', () => {
     expect(scanWindowMethods(src)).toContain('setDecorations');
   });
 
+  it('detects destructured methods from a variable or a factory call', () => {
+    const a = scanWindowMethods('const { setFullscreen, setTitle: st, close = x } = win;');
+    expect(a).toEqual(expect.arrayContaining(['setFullscreen', 'setTitle', 'close']));
+    expect(scanWindowMethods('const { setDecorations } = getCurrentWindow();')).toContain(
+      'setDecorations',
+    );
+    const b = scanWindowMethods('const w = getCurrentWindow();\nconst { minimize } = w;');
+    expect(b).toContain('minimize');
+  });
+
+  it('detects namespace imports (import * as w) for factories and classes', () => {
+    const head = "import * as w from '@tauri-apps/api/window';\n";
+    expect(scanWindowMethods(head + 'w.getCurrentWindow().setFullscreen(true);')).toContain(
+      'setFullscreen',
+    );
+    expect(scanWindowMethods(head + 'w.Window.getCurrent().hide();')).toContain('hide');
+    const c = head + 'const x = w.getCurrentWindow(); x.setPosition(p);';
+    expect(scanWindowMethods(c)).toContain('setPosition');
+  });
+
+  it('detects import-aliased Window class (Window as W)', () => {
+    const src = "import { Window as W } from '@tauri-apps/api/window';\nW.getCurrent().center();";
+    expect(scanWindowMethods(src)).toContain('center');
+  });
+
   it('detects new Window(...) instances and reassigned variables', () => {
     expect(scanWindowMethods("const z = new Window('x'); z.center();")).toContain('center');
     expect(scanWindowMethods('let q; q = getCurrentWindow(); q.maximize();')).toContain('maximize');
+  });
+});
+
+describe('ウィンドウ API の import 範囲ガード (#103)', () => {
+  // 別ファイルへ window オブジェクトを渡す形はスキャナで追えないため、ウィンドウ API を
+  // import してよいファイルを App.tsx に限定する。増やす場合はスキャナ対象として確認すること。
+  it('only src/App.tsx imports the Tauri window API', () => {
+    const importers = sources
+      .filter(({ text }) => WINDOW_MODULES.some((m) => text.includes(m)))
+      .map(({ file }) => file.slice(SRC.length + 1));
+    expect(importers).toEqual(['App.tsx']);
   });
 });
 
