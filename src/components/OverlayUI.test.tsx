@@ -303,6 +303,27 @@ describe('OverlayUI "…" menu accessibility + imperative handle (#66レビュ�
   });
 });
 
+// #110: 除外サブメニューは親メニュー（操作バーの上に出る）の最下段の項目から
+// 開くため、`top-0`（項目上端基準で下へ伸ばす）だと最後の項目が親メニューの
+// 下＝画面外・操作バー上へはみ出した。`bottom-0`（下端基準で上へ伸ばす）が
+// 正しい。jsdomは配置を計算しないのでクラスの回帰だけを見る（実矩形の検証は
+// 実ブラウザe2e「#110」が担当）。
+describe('OverlayUI exclude submenu opens upward, not below the parent menu (#110)', () => {
+  it('anchors the submenu by its bottom edge (bottom-0), never top-0', () => {
+    const image = makeImage();
+    render(<OverlayUI image={image} {...requiredProps} />);
+
+    fireEvent.click(screen.getByTitle('メニュー'));
+    fireEvent.click(screen.getByText('除外'));
+
+    const submenu = screen.getByText('撮影日付で除外').parentElement!;
+    expect(submenu.classList.contains('right-full')).toBe(true);
+    expect(submenu.classList.contains('bottom-0')).toBe(true);
+    expect(submenu.classList.contains('top-0')).toBe(false);
+    expect(submenu.children.length).toBe(3);
+  });
+});
+
 // #66レビュー3巡目must: 背景幕(`fixed inset-0`)が操作バー（transformを持つ
 // 祖先）の子孫だと、CSSの含有ブロックがバー自身に限定され、`inset-0`が画面
 // 全体でなくバーの矩形にしかならない（写真をクリックしても閉じない回帰）。

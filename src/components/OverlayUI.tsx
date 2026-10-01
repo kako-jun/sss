@@ -662,7 +662,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                       {t('viewPicks')}
                     </button>
 
-                    {/* 除外サブメニュー */}
+                    {/* 除外サブメニュー。親メニューは操作バーの上に出るので、`top-0`（項目の上端基準で下へ伸ばす）だと最後の項目の下へはみ出して画面外・操作バーに重なる。`bottom-0`（項目の下端基準で上へ伸ばす）にして親メニューの縦範囲内に収める (#110) */}
                     <div className="relative">
                       <button
                         onClick={() => setShowExcludeSubmenu(!showExcludeSubmenu)}
@@ -676,7 +676,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                         <ChevronLeft size={12} className="ml-auto" />
                       </button>
                       {showExcludeSubmenu && (
-                        <div className="absolute right-full top-0 mr-1 bg-black/90 rounded-xl shadow-2xl border border-white/10 p-1.5 space-y-0.5 w-48 z-50 backdrop-blur-md">
+                        <div className="absolute right-full bottom-0 mr-1 bg-black/90 rounded-xl shadow-2xl border border-white/10 p-1.5 space-y-0.5 w-48 z-50 backdrop-blur-md">
                           <button
                             onClick={() => handleExclude('date')}
                             onMouseDown={guardButtonMouseDown}

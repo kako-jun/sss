@@ -344,6 +344,12 @@ bg-black/90 rounded-xl shadow-2xl border border-white/10
 p-1.5 space-y-0.5 backdrop-blur-md
 ```
 
+The overlay "…" menu opens upward from the floating bar, so its nested Exclude
+submenu is anchored by its **bottom** edge (`absolute right-full bottom-0`), not
+`top-0`: it is opened from the last row of the parent menu, and growing downward
+from there would run past the viewport and over the bar (#110). Any new nested
+submenu opened from a bottom-anchored menu follows the same rule.
+
 ### Hover-reveal Controls (#66)
 
 Small per-item action buttons that live inside a list row or thumbnail (exclude-rule

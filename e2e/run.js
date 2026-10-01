@@ -1911,6 +1911,62 @@ const scenarios = [
       };
     },
   },
+  {
+    // #110: 「…」メニュー→「除外」サブメニューの3項目が、どの画面サイズでも
+    // viewport内に収まり、操作バーと交差しない（以前は top-0 で下へ伸びて
+    // 最後の項目が viewport を超え、バーに重なっていた）。
+    name: 'exclude submenu stays inside the viewport and clear of the bar (#110)',
+    hash: 'slides',
+    async run(page) {
+      await wakeFromIdle(page);
+      await page.click('button[aria-label="メニュー"]');
+      await page.waitForTimeout(300);
+      await page.locator('button').filter({ hasText: /^除外/ }).first().click();
+      await page.waitForTimeout(400);
+      const labels = ['撮影日付で除外', 'フォルダを除外', 'ファイルを除外'];
+      const details = [];
+      let pass = true;
+      for (const [w, h] of [
+        [1920, 1080],
+        [1280, 800],
+        [800, 600],
+        [480, 800],
+      ]) {
+        await page.setViewportSize({ width: w, height: h });
+        await page.waitForTimeout(300);
+        const m = await page.evaluate((labels) => {
+          const rect = (e) => e.getBoundingClientRect();
+          const items = labels.map((t) =>
+            [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === t),
+          );
+          if (items.some((i) => !i)) return null;
+          let bar = document.querySelector('button[aria-label="メニュー"]');
+          while (bar && getComputedStyle(bar).position !== 'fixed') bar = bar.parentElement;
+          const rs = items.map(rect);
+          const b = rect(bar);
+          return {
+            top: Math.min(...rs.map((r) => r.top)),
+            bottom: Math.max(...rs.map((r) => r.bottom)),
+            left: Math.min(...rs.map((r) => r.left)),
+            right: Math.max(...rs.map((r) => r.right)),
+            barTop: b.top,
+            hitsBar: rs.some(
+              (r) => r.bottom > b.top && r.top < b.bottom && r.right > b.left && r.left < b.right,
+            ),
+            vh: innerHeight,
+            vw: innerWidth,
+          };
+        }, labels);
+        const ok =
+          !!m && m.top >= 0 && m.left >= 0 && m.bottom <= m.vh && m.right <= m.vw && !m.hitsBar;
+        if (!ok) pass = false;
+        details.push(
+          `${w}x${h}:${ok ? 'ok' : 'NG'}(${m ? `top=${Math.round(m.top)} bottom=${Math.round(m.bottom)} barTop=${Math.round(m.barTop)}` : 'items missing'})`,
+        );
+      }
+      return { pass, detail: details.join(' ') };
+    },
+  },
 ];
 
 /**
