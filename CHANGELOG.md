@@ -9,6 +9,7 @@ Dates use `YYYY-MM-DD`.
 
 ### Changed
 
+- 開発者向け: pre-commit の `lint-staged` を `--no-stash` で実行するようにした。既定の退避 stash は全 worktree で共有されるため、並行 worktree のコミットや他セッションの `git stash pop` と衝突して worktree が壊れる事故があった。並行コミットの検証スクリプト `scripts/verify-concurrent-precommit.sh` を追加し、CLAUDE.md に `--no-stash` の代償と worktree 運用の指針を追記 (#126)
 - ようこそ画面の「? ショートカット一覧を表示」ヒントをボタンにし、クリック（Enter/Space）でもショートカット一覧を開けるようにした。hover/キーボードフォーカスで少し明るくなる (#100)
 
 ### Fixed
