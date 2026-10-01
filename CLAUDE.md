@@ -405,7 +405,7 @@ CREATE TABLE app_settings (
 
 ### src-tauri/src/asset_scope.rs
 
-- asset protocol scope（`convertFileSrc` の許可範囲）の動的許可に使う純関数群と検証ゲート（`sanitize_allow_dir`・`startup_allow_dirs` ほか）。`tauri.conf.json` の静的 scope は空。拒否理由は `AllowDirRejection`（`check_allow_dir`）で分類し、`log_refused_allow_dir` が「未作成（正常。デバッグビルドのみ出力）」と「危険・不正（常に警告）」を出し分ける（#121）
+- asset protocol scope（`convertFileSrc` の許可範囲）の動的許可に使う純関数群と検証ゲート（`sanitize_allow_dir`・`startup_allow_dirs` ほか）。`tauri.conf.json` の静的 scope は空。拒否理由は `AllowDirRejection`（`check_allow_dir`）で分類し、`log_refused_allow_dir` が「未作成（正常。デバッグビルドのみ出力）」と「危険・不正（常に警告）」を出し分ける。ゲートに使った `check_allow_dir` の結果を呼び出し元がそのまま渡す。存在しない危険パス（`..`・保護領域配下）は `NotYetCreatedUnsafe`、ドライブ/共有ルート不在は `Inaccessible` で警告を維持する（#121）
 
 ### src-tauri/src/pick.rs
 

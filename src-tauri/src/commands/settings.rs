@@ -1,4 +1,4 @@
-use crate::asset_scope::{resolve_and_sanitize_share_directory, resolve_share_directory};
+use crate::asset_scope::resolve_share_directory;
 use crate::commands::dialog::{pick_directory_blocking, DirectoryPicker, PrePicked};
 use crate::commands::file_operations::home_pictures_dir;
 use crate::commands::types::AppState;
@@ -105,8 +105,9 @@ pub async fn select_share_directory(
     };
     let value = saved.to_string_lossy().to_string();
     if let Ok(pictures_dir) = home_pictures_dir() {
-        match resolve_and_sanitize_share_directory(&pictures_dir, Some(value.as_str())) {
-            Some(safe_dir) => {
+        let resolved = resolve_share_directory(&pictures_dir, Some(value.as_str()));
+        match crate::asset_scope::check_allow_dir(&resolved) {
+            Ok(safe_dir) => {
                 if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
                     eprintln!(
                         "Failed to allow asset scope for {}: {e}",
@@ -114,9 +115,8 @@ pub async fn select_share_directory(
                     );
                 }
             }
-            None => {
-                let resolved = resolve_share_directory(&pictures_dir, Some(value.as_str()));
-                crate::asset_scope::log_refused_allow_dir(&resolved);
+            Err(reason) => {
+                crate::asset_scope::log_refused_allow_dir(&resolved, reason);
             }
         }
     }

@@ -1,6 +1,4 @@
-use crate::asset_scope::{
-    default_share_directory, resolve_validated_share_directory, sanitize_allow_dir,
-};
+use crate::asset_scope::{default_share_directory, resolve_validated_share_directory};
 use crate::commands::playlist_persistence;
 use crate::commands::types::{AppState, ExcludeOutcome};
 use crate::ignore::{glob_check_pattern, IgnoreFilter, IgnoreRule, RuleType};
@@ -163,8 +161,8 @@ pub async fn pick_image<R: tauri::Runtime>(
     // ある（新規環境の既定ピック先など）。実在が保証された今このタイミングで改めて許可し、
     // 「ピック済み」タブのサムネイル/動画表示が次回起動を待たずに動くようにする
     // （レビュー #73 must）。
-    match sanitize_allow_dir(&share_directory) {
-        Some(safe_dir) => {
+    match crate::asset_scope::check_allow_dir(&share_directory) {
+        Ok(safe_dir) => {
             if let Err(e) = app.asset_protocol_scope().allow_directory(&safe_dir, true) {
                 eprintln!(
                     "Failed to allow asset scope for {}: {e}",
@@ -172,8 +170,8 @@ pub async fn pick_image<R: tauri::Runtime>(
                 );
             }
         }
-        None => {
-            crate::asset_scope::log_refused_allow_dir(&share_directory);
+        Err(reason) => {
+            crate::asset_scope::log_refused_allow_dir(&share_directory, reason);
         }
     }
 
