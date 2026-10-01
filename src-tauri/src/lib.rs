@@ -16,7 +16,7 @@ pub mod playlist;
 pub mod scanner;
 pub mod thumbnail;
 
-use asset_scope::{sanitize_allow_dir, startup_allow_dirs};
+use asset_scope::startup_allow_dirs;
 use cache_worker::CacheWorker;
 use commands::file_operations::get_picked_directory;
 use commands::AppState;
@@ -126,8 +126,8 @@ pub fn run() {
             for dir in
                 startup_allow_dirs(&cache_dir, share_directory.as_deref(), &scanned_directories)
             {
-                match sanitize_allow_dir(&dir) {
-                    Some(safe_dir) => {
+                match crate::asset_scope::check_allow_dir(&dir) {
+                    Ok(safe_dir) => {
                         if let Err(e) = scope.allow_directory(&safe_dir, true) {
                             eprintln!(
                                 "Failed to allow asset scope for {}: {e}",
@@ -135,11 +135,8 @@ pub fn run() {
                             );
                         }
                     }
-                    None => {
-                        eprintln!(
-                            "Refusing to allow unsafe asset scope directory: {}",
-                            dir.display()
-                        );
+                    Err(reason) => {
+                        crate::asset_scope::log_refused_allow_dir(&dir, reason);
                     }
                 }
             }

@@ -266,18 +266,62 @@ Caveat: on macOS WKWebView / Linux WebKitGTK the popup is drawn natively and
 the option CSS (and even `color-scheme: dark`) may not take effect; this is
 unverified on real devices. Windows (WebView2) is the primary target.
 
-### Range Sliders
+### Checkboxes / Range Sliders (#122)
 
 ```
-h-1 bg-white/10 rounded-lg accent-white/60
+checkbox:  sss-checkbox      (no Tailwind sizing/colour classes)
+range:     sss-range flex-1
 ```
 
-### Checkboxes
+Native form controls render with the OS theme: on Linux WebKitGTK an unchecked
+checkbox is a **white box** even under `color-scheme: dark` (Chromium hides the
+difference), clashing with the dark UI. Every `<input type="checkbox|range">`
+MUST carry the matching shared class from `src/index.css`, which draws it
+explicitly with `appearance: none` so all engines look the same. There is no
+radio style because nothing uses a radio; add one (and register it in the scan
+test) before the first radio lands.
 
-```
-w-4 h-4 rounded border-white/20
-bg-white/5 accent-white/50
-```
+- **Box**: 20x20px (minimum hit area), `margin: 0 2px` (vertical 0 so the box
+  centre matches the first label line, which is 20px tall with `text-sm`),
+  4px radius, `bg rgba(0,0,0,0.4)` (same glass as inputs) and a
+  `1px rgba(255,255,255,0.5)` border (about 5:1 against `#0a0a0a`, above the 3:1
+  non-text contrast of WCAG 1.4.11; the old `white/20` was about 1.8:1). Hover
+  brightens the border to 0.75. The colour change eases over 150ms, disabled
+  under `prefers-reduced-motion: reduce`.
+- **Checked**: `rgba(255,255,255,0.9)` fill with a `#0a0a0a` mark drawn in CSS
+  (`::after` + `clip-path: polygon`). No image, icon font or emoji.
+- **Focus**: `:focus-visible` only, 2px `rgba(255,255,255,0.6)` ring with
+  `outline-offset: 0` (the global 2px offset is clipped at the left edge of the
+  settings scroll area; the horizontal 2px margin keeps the ring inside). For the
+  range the ring surrounds the whole input (full width x 20px), an intentionally
+  long rectangle; the 2px margin also makes its track start 2px inside the
+  heading's left edge, which is accepted.
+- **Disabled**: opacity 0.3 (same as the existing `disabled:opacity-30` rule),
+  `not-allowed` cursor.
+- **Range**: 4px rounded track (`white/25`), 20px round white thumb (border-box,
+  so `margin-top` is exactly -8px) styled via `::-webkit-slider-*` and
+  `::-moz-range-*`. The filled part is not drawn in any engine (Firefox's
+  `-moz-range-progress` is deliberately unused so engines look the same). Do not
+  set a height with Tailwind on it; the 20px height is the hit area.
+- **Forced colors** (Windows High Contrast, passed through by WebView2): the
+  browser overrides background colours to `Canvas`, which would turn a checked box
+  into an empty one. `@media (forced-colors: active)` sets
+  `forced-color-adjust: none` and uses system colours only: border `ButtonText`,
+  checked fill `Highlight` with a `HighlightText` mark, focus ring `CanvasText`
+  (a checked box has a `Highlight` fill and border, so a `Highlight` ring would vanish),
+  disabled `GrayText` with opacity back to 1 (`GrayText` is already the dimmed
+  colour; the normal 0.3 would dim it twice), range track and thumb `ButtonText`
+  (thumb `Highlight` on hover). The hover border change applies only to enabled,
+  unchecked boxes (`:hover:not(:disabled):not(:checked)`).
+
+`src/test/inputDark.test.ts` walks the TypeScript syntax tree of `src/**/*.tsx` and
+fails if any checkbox/range lacks its class (a dynamic `className` such as `cn()`, a
+dynamic `type` or any radio counts as an offender), or if the CSS loses
+`appearance: none` or the forced-colors rules. It cannot see inputs outside
+`.tsx`, in `index.html`, or with a `type` passed through a props spread. The e2e
+scenarios (#122) check every state, the label alignment (box centre within 1px of
+the first label line) and forced-colors mode in a real browser. Windows
+(WebView2) and the WebKitGTK app itself are unverified on real devices.
 
 ### Panels & Cards (#66: background over border)
 
