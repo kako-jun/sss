@@ -798,7 +798,7 @@ function App() {
                   setIsShortcutsOpen(true);
                 }}
                 aria-keyshortcuts="?"
-                className="group mx-auto mt-6 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1 text-xs text-white/50 transition-colors hover:text-white/80 focus-visible:text-white/80"
+                className="group mx-auto -mb-1 mt-5 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1 text-xs text-white/50 transition-colors hover:text-white/80 focus-visible:text-white/80"
               >
                 <span
                   className="rounded border border-white/10 bg-white/8 px-1.5 py-0.5 font-mono transition-colors group-hover:bg-white/15 group-focus-visible:bg-white/15"

@@ -181,6 +181,9 @@ chip: bg-white/8 group-hover:bg-white/15 group-focus-visible:bg-white/15
 rounded-lg px-2 py-1 text-xs transition-colors
 ```
 
+The padding enlarges the click target; offset it with margins (`mt-5 -mb-1` in place
+of the former `mt-6`) so the card's vertical rhythm is unchanged.
+
 ### Input Fields
 
 ```
