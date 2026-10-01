@@ -35,6 +35,12 @@ const MEDIA_FAILURE_TOAST_MS = 6000;
  * `currentImage` に格納してしまい、それ以外の「案内が要る状態」だけをここに
  * 残したいため。
  */
+/**
+ * メディアの失敗の原因（#120）。`error`=`onError`（ファイルが本当に読めない）、
+ * `watchdog`=読込完了も失敗も来ないまま待ち時間を超えた（遅いだけの可能性がある）。
+ */
+type MediaFailureCause = 'error' | 'watchdog';
+
 export type SlideshowNotice =
   | { kind: 'emptyPlaylist' }
   | { kind: 'rootUnavailable' }
@@ -120,7 +126,9 @@ export function useSlideshow(
   playlistTotalRef.current = playlistTotal;
   // #120: 画像/動画の読込完了(onLoad/loadeddata)も失敗(onError)も来ない場合の見張り。
   const watchdogTimerRef = useRef<number | undefined>(undefined);
-  const handleMediaFailureRef = useRef<(path: string) => Promise<void>>(async () => {});
+  const handleMediaFailureRef = useRef<(path: string, cause?: MediaFailureCause) => Promise<void>>(
+    async () => {},
+  );
 
   const isCurrentVideo = currentImage?.isVideo ?? false;
   const isCurrentVideoRef = useRef(isCurrentVideo);
@@ -257,7 +265,7 @@ export function useSlideshow(
           `[sss] media watchdog: no load/error for ${((Date.now() - startedAt) / 1000).toFixed(1)}s, skipping`,
           { path, navigationInFlight: inFlightRef.current },
         );
-        void handleMediaFailureRef.current(path);
+        void handleMediaFailureRef.current(path, 'watchdog');
       };
       watchdogTimerRef.current = window.setTimeout(fire, ms);
     },
@@ -294,6 +302,9 @@ export function useSlideshow(
   const handleMediaReady = useCallback(() => {
     // #120: 描画に成功したので連続失敗の数え直し（動画は loadeddata で呼ばれる）。
     // 見張りを解除し、スキップ中トーストも消す（成功で連続が途切れた）。
+    // 既知の限界（out of scope）: 見張りは「最初の読込完了」までしか見ない。動画が最初の
+    // フレームだけ読めて再生が始まらない場合（loadeddata 後に止まる）は見張りが解除済みで、
+    // 自力では進まない（従来どおり onEnded/onError/手動操作に委ねる）。
     mediaFailureStreakRef.current = 0;
     clearWatchdog();
     clearMediaSkipToast();
@@ -465,12 +476,19 @@ export function useSlideshow(
    * 順序は「表示回数の取り消し → 失敗の記録・計数 → 次へ」（#65: undo完了前に次の
    * get_next_imageが走ると取り消しがパス不一致で無視されるため）。取り消しの待ち中に
    * 手動で別の画像へ移っていたら（古い失敗）、計数も次への進行もしない（正常な画像を
-   * 消さない）。壊れたパス自体はセッションの失敗セットに記録する。
+   * 消さない）。
+   *
+   * 失敗セットへの記録は原因で分ける: `error`（onError=本当に読めない）は、鮮度チェックの
+   * 結果に関わらず（undo待ち中にユーザーが先へ進んでいても、そのファイルが壊れている
+   * 事実は変わらないので）記録する。`watchdog`（読込が遅いだけかもしれない: 遅いNAS・
+   * loadeddata に10秒超かかる大きな動画）は記録しない。同じパスが再び当たったらもう一度
+   * 試す。連続失敗の計数には両方入る（成功で0に戻るので「連続して見張りが発動」の時だけ
+   * 積み上がる）。失敗セットに入らないので全件破損の判定にも使われない。
    */
   const handleMediaFailure = useCallback(
-    async (path: string) => {
+    async (path: string, cause: MediaFailureCause = 'error') => {
       clearWatchdog();
-      failedPathsRef.current.add(path);
+      if (cause === 'error') failedPathsRef.current.add(path);
       const startedAt = Date.now();
       try {
         await undoDisplayCount(path);
@@ -500,6 +518,9 @@ export function useSlideshow(
    * 失敗セットを空にして次の画像から試し直す。
    */
   const resumeAfterFailures = useCallback(async () => {
+    // 別のナビゲーションが進行中だと loadNextImage は黙って無視され、notice だけ消えて
+    // 黒画面＋案内なしになってしまう。進行中は何も変えず案内を残す（もう一度押せる）。
+    if (inFlightRef.current) return;
     failedPathsRef.current.clear();
     mediaFailureStreakRef.current = 0;
     setNotice(null);

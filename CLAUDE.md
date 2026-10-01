@@ -210,6 +210,10 @@
     次へ進む（一時停止中は張り直すだけ）。発動時は `console.warn('[sss] media watchdog: ...')` に
     パス・待った秒数・`navigationInFlight`（`inFlightRef`）を残し、`undo_display_count` が1秒超なら
     その旨も `console.warn` する（原因診断を隠さない）。
+    見張り由来のスキップは**失敗セットに入れない**（遅い NAS・loadeddata に10秒超かかる大きな動画など、遅いだけの
+    正常なファイルを二度と出さなくしないため。同じパスが再び当たればもう一度試す。全件破損の判定にも使わない。
+    連続失敗の計数には入る）。`onError` 由来は失敗セットに記録する（undo 待ち中に先へ進まれても記録は残す）。
+    既知の限界: 見張りは最初の `loadeddata` で解除されるので、最初のフレームだけ読めて再生が始まらない動画は対象外。
   - **実アプリ（WebKitGTK）で報告された「黒画面が間隔の間ずっと続く」の仮説**（実描画では未再現）:
     ① `handleMediaError` は `undo_display_count`（DB mutex 待ち）を await してから次へ進むので、
     スキャン/先読みが DB を握っていると待たされる ② `continueInLastDirection` は `inFlightRef` が立っていると

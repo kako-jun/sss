@@ -1031,6 +1031,32 @@ describe('broken media skipping (#120)', () => {
     expect(result.current.notice).toBeNull();
   });
 
+  it('resumeAfterFailures leaves the card in place when another navigation is in flight (no silent black screen)', async () => {
+    const { result } = renderHook(() => useSlideshow());
+    for (let i = 0; i < 10; i++) await showThenFail(result, `/bad${i}.jpg`);
+    expect(result.current.notice).toEqual({ kind: 'mediaFailureStreak' });
+    let release: (r: ImageNavigationResult) => void = () => {};
+    getNextImage
+      .mockReset()
+      .mockImplementationOnce(
+        () => new Promise<ImageNavigationResult>((resolve) => (release = resolve)),
+      );
+    let inFlight: Promise<void> = Promise.resolve();
+    act(() => {
+      inFlight = result.current.loadNextImage();
+    });
+    await act(async () => {
+      await result.current.resumeAfterFailures();
+    });
+    expect(result.current.notice).toEqual({ kind: 'mediaFailureStreak' });
+    expect(getNextImage).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      release(found('/ok.jpg'));
+      await inFlight;
+    });
+    expect(result.current.currentImage?.path).toBe('/ok.jpg');
+  });
+
   it('initialize forgets the failed set, the counter and the toast', async () => {
     const { result } = renderHook(() => useSlideshow());
     for (let i = 0; i < 3; i++) await showThenFail(result, `/bad${i}.jpg`);
@@ -1151,6 +1177,57 @@ describe('media watchdog (#120)', () => {
       await vi.advanceTimersByTimeAsync(10100);
     });
     expect(undoDisplayCount).toHaveBeenCalledWith('/p.jpg');
+  });
+
+  it('does not put a watchdog-skipped (merely slow) path into the failed set: it is tried again, and never counts toward "all broken"', async () => {
+    const { result } = renderHook(() => useSlideshow(10000, true, 1));
+    await show(result, '/slow.jpg');
+    getNextImage.mockResolvedValue(found('/after.jpg'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10100);
+    });
+    expect(undoDisplayCount).toHaveBeenCalledWith('/slow.jpg');
+    // 総数1でも「全件破損」にならない（見張り由来は失敗セットに入らない）。
+    expect(result.current.notice).toBeNull();
+    expect(result.current.currentImage?.path).toBe('/after.jpg');
+    // 同じパスが再び当たっても読み飛ばさず表示する。
+    getNextImage.mockReset().mockResolvedValue(found('/slow.jpg'));
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.currentImage?.path).toBe('/slow.jpg');
+  });
+
+  it('by contrast an onError failure of the same path IS remembered and skipped later', async () => {
+    const { result } = renderHook(() => useSlideshow(10000, true, 5000));
+    await show(result, '/bad.jpg');
+    getNextImage.mockResolvedValue(found('/after.jpg'));
+    await act(async () => {
+      await result.current.handleMediaFailure('/bad.jpg');
+    });
+    getNextImage
+      .mockReset()
+      .mockResolvedValueOnce(found('/bad.jpg'))
+      .mockResolvedValue(found('/good.jpg'));
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    expect(result.current.currentImage?.path).toBe('/good.jpg');
+  });
+
+  it('consecutive watchdog firings still count toward the consecutive-failure stop', async () => {
+    const { result } = renderHook(() => useSlideshow(10000, true, 5000));
+    let n = 0;
+    getNextImage.mockImplementation(async () => found(`/stuck${n++}.jpg`));
+    await act(async () => {
+      await result.current.loadNextImage();
+    });
+    for (let i = 0; i < 10; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10100);
+      });
+    }
+    expect(result.current.notice).toEqual({ kind: 'mediaFailureStreak' });
   });
 
   it('releases its timer on unmount', async () => {
