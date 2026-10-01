@@ -93,6 +93,8 @@ export const en = {
   // #78: brief toast right after exclude/pick, with an Undo button for a few seconds
   undoButton: 'Undo',
   undoExcludeDone: 'Exclusion undone',
+  undoExcludeNeedsRescan:
+    'Exclusion undone. To bring back photos dropped by a rescan, rescan from the Folder tab in Settings',
   undoExcludeNothing: 'Nothing to undo',
   undoPickDone: 'Pick undone',
   undoFailed: "Error: couldn't undo",
