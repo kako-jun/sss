@@ -1,4 +1,4 @@
-//! #87: `pick_image` は管理下（プレイリスト構成員・履歴・ピックフォルダ内）のメディア
+//! #87: `pick_image` は管理下（プレイリスト構成員・履歴・ピック先フォルダ内）のメディア
 //! ファイルだけをコピーし、任意の絶対パス・非メディア拡張子は拒否する。
 
 use std::path::PathBuf;
@@ -125,7 +125,7 @@ fn a_widened_share_directory_setting_does_not_widen_the_managed_area() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// ピックフォルダ内にあるがフォルダ外を指すシンボリックリンクは拒否される。
+/// ピック先フォルダ内にあるがフォルダ外を指すシンボリックリンクは拒否される。
 #[cfg(unix)]
 #[test]
 fn a_symlink_in_the_picked_folder_pointing_outside_is_rejected() {

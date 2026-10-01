@@ -61,7 +61,7 @@ pub async fn open_in_explorer(
     image_path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // #92: 任意パスの存在確認・ファイラ表示をさせない（管理下＝DB 登録 or ピックフォルダ内のみ）。
+    // #92: 任意パスの存在確認・ファイラ表示をさせない（管理下＝DB 登録 or ピック先フォルダ内のみ）。
     // UI は表示中の画像の絶対パスを渡すので `~` 展開は不要（管理外扱いになる）。
     let (share_directory, known) = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
@@ -132,8 +132,8 @@ pub async fn pick_image<R: tauri::Runtime>(
 ) -> Result<String, String> {
     let source_path = Path::new(&image_path);
 
-    // #87: 任意の絶対パスをピックフォルダ（asset scope 内）へコピーさせない。
-    // メディア拡張子で、かつ管理下（プレイリスト構成員・履歴・ピックフォルダ内）のみ許可。
+    // #87: 任意の絶対パスをピック先フォルダ（asset scope 内）へコピーさせない。
+    // メディア拡張子で、かつ管理下（プレイリスト構成員・履歴・ピック先フォルダ内）のみ許可。
     if !crate::scanner::is_media_path(source_path) {
         return Err("notMediaFile".to_string());
     }
@@ -630,7 +630,7 @@ pub async fn get_thumbnail(
     if !crate::scanner::is_image_path(&source) {
         return Err("Not a supported image file".to_string());
     }
-    // #87: 任意の絶対パスをデコードさせない（プレイリスト構成員・履歴・ピックフォルダ内のみ）。
+    // #87: 任意の絶対パスをデコードさせない（プレイリスト構成員・履歴・ピック先フォルダ内のみ）。
     let (share_directory, known) = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
         (
@@ -690,7 +690,7 @@ pub async fn delete_picked_image(
     let picked_dir = get_picked_directory(&db)?;
     drop(db);
 
-    // 安全チェック: ピックフォルダ内の通常のメディアファイルのみ削除可能
+    // 安全チェック: ピック先フォルダ内の通常のメディアファイルのみ削除可能
     let target = crate::pick::validate_picked_delete_target(Path::new(&image_path), &picked_dir)?;
     fs::remove_file(&target).map_err(|e| format!("Failed to delete file: {e}"))?;
     Ok(())
