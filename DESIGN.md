@@ -254,6 +254,23 @@ Keep a border only when there's no background difference to rely on (an input
 field on bare black, a thumbnail image that needs a defined edge) — see Input
 Fields below.
 
+### Confirm Modal (#119)
+
+In-app replacement for `window.confirm` (which Tauri turns into a always-truthy
+Promise — never use it). `role="alertdialog"`, `aria-modal="true"`. Same panel as
+other modals on a `bg-black/85 backdrop-blur-md` backdrop, portaled to `body`,
+narrower (`max-w-md`). Message only (no title, `text-sm text-white/70`,
+`whitespace-pre-line`); buttons right-aligned, Cancel first and focused by default:
+
+```
+Panel:    bg-neutral-950 rounded-2xl border border-white/10 shadow-2xl p-7 max-w-md w-full mx-8
+Cancel:   Buttons — Standard (bg-white/8 hover:bg-white/15 text-white/60 …)
+Confirm:  bg-red-950/60 hover:bg-red-900/60 text-red-400/70 hover:text-red-400/90 rounded-lg text-sm
+          (the Settings "danger zone" button style; label names the action, never "OK")
+```
+
+Esc / backdrop click = Cancel. No emoji.
+
 ### Settings Section Rhythm (#66)
 
 Every settings tab is a vertical stack of sections (`space-y-8` between them).

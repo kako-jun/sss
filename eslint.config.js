@@ -26,7 +26,6 @@ export default [
         setInterval: 'readonly',
         clearInterval: 'readonly',
         localStorage: 'readonly',
-        alert: 'readonly',
         navigator: 'readonly',
         KeyboardEvent: 'readonly',
         HTMLElement: 'readonly',
@@ -37,7 +36,6 @@ export default [
         HTMLVideoElement: 'readonly',
         HTMLDivElement: 'readonly',
         HTMLInputElement: 'readonly',
-        confirm: 'readonly',
         React: 'readonly',
         EventTarget: 'readonly',
         Element: 'readonly',
@@ -57,6 +55,26 @@ export default [
       'react/react-in-jsx-scope': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
+      // #119: window.confirm/alert/prompt は tauri_plugin_dialog が Promise 版に差し替えて
+      // おり（dialog 権限は付与しない、#93）、Promise は常に truthy で確認が素通りする。
+      // 確認は src/lib/confirmDialog.ts の confirmDialog() を await する。
+      'no-restricted-globals': [
+        'error',
+        ...['confirm', 'alert', 'prompt'].map((name) => ({
+          name,
+          message: 'window.confirm/alert/prompt は使用禁止（#119）。confirmDialog() を使う。',
+        })),
+      ],
+      'no-restricted-properties': [
+        'error',
+        ...['confirm', 'alert', 'prompt'].flatMap((property) =>
+          ['window', 'globalThis', 'self'].map((object) => ({
+            object,
+            property,
+            message: 'window.confirm/alert/prompt は使用禁止（#119）。confirmDialog() を使う。',
+          })),
+        ),
+      ],
     },
     settings: {
       react: {

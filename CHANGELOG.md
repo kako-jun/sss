@@ -13,6 +13,7 @@ Dates use `YYYY-MM-DD`.
 
 ### Fixed
 
+- 「設定を初期化」を押すと確認ダイアログが出ないまま全データが削除されアプリが再起動する、データ消失に至る不具合を修正。`tauri_plugin_dialog` が `window.confirm` を Promise を返す非同期版に差し替えており（dialog 権限は付与しない方針 #93）、Promise は常に truthy なので `if (!confirm(..))` が素通りしていた。確認をアプリ内モーダル（`role="alertdialog"`、既定フォーカスはキャンセル、ESC・背景クリック=キャンセル）に置き換え、同じ問題を抱えていた「表示回数のリセット」「ピック写真の削除」も移行。`window.confirm`/`alert`/`prompt` を eslint と走査テストで禁止し、テスト環境の `window.confirm` を Tauri 実機と同じ Promise 版にして素通りを再現する回帰テストを追加 (#119)
 - 設定画面のドロップダウン(select)を開いたときの選択肢リストがOS既定の明るい背景になり、ダークテーマと不整合で読みにくかった問題を修正。共通クラス `.sss-select` で `color-scheme: dark` と option/optgroup の不透明なダーク背景・明るい文字色を指定し、全 select に適用(主対象は Windows/WebView2。macOS・Linux の WebView では実機未確認)。全 select が付けていることを走査テストで担保 (#102)
 - スライドショー背景のSSSロゴが不透明（100%）で目立って表示される不具合を修正。`opacity-2` が Tailwind の既定スケールに無く CSS が生成されていなかったため、`tailwind.config.js` の `theme.extend.opacity` に `2: '0.02'` を追加した。他に未登録の非5刻み opacity クラスは無いことを全件確認済み (#99)
 - 右上のウィンドウモード切替ボタン（F/F11 キー含む）が何も起こさなかった問題を修正。capability に `core:window:allow-set-fullscreen`・`allow-set-decorations` が無く呼び出しが拒否されていた。同じく `core:default` に含まれないウィンドウタイトル更新用の `allow-set-title` も追加（#80 のタイトル切替が実機で効いていなかった可能性）。切替に失敗した場合は無反応にせず画面下に通知を出し、表示をOSの実態に再同期する。権限の不足・過剰を静的に検出する回帰テストを追加 (#103)

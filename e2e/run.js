@@ -28,7 +28,8 @@ import net from 'node:net';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, '..');
-const PORT = 1420;
+// 並行作業中の別 dev サーバーと衝突しないよう E2E_PORT で上書きできる（既定 1420）。
+const PORT = Number(process.env.E2E_PORT || 1420);
 const BASE_URL = `http://localhost:${PORT}`;
 const INIT_SCRIPT = path.join(__dirname, 'init.js');
 
@@ -210,6 +211,112 @@ async function getOverlayBarWrapperOpacity(page) {
     const wrapper = bar ? bar.parentElement : null;
     return wrapper ? Number(getComputedStyle(wrapper).opacity) : null;
   });
+}
+
+/**
+ * #119: 「すべてのデータを初期化」は window.confirm ではなくアプリ内モーダル
+ * （role=alertdialog）で確認し、OK を押した時だけ reset_all_data を呼ぶ。
+ * キャンセル/ESC/背景クリックでは IPC が一切呼ばれず、ESC が設定を閉じたり
+ * exit_app を呼んだりしないことをログで確認する。E2E_SHOT_DIR を指定すると
+ * 800/1280/480 幅のスクリーンショットも保存する。
+ */
+async function confirmResetScenario(page, lang) {
+  await page.waitForTimeout(600);
+  await openSettingsModal(page);
+  await page.evaluate(() => {
+    const tabs = [...document.querySelectorAll('[role="tab"]')];
+    tabs[tabs.length - 1].click();
+  });
+  await page.waitForTimeout(300);
+  const openDialog = async () => {
+    await page.evaluate(() => {
+      const icon = document.querySelector('svg.lucide-rotate-ccw');
+      const btn = icon && icon.closest('button');
+      if (!btn) throw new Error('初期化ボタンが見つからない');
+      btn.click();
+    });
+    await page.waitForSelector('[role="alertdialog"]', { timeout: 2000 });
+    await page.waitForTimeout(150);
+  };
+  const dialogState = () =>
+    page.evaluate(() => {
+      const d = document.querySelector('[role="alertdialog"]');
+      return d
+        ? {
+            modal: d.getAttribute('aria-modal'),
+            display: getComputedStyle(d).display,
+            focus: document.activeElement ? document.activeElement.textContent : null,
+            text: d.textContent,
+          }
+        : null;
+    });
+  const resets = () => countCalls(page, 'reset_all_data');
+  const detail = [];
+
+  await openDialog();
+  const st = await dialogState();
+  detail.push('dialog=' + JSON.stringify(st));
+  const defaultFocusIsCancel = st && st.focus === (lang === 'ja' ? 'キャンセル' : 'Cancel');
+
+  const shotDir = process.env.E2E_SHOT_DIR;
+  if (shotDir) {
+    for (const [w, h] of [
+      [800, 600],
+      [1280, 800],
+      [480, 700],
+    ]) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: path.join(shotDir, `confirm-${lang}-${w}.png`) });
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.waitForTimeout(200);
+  }
+
+  // 1) キャンセルボタン
+  await page.click('[role="alertdialog"] button:first-of-type');
+  await page.waitForTimeout(250);
+  const afterCancel = { resets: await resets(), open: !!(await dialogState()) };
+  // 2) ESC（設定は閉じず exit_app も呼ばれない）
+  await openDialog();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  const afterEsc = {
+    resets: await resets(),
+    open: !!(await dialogState()),
+    settingsStillOpen: (await page.$('svg.lucide-rotate-ccw')) !== null,
+    exits: await countCalls(page, 'exit_app'),
+  };
+  // 3) 背景クリック（パネルの外）
+  await openDialog();
+  await page.mouse.click(4, 4);
+  await page.waitForTimeout(250);
+  const afterBackdrop = { resets: await resets(), open: !!(await dialogState()) };
+  // 4) OK でのみ実行
+  await openDialog();
+  await page.click('[role="alertdialog"] button:last-of-type');
+  await page.waitForTimeout(400);
+  const afterOk = { resets: await resets(), open: !!(await dialogState()) };
+
+  const pass =
+    st !== null &&
+    st.modal === 'true' &&
+    st.display !== 'none' &&
+    defaultFocusIsCancel &&
+    afterCancel.resets === 0 &&
+    !afterCancel.open &&
+    afterEsc.resets === 0 &&
+    !afterEsc.open &&
+    afterEsc.settingsStillOpen &&
+    afterEsc.exits === 0 &&
+    afterBackdrop.resets === 0 &&
+    !afterBackdrop.open &&
+    afterOk.resets === 1 &&
+    !afterOk.open;
+  detail.push(
+    `defaultFocusIsCancel=${defaultFocusIsCancel} cancel=${JSON.stringify(afterCancel)} esc=${JSON.stringify(afterEsc)} backdrop=${JSON.stringify(afterBackdrop)} ok=${JSON.stringify(afterOk)}`,
+  );
+  return { pass, detail: detail.join(' | ') };
 }
 
 const scenarios = [
@@ -1909,6 +2016,21 @@ const scenarios = [
         pass,
         detail: `pausedAfterClick=${pausedAfterClick} playingAfterSecond=${playingAfterSecond} pausedAfterDouble=${pausedAfterDouble} overlayStillPlaying=${overlayStillPlaying} overlayNext=${nextAfterOverlay - beforeOverlayClick} wheelNext=${nextAfter - nextBefore} wheelPrev=${prevAfter - prevBefore}`,
       };
+    },
+  },
+  {
+    name: 'reset-all-data uses an in-app alertdialog; cancel/ESC/backdrop never call reset_all_data, OK does (ja) (#119)',
+    hash: 'statszero',
+    async run(page) {
+      return confirmResetScenario(page, 'ja');
+    },
+  },
+  {
+    name: 'reset-all-data uses an in-app alertdialog; cancel/ESC/backdrop never call reset_all_data, OK does (en) (#119)',
+    hash: 'statszero',
+    locale: 'en-US',
+    async run(page) {
+      return confirmResetScenario(page, 'en');
     },
   },
 ];

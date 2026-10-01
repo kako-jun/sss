@@ -38,6 +38,8 @@ import {
   createButtonFocusGuard,
 } from './lib/keyboardShortcuts';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
+import { ConfirmDialogHost } from './components/ConfirmDialog';
+import { isConfirmDialogOpen } from './lib/confirmDialog';
 import { createClickDebouncer, createWheelNavigator } from './lib/photoGestures';
 
 function App() {
@@ -400,6 +402,10 @@ function App() {
       // （Cmd+F/Ctrl+F等、OS/ブラウザ標準のショートカットとの衝突を避ける。
       // 実ブラウザで「Cmd+FがOSのフルスクリーンAPIも呼んでしまう」ことを確認）。
       if (hasModifierKey(e)) return;
+
+      // #119: 確認モーダル表示中は全ショートカットを無効化する（ESC は ConfirmDialogHost が
+      // window の capture で先取りしてキャンセル扱いにする。ここへは届かない）。
+      if (isConfirmDialogOpen()) return;
 
       const h = keydownHandlersRef.current;
 
@@ -911,6 +917,9 @@ function App() {
         initialTab={settingsInitialTab}
         openedViaMouse={settingsOpenedViaMouse}
       />
+
+      {/* #119: アプリ内の確認モーダル（window.confirm の代替） */}
+      <ConfirmDialogHost />
     </div>
   );
 }
