@@ -532,20 +532,6 @@ describe('OverlayUI undo toast (#78)', () => {
     await screen.findByText('取り消す');
   }
 
-  it('tells the user to rescan when undoing a folder/date exclusion (#111)', async () => {
-    excludeImage.mockResolvedValue({ ...outcome, pattern: '/photos/{**,*}', needsRescan: true });
-    undoExclude.mockResolvedValue(undefined);
-    render(<OverlayUI image={makeImage()} {...requiredProps} />);
-
-    fireEvent.click(screen.getByTitle('メニュー'));
-    fireEvent.click(screen.getByText('除外'));
-    fireEvent.click(screen.getByText('フォルダを除外'));
-    await screen.findByText('取り消す');
-    fireEvent.click(screen.getByText('取り消す'));
-
-    await screen.findByText(/除外を取り消しました。再スキャンで外れた写真を戻すには/);
-  });
-
   it('undoes an exclusion with the backend result and notifies the caller', async () => {
     excludeImage.mockResolvedValue(outcome);
     undoExclude.mockResolvedValue(undefined);

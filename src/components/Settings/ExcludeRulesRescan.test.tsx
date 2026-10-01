@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { setLanguageSetting } from '../../lib/i18n/store';
 
 // #111: 除外ルールの追加・削除は DB に書くだけでプレイリストへ反映されない。
 // 変更直後に「再スキャンが必要」の案内（1件に集約）と「今すぐ再スキャン」ボタンを出し、
 // ボタンで rescan_last_directory を呼ぶ。自動では再スキャンしない。
+// 状態は親（Settings）が持つ。ここではセクション単体を、Settings と同じ配線のハーネスで検証する。
+// Settings 本体の結合（タブ往復・ScanSection/HistorySection 連動）は Settings.rescan.test.tsx。
 const getIgnorePatterns = vi.fn();
 const removeIgnorePattern = vi.fn();
 const addIgnorePattern = vi.fn();
@@ -19,11 +20,8 @@ vi.mock('../../lib/tauri', () => ({
   rescanLastDirectory: (...args: unknown[]) => rescanLastDirectory(...args),
 }));
 
-import {
-  ExcludeRulesSection,
-  foldExcludeRescanNotice,
-  type ExcludeRescanNotice,
-} from './ExcludeRulesSection';
+import { ExcludeRulesSection } from './ExcludeRulesSection';
+import { useExcludeRescan, applyChange, toNotice } from './useExcludeRescan';
 
 const progress = (totalFiles: number) => ({
   totalFiles,
@@ -34,19 +32,9 @@ const progress = (totalFiles: number) => ({
   errorExamples: [],
 });
 
-// Settings（親）と同じ配線: 案内状態は親が持ち、成功時に applied なら消す。
 function Harness({ onScanComplete }: { onScanComplete: () => void }) {
-  const [notice, setNotice] = useState<ExcludeRescanNotice | null>(null);
-  return (
-    <ExcludeRulesSection
-      notice={notice}
-      onRuleChanged={(c) => setNotice((p) => foldExcludeRescanNotice(p, c))}
-      onRescanned={(applied) => {
-        if (applied) setNotice(null);
-        onScanComplete();
-      }}
-    />
-  );
+  const rescan = useExcludeRescan(onScanComplete);
+  return <ExcludeRulesSection rescan={rescan} />;
 }
 
 beforeEach(() => {
@@ -114,7 +102,17 @@ describe('ExcludeRulesSection rescan notice (#111)', () => {
     expect(screen.getAllByRole('button', { name: '今すぐ再スキャン' })).toHaveLength(1);
   });
 
-  it('calls rescanLastDirectory (no args) on click, shows scanning state, then done and clears the notice', async () => {
+  it('removes the notice when an added rule is removed again (net change is none) (N1)', async () => {
+    render(<Harness onScanComplete={() => {}} />);
+    await addRule('**/a/');
+    await screen.findByText(/除外ルールを追加しました: \*\*\/a\//);
+    // 追加した行の解除ボタン（2行目）
+    const removes = screen.getAllByRole('button', { name: '解除' });
+    fireEvent.click(removes[removes.length - 1]);
+    await waitFor(() => expect(screen.queryByTestId('exclude-rescan-notice')).toBeNull());
+  });
+
+  it('calls rescanLastDirectory (no args), shows scanning, then done with the current count', async () => {
     let resolve!: (v: ReturnType<typeof progress>) => void;
     rescanLastDirectory.mockReturnValue(new Promise((r) => (resolve = r)));
     const onScanComplete = vi.fn();
@@ -126,13 +124,13 @@ describe('ExcludeRulesSection rescan notice (#111)', () => {
     expect(rescanLastDirectory).toHaveBeenCalledWith();
     const busy = await screen.findByRole('button', { name: '再スキャン中...' });
     expect((busy as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(busy); // 二重実行されない
+    fireEvent.click(busy);
     expect(rescanLastDirectory).toHaveBeenCalledTimes(1);
 
     resolve(progress(1234));
     await waitFor(() => {
       expect(
-        screen.getByText('再スキャンしました。除外ルールを反映しました（1,234件）'),
+        screen.getByText('再スキャンしました。除外ルールを反映しました（現在の対象は1,234件）'),
       ).toBeTruthy();
     });
     expect(onScanComplete).toHaveBeenCalledTimes(1);
@@ -140,6 +138,7 @@ describe('ExcludeRulesSection rescan notice (#111)', () => {
   });
 
   it('shows the error and keeps the notice + button when the rescan fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     rescanLastDirectory.mockRejectedValue('directoryNotFound:/mnt/gone');
     const onScanComplete = vi.fn();
     render(<Harness onScanComplete={onScanComplete} />);
@@ -152,6 +151,16 @@ describe('ExcludeRulesSection rescan notice (#111)', () => {
     expect(screen.getByRole('button', { name: '今すぐ再スキャン' })).toBeTruthy();
   });
 
+  it('shows a failure message (not silence) when the rescan returns nothing (N2)', async () => {
+    rescanLastDirectory.mockResolvedValue(null);
+    const onScanComplete = vi.fn();
+    render(<Harness onScanComplete={onScanComplete} />);
+    await addRule('**/thumbs/');
+    fireEvent.click(await screen.findByRole('button', { name: '今すぐ再スキャン' }));
+    await screen.findByText('フォルダのスキャンに失敗しました');
+    expect(onScanComplete).not.toHaveBeenCalled();
+  });
+
   it('keeps the notice when a rule changes while the rescan is running', async () => {
     let resolve!: (v: ReturnType<typeof progress>) => void;
     rescanLastDirectory.mockReturnValue(new Promise((r) => (resolve = r)));
@@ -159,12 +168,14 @@ describe('ExcludeRulesSection rescan notice (#111)', () => {
     await addRule('**/a/');
     fireEvent.click(await screen.findByRole('button', { name: '今すぐ再スキャン' }));
     await screen.findByRole('button', { name: '再スキャン中...' });
-    await addRule('**/b/'); // 実行中に追加（このルールは今回の再スキャンに間に合っていない）
+    await addRule('**/b/');
     await screen.findByText('**/b/');
     resolve(progress(10));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '今すぐ再スキャン' })).toBeTruthy();
     });
+    // 残る案内は、間に合わなかった b だけを指す
+    expect(screen.getByText(/除外ルールを追加しました: \*\*\/b\//)).toBeTruthy();
   });
 
   it('renders the English wording', async () => {
@@ -180,12 +191,12 @@ describe('ExcludeRulesSection rescan notice (#111)', () => {
   });
 });
 
-describe('foldExcludeRescanNotice (#111)', () => {
-  it('keeps the first change as is and folds later ones into "multiple"', () => {
-    const first = foldExcludeRescanNotice(null, { kind: 'added', pattern: 'x' });
-    expect(first).toEqual({ kind: 'added', pattern: 'x' });
-    expect(foldExcludeRescanNotice(first, { kind: 'removed', pattern: 'y' })).toEqual({
-      kind: 'multiple',
-    });
+describe('applyChange / toNotice (#111)', () => {
+  it('folds changes and cancels an add/remove pair of the same pattern', () => {
+    const one = applyChange([], { kind: 'added', pattern: 'x' }, 1);
+    expect(toNotice(one)).toEqual({ kind: 'added', pattern: 'x' });
+    const two = applyChange(one, { kind: 'removed', pattern: 'y' }, 2);
+    expect(toNotice(two)).toEqual({ kind: 'multiple' });
+    expect(toNotice(applyChange(one, { kind: 'removed', pattern: 'x' }, 3))).toBeNull();
   });
 });

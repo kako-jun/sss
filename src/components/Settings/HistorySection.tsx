@@ -6,13 +6,14 @@ import type { RecentImage } from '../../types';
 import { useT } from '../../lib/i18n';
 import { resolveExcludeErrorMessage } from '../../lib/i18n/errors';
 import { Thumbnail } from './Thumbnail';
+import type { ExcludeRuleChange } from './useExcludeRescan';
 
 interface HistorySectionProps {
   /**
    * #111: ディレクトリ/撮影日除外は再スキャンするまでプレイリストに反映されない。
    * ルールが追加されて再スキャンが要るとき、「除外ルール」タブの案内（再スキャンボタン付き）へ伝える。
    */
-  onRuleChanged?: (change: { kind: 'added'; pattern: string }) => void;
+  onRuleChanged?: (change: ExcludeRuleChange) => void;
 }
 
 export function HistorySection({ onRuleChanged }: HistorySectionProps = {}) {

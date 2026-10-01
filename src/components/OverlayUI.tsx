@@ -329,9 +329,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
           }
           await undoExclude(outcome);
           onExcludeUndoneRef.current?.();
-          // #111: フォルダ/撮影日の除外（needsRescan）は、再スキャンで外れた写真が取り消しでは
-          // 自動で戻らない。トーストで再スキャンを案内する（除外時と同じ「再スキャン」導線）。
-          return outcome.needsRescan ? t('undoExcludeNeedsRescan') : t('undoExcludeDone');
+          return t('undoExcludeDone');
         },
       );
       // #65 問題5: 除外した画像を表示し続けず、即座に次へ進んでプレイリスト

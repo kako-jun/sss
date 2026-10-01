@@ -26,6 +26,8 @@
   // 壊れたPNGバイト列で実ブラウザに本物のonErrorを起こさせる）。
   const seqs = {
     slides: ['/p/a.png', '/p/b.png'],
+    // #111: 除外ルール変更後の再スキャン案内（再スキャンを少し遅らせて実行中の状態を作る）。
+    exrescan: ['/p/a.png', '/p/b.png'],
     // #67: 統計タブ用（背景に写真1枚を出しておく）。
     stats: ['/p/a.png'],
     statsspread: ['/p/a.png'],
@@ -176,6 +178,7 @@
             errorExamples: [],
           };
         case 'rescan_last_directory':
+          if (sc === 'exrescan') await new Promise((r) => setTimeout(r, 700));
           if (sc === 'unreach') {
             await new Promise((r) => setTimeout(r, 100));
             // #80: 実際のバックエンドはユーザー向け文言でなくエラーコードで返す

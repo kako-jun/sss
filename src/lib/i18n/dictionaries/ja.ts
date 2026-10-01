@@ -91,8 +91,6 @@ export const ja = {
   // #78: 除外/ピック直後の控えめなトースト（数秒だけ「取り消す」を出す）
   undoButton: '取り消す',
   undoExcludeDone: '除外を取り消しました',
-  undoExcludeNeedsRescan:
-    '除外を取り消しました。再スキャンで外れた写真を戻すには、設定のフォルダタブから再スキャンしてください',
   undoExcludeNothing: '戻すものはありませんでした',
   undoPickDone: 'ピックを取り消しました',
   undoFailed: 'エラー: 取り消せませんでした',
@@ -175,7 +173,7 @@ export const ja = {
   excludeRulesChangedNeedsRescan: '除外ルールを変更しました。反映するには再スキャンが必要です',
   excludeRescanNow: '今すぐ再スキャン',
   excludeRescanning: '再スキャン中...',
-  excludeRescanDone: '再スキャンしました。除外ルールを反映しました（{count}件）',
+  excludeRescanDone: '再スキャンしました。除外ルールを反映しました（現在の対象は{count}件）',
 
   // === 設定画面: ピック ===
   pickListTitle: 'ピック一覧',

@@ -28,7 +28,7 @@ import net from 'node:net';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, '..');
-const PORT = 1420;
+const PORT = Number(process.env.E2E_PORT) || 1420;
 const BASE_URL = `http://localhost:${PORT}`;
 const INIT_SCRIPT = path.join(__dirname, 'init.js');
 
@@ -92,6 +92,14 @@ function waitForServer(url, timeoutMs, viteProcess) {
 
 /** システムにインストール済みの Chrome または Edge を順に試す。 */
 async function launchSystemBrowser() {
+  // E2E_BROWSER_PATH: channel の Chrome/Edge が無い環境（Playwright 同梱 Chromium 等）用に実行ファイルを直接指定する。
+  if (process.env.E2E_BROWSER_PATH) {
+    return chromium.launch({
+      executablePath: process.env.E2E_BROWSER_PATH,
+      headless: true,
+      args: ['--autoplay-policy=no-user-gesture-required', '--no-sandbox'],
+    });
+  }
   const channels = ['chrome', 'msedge'];
   let lastError;
   for (const channel of channels) {
@@ -1798,6 +1806,57 @@ const scenarios = [
       return {
         pass,
         detail: `shown=${shown} stillShown(idle)=${stillShown} barOpacity=${barOpacity} undoCalls=${JSON.stringify(undoCalls)} doneShown=${doneShown} buttonGone=${buttonGone}`,
+      };
+    },
+  },
+  {
+    // #111: 除外ルールの追加後に再スキャン案内とボタンが出て、押すと rescan_last_directory が
+    // 1回だけ呼ばれる。再スキャン中に別タブへ往復してもボタンは無効のまま・二重実行されず、
+    // 完了メッセージは戻ったときに見られる。
+    name: 'exclude rule change shows a rescan notice; the button rescans once even across tab round trips (#111)',
+    hash: 'exrescan',
+    async run(page) {
+      await page.waitForTimeout(1500); // 起動時の背景スキャン（rescan 1回目）の完了を待つ
+      await openSettingsModal(page);
+      await page.click('#tab-exclude');
+      await page.waitForTimeout(300);
+      const rescanCalls = () => countCalls(page, 'rescan_last_directory');
+      const baseline = await rescanCalls();
+      const noticeBefore = await isVisible(page, '今すぐ再スキャン');
+      await page.fill('input[type=text]', '**/thumbs/');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(300);
+      const noticeShown = await isVisible(page, '反映するには再スキャンが必要です');
+      const afterAdd = await rescanCalls(); // 自動では再スキャンしない
+      await page.click('button:has-text("今すぐ再スキャン")');
+      await page.waitForTimeout(150);
+      // 再スキャン中にタブを往復する
+      await page.click('#tab-history');
+      await page.click('#tab-exclude');
+      await page.waitForTimeout(100);
+      const busy = await page.evaluate(() => {
+        const b = [...document.querySelectorAll('button')].find((x) =>
+          x.textContent.includes('再スキャン中'),
+        );
+        return b ? { disabled: b.disabled, display: getComputedStyle(b).display } : null;
+      });
+      if (busy && !busy.disabled) await page.click('button:has-text("再スキャン中")');
+      await page.waitForTimeout(1000);
+      const doneShown = await isVisible(page, '再スキャンしました');
+      const total = await rescanCalls();
+      const buttonGone = !(await isVisible(page, '今すぐ再スキャン'));
+      const pass =
+        !noticeBefore &&
+        noticeShown &&
+        afterAdd === baseline &&
+        busy !== null &&
+        busy.disabled === true &&
+        total === baseline + 1 &&
+        doneShown &&
+        buttonGone;
+      return {
+        pass,
+        detail: `baseline=${baseline} afterAdd=${afterAdd} total=${total} noticeBefore=${noticeBefore} noticeShown=${noticeShown} busy=${JSON.stringify(busy)} doneShown=${doneShown} buttonGone=${buttonGone}`,
       };
     },
   },
