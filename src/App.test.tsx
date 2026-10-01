@@ -1403,3 +1403,20 @@ describe('App startup failures (#115)', () => {
     ).toBeTruthy();
   });
 });
+
+// #113: 右上ピルも明るい写真の上でアイコンが 3:1 を満たすよう、背景を bg-black/75 にする
+// （実効コントラスト比は実ブラウザ e2e が測る）。
+describe('App top-right pill background (#113)', () => {
+  it('uses bg-black/75 so its icons stay readable over bright photos', async () => {
+    getLastDirectoryPath.mockResolvedValue(null);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    });
+
+    const pill = screen.getByTitle('設定').closest('.backdrop-blur-md')!;
+    expect(pill.className).toContain('bg-black/75');
+    expect(pill.className).not.toContain('bg-black/50');
+  });
+});

@@ -747,7 +747,7 @@ function App() {
 
         {/* 終了ボタン（右上）。#66視覚刷新: 通常表示中の右上ピルと統一 */}
         <div className="fixed top-4 right-4 z-50">
-          <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
+          <div className="flex items-center bg-black/75 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
             <button
               onClick={() => exit(0)}
               className="relative p-2 rounded-full text-white/60 hover:text-white/90 hover:bg-white/10 focus-visible:text-white/90 transition-colors group"
@@ -846,7 +846,7 @@ function App() {
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
       >
-        <div className="flex items-center gap-0.5 bg-black/50 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
+        <div className="flex items-center gap-0.5 bg-black/75 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
           <button
             onClick={(e) => {
               // #66レビュー3巡目should: マウスクリック(detail>0)かキーボードの
