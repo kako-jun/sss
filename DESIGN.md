@@ -521,6 +521,17 @@ Ctrl+C. Rejected: a `copy` handler (drag `toString()` stays split) and an overla
 invisible full-text layer (selection highlight no longer matches the visible text).
 Japanese time uses a 2-digit hour (`00:30`) so the width does not jump with the hour.
 
+Known limits (RTL names, #114): (1) for a Hebrew/Arabic filename, dragging across the
+whole info cluster from its left edge to its right edge can leave the filename out of
+the selection and select only the date line (a bidi caret-mapping quirk); dragging or
+triple-clicking the filename itself, and Ctrl+C on it, give the exact name.
+(2) At 480px wide an overflowing RTL name can only be drag-selected up to its visible
+part; triple-click and Ctrl+C still give the whole name. (3) The few pixels between the
+`…` and the tail are intentional: the head box is as wide as the room left for it and
+the ellipsis lands on a character boundary, so the leftover (under one glyph) shows as a
+gap; shrinking the box to fit would break the layout of the tail or the copy-exact
+structure, so it is left as is.
+
 Measured visible filename characters for a 60-char name with date + map:
 0 → 33 at 480x420, 20 → 52 at 800/1280, 20 → 60 (whole name) at 1920/3840. The max
 width scales with the screen (`max-w-[max(36rem,40vw)]`: 576px up to 1440px wide,
