@@ -366,6 +366,9 @@
             return { files: 500, min: 0, max: 0, mean: 0, bins: [{ count: 0, files: 500 }] };
           }
           return { files: 0, min: 0, max: 0, mean: 0, bins: [] };
+        case 'get_share_directory':
+          // 実バックエンドは解決済みパス(文字列)を返す。null だと controlled input の警告が出る。
+          return '/tmp/sss-picked';
         case 'get_default_share_directory':
         case 'get_share_directory':
           return '/tmp/sss-picked';

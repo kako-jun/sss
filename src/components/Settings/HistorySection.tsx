@@ -72,7 +72,10 @@ export function HistorySection({ onRuleChanged }: HistorySectionProps = {}) {
       )}
 
       {excludeError && (
-        <div role="alert" className="p-2 bg-black/30 rounded-lg text-red-300/80 text-xs">
+        <div
+          role="alert"
+          className="select-text p-2 bg-black/30 rounded-lg text-red-300/80 text-xs"
+        >
           {excludeError}
         </div>
       )}
