@@ -172,15 +172,53 @@ async function countCalls(page, cmd) {
   return page.evaluate((c) => window.__e2eLog.filter((l) => l[1] === c).length, cmd);
 }
 
-/** 設定ボタン（lucideのgearアイコン、ロケール非依存）をクリックして開く。#66用。 */
-/** リサイズ後のレイアウト確定を待つ（リサイズ→再描画の2フレーム + 余裕）。固定 sleep の代わり。 */
-async function settleLayout(page) {
-  await page.evaluate(
-    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
-  );
-  await page.waitForTimeout(100);
+/**
+ * #124: レイアウトが確定する（アニメーション・リサイズ反映が終わる）まで待つ。固定 sleep や
+ * 「ポーリング回数」でなく**時間と実フレーム**で判定する: 描画に関わる値（最初のタブ・モーダルの
+ * 矩形、ビューポート）が、requestAnimationFrame の3フレーム以上かつ 100ms 以上連続して
+ * 変わらなければ確定とみなす。レンダラがフレームを出せない間は rAF が呼ばれず、
+ * フレーム数が進まないので、負荷で凍っている間の「同じ値」を確定と誤認しない。
+ */
+async function waitLayoutStable(page, { timeout = 15000 } = {}) {
+  try {
+    await page.waitForFunction(
+      () => {
+        const r = (el) => {
+          if (!el) return null;
+          const b = el.getBoundingClientRect();
+          return [b.top, b.left, b.width, b.height].map((v) => Math.round(v * 100) / 100).join(',');
+        };
+        const key = [
+          r(document.querySelector('[role="tab"]')),
+          r(document.querySelector('[role="dialog"]')),
+          window.innerWidth,
+          window.innerHeight,
+        ].join('|');
+        const now = performance.now();
+        const st = window.__layoutSettle;
+        if (!st || st.key !== key) {
+          window.__layoutSettle = { key, since: now, frames: 0 };
+          return false;
+        }
+        st.frames++;
+        return st.frames >= 3 && now - st.since >= 100;
+      },
+      null,
+      { polling: 'raf', timeout },
+    );
+  } finally {
+    await page.evaluate(() => {
+      delete window.__layoutSettle;
+    });
+  }
 }
 
+/** リサイズ後のレイアウト確定を待つ（固定 sleep の代わり。waitLayoutStable 参照）。 */
+async function settleLayout(page) {
+  await waitLayoutStable(page);
+}
+
+/** 設定ボタン（lucideのgearアイコン、ロケール非依存）をクリックして開く。#66用。 */
 async function openSettingsModal(page) {
   await page.evaluate(() => {
     const icon = document.querySelector('svg.lucide-settings');
@@ -188,25 +226,10 @@ async function openSettingsModal(page) {
     if (!btn) throw new Error('設定ボタンが見つからない');
     btn.click();
   });
-  // #124: 固定 350ms 待ちだと、負荷で開閉アニメーション中（タブ行がまだ描画前、または座標が
-  // 移動中）の値を測って揺れる。タブが現れ、モーダルの位置が連続 5 回（約 100ms）変わらなく
-  // なる（アニメーション完了）まで条件待ちする。
+  // #124: 固定 350ms 待ちだと、負荷で開閉アニメーション中の値を測って揺れる。
+  // タブが現れ、モーダルの矩形が時間・フレーム基準で安定する（アニメーション完了）まで待つ。
   await page.waitForSelector('[role="tab"]', { timeout: 8000 });
-  await page.waitForFunction(
-    () => {
-      const el = document.querySelector('[role="tab"]');
-      const y = el ? el.getBoundingClientRect().top : null;
-      const st = (window.__settingsOpenSettle ??= { y: null, n: 0 });
-      st.n = y !== null && y === st.y ? st.n + 1 : 0;
-      st.y = y;
-      return st.n >= 5;
-    },
-    null,
-    { polling: 20, timeout: 8000 },
-  );
-  await page.evaluate(() => {
-    delete window.__settingsOpenSettle;
-  });
+  await waitLayoutStable(page);
 }
 
 /**
@@ -1833,59 +1856,103 @@ const scenarios = [
     // #65レビュー3巡目M4(must): 「同じpathの連続表示はフェード省略」nitが、
     // AnimatePresence(mode="wait")の退場500ms中の再レンダーで誤って発火し、
     // 画像→動画・動画→画像を含む全ての切り替えでフェードインが消えていた
-    // （新要素がopacity 0→1ではなく瞬時に1で現れる）。新しくマウントされた
-    // 要素が必ず低いopacityから始まり、約0.5秒かけて1に達することを
-    // 40ms間隔のサンプリングで確認する。
+    // （新要素がopacity 0→1ではなく瞬時に1で現れる）。
+    //
+    // 判定（#124で作り直し）: 「新しくマウントされた要素そのもの」を追跡する。
+    // ページ読み込み前（setup）に MutationObserver を仕込み、メディア要素（video/img）が
+    // DOM に追加された**その瞬間**（microtask、描画前）の computed opacity を要素ごとに記録する。
+    //   - 合格 = 追加直後の最初の値が低く(<0.9)、**同じ要素**が後に高く(>=0.95)なった要素がある。
+    //   - 退場中の既存要素が下がる低 opacity は、新要素ではないので数えない
+    //     （旧実装は観測窓が長いと自動送りの退場フェードアウトを「低」と誤認し、
+    //     次の画像が opacity 1 で瞬時に出ても PASS した）。
+    //   - マウントが観測開始より前に終わって低 opacity を見逃す問題もない（観測は操作前から常時）。
+    // 窓の長さに依存せず、条件が満たされるまで待つ（上限は退場500ms+フェード500msに対し十分長い）。
     name: 'newly mounted media always fades in over ~0.5s, never appears instantly at opacity 1 (M4)',
     hash: 'fade',
+    async setup(page) {
+      await page.addInitScript(() => {
+        const tracked = [];
+        window.__fadeTracked = tracked;
+        const record = (el) => {
+          if (tracked.some((t) => t.el === el)) return;
+          const first = Number(getComputedStyle(el).opacity);
+          tracked.push({
+            el,
+            kind: el.tagName.toLowerCase(),
+            first,
+            maxAfter: first,
+            samples: [Number(first.toFixed(3))],
+          });
+        };
+        const isMedia = (el) =>
+          el.nodeType === 1 &&
+          (el.tagName === 'VIDEO' || (el.tagName === 'IMG' && el.alt !== 'SSS Logo'));
+        new MutationObserver((muts) => {
+          for (const m of muts) {
+            for (const n of m.addedNodes) {
+              if (n.nodeType !== 1) continue;
+              if (isMedia(n)) record(n);
+              n.querySelectorAll &&
+                n.querySelectorAll('video,img').forEach((e) => isMedia(e) && record(e));
+            }
+          }
+        }).observe(document, { childList: true, subtree: true });
+        setInterval(() => {
+          for (const t of tracked) {
+            if (!t.el.isConnected) continue;
+            const o = Number(getComputedStyle(t.el).opacity);
+            if (o > t.maxAfter) t.maxAfter = o;
+            if (t.samples.length < 200) t.samples.push(Number(o.toFixed(3)));
+          }
+        }, 16);
+      });
+    },
     async run(page) {
-      // 固定長のサンプリング窓だと、負荷でフェード開始が遅れたり page.evaluate が間延びしたとき
-      // （窓内に1.0へ届かない・サンプルが数個しか取れない）に偽陰性になる。ページ内で約16ms間隔に
-      // 自前サンプリングし、「低opacity(<0.9)を観測したあとに高opacity(>=0.95)へ到達する」
-      // 条件が満たされるまで（上限 timeoutMs）待つ条件待ちにする。
-      async function observeFade(timeoutMs) {
-        return page.evaluate(
-          (timeout) =>
-            new Promise((resolve) => {
-              const samples = [];
-              let sawLow = false;
-              let sawHighAfterLow = false;
-              const deadline = performance.now() + timeout;
-              const tick = () => {
-                const el =
-                  document.querySelector('video') ||
-                  [...document.querySelectorAll('img')].find((i) => i.alt !== 'SSS Logo');
-                const o = el ? Number(getComputedStyle(el).opacity) : null;
-                if (samples.length < 400) samples.push(o === null ? null : Number(o.toFixed(3)));
-                if (o !== null && o < 0.9) sawLow = true;
-                if (sawLow && o !== null && o >= 0.95) sawHighAfterLow = true;
-                if (sawHighAfterLow || performance.now() > deadline) {
-                  clearInterval(timer);
-                  resolve({ ok: sawHighAfterLow, samples });
-                }
-              };
-              const timer = setInterval(tick, 16);
-            }),
-          timeoutMs,
+      const summary = () =>
+        page.evaluate(() =>
+          window.__fadeTracked.map((t, i) => ({
+            i,
+            kind: t.kind,
+            first: Number(t.first.toFixed(3)),
+            max: Number(t.maxAfter.toFixed(3)),
+          })),
         );
+      // `from` 以降に追加された kind の要素で「最初の値<0.9 かつ同じ要素が>=0.95に到達」したものを待つ。
+      async function expectFadeIn(from, kind) {
+        const ok = await page
+          .waitForFunction(
+            ([f, k]) =>
+              window.__fadeTracked
+                .slice(f)
+                .some((t) => (k === 'any' || t.kind === k) && t.first < 0.9 && t.maxAfter >= 0.95),
+            [from, kind],
+            { timeout: 12000, polling: 50 },
+          )
+          .then(
+            () => true,
+            () => false,
+          );
+        return ok;
       }
+      const count = () => page.evaluate(() => window.__fadeTracked.length);
 
-      // 初回マウント(画像a)のフェードインを見る。
-      const initial = await observeFade(6000);
+      // 初回マウント(画像a)。
+      const initial = await expectFadeIn(0, 'img');
 
-      // 手動で次へ進み、2件目(動画)への切り替わりのフェードインも見る
-      // （退場500ms + 自身のフェード500msぶん。観測は条件成立まで待つ）。
+      // 手動で次へ進み、2件目(動画)への切り替わりのフェードインも見る。
+      const beforeVideo = await count();
       await page.keyboard.press('ArrowRight');
-      const toVideo = await observeFade(6000);
+      const toVideo = await expectFadeIn(beforeVideo, 'video');
 
       // さらに次へ進み、動画→画像の切り替わりも確認する。
+      const beforeImage = await count();
       await page.keyboard.press('ArrowRight');
-      const toImage = await observeFade(6000);
+      const toImage = await expectFadeIn(beforeImage, 'img');
 
-      const pass = initial.ok && toVideo.ok && toImage.ok;
+      const pass = initial && toVideo && toImage;
       return {
         pass,
-        detail: `initial=${JSON.stringify(initial.samples)} toVideo=${JSON.stringify(toVideo.samples)} toImage=${JSON.stringify(toImage.samples)}`,
+        detail: `initial=${initial} toVideo=${toVideo} toImage=${toImage} tracked=${JSON.stringify(await summary())}`,
       };
     },
   },
@@ -2920,6 +2987,10 @@ const scenarios = [
         (document.querySelector('[role=tabpanel]')?.innerText ?? '').includes('**/thumbs/'),
       );
       const noticeAfterReopen = await isVisible(page, '反映するには再スキャンが必要です');
+      // ゲートの invoke がモックに到達する前に呼ぶと未定義になるため、関数が現れるまで待つ。
+      await page.waitForFunction(() => typeof window.__rescanRelease === 'function', null, {
+        timeout: 5000,
+      });
       await page.evaluate(() => window.__rescanRelease());
       await page
         .waitForFunction(() => document.body.innerText.includes('再スキャンしました'), null, {
@@ -3029,9 +3100,30 @@ const scenarios = [
       await page.mouse.move(640, 300);
       await page.waitForTimeout(400);
       const nextBefore = await countCalls(page, 'get_next_image');
-      // 連続イベントは1回に畳まれる。実ホイールを間隔50msで送ると、負荷で到達が遅れ
-      // e.timeStamp の差が畳み込み窓を超えて2回に割れる（#124）ため、同一フレーム内に3発を
-      // ページ内から発火して「連続」を決定的にする（実ホイール経路は下の「上=前へ」で検証）。
+      // 連続イベントは1回に畳まれる（アプリの畳み込み窓 WHEEL_QUIET_MS=200ms）。
+      // (1) 実ホイール 3 発: 負荷でイベントの到達が遅れると窓を超えて 2 回に割れることがある（#124）
+      //     ため、ページ内で各イベントの到達時刻（e.timeStamp）を記録し、「到達間隔が窓以上空いた
+      //     回数 + 1」を期待ナビゲーション数として判定する（負荷で割れても、割れ方どおりなら正しい）。
+      await page.evaluate(() => {
+        window.__wheelStamps = [];
+        window.addEventListener('wheel', (e) => window.__wheelStamps.push(e.timeStamp), {
+          capture: true,
+        });
+      });
+      await page.mouse.wheel(0, 100);
+      await page.mouse.wheel(0, 100);
+      await page.mouse.wheel(0, 100);
+      await page.waitForTimeout(400);
+      const stamps = await page.evaluate(() => window.__wheelStamps.slice());
+      const expectedReal = stamps.reduce(
+        (n, t, i) => (i > 0 && t - stamps[i - 1] >= 200 ? n + 1 : n),
+        1,
+      );
+      const nextAfterReal = await countCalls(page, 'get_next_image');
+      // (2) 同一フレーム内に 3 発をページ内から発火（isTrusted=false）: 到達間隔が 0 なので
+      //     負荷に依らず必ず 1 回に畳まれる。
+      await page.waitForTimeout(400);
+      const nextBeforeSynth = await countCalls(page, 'get_next_image');
       await page.evaluate(() => {
         const target = document.elementFromPoint(640, 300);
         for (let i = 0; i < 3; i++) {
@@ -3042,6 +3134,7 @@ const scenarios = [
       });
       await page.waitForTimeout(300);
       const nextAfter = await countCalls(page, 'get_next_image');
+      const realCollapsed = nextAfterReal - nextBefore === expectedReal;
 
       // 上=前へ（戻れる状態）。一連の操作が落ち着いてから。
       await page.waitForTimeout(400);
@@ -3056,11 +3149,12 @@ const scenarios = [
         pausedAfterDouble &&
         overlayStillPlaying &&
         nextAfterOverlay - beforeOverlayClick === 1 &&
-        nextAfter - nextBefore === 1 &&
+        realCollapsed &&
+        nextAfter - nextBeforeSynth === 1 &&
         prevAfter - prevBefore === 1;
       return {
         pass,
-        detail: `pausedAfterClick=${pausedAfterClick} playingAfterSecond=${playingAfterSecond} pausedAfterDouble=${pausedAfterDouble} overlayStillPlaying=${overlayStillPlaying} overlayNext=${nextAfterOverlay - beforeOverlayClick} wheelNext=${nextAfter - nextBefore} wheelPrev=${prevAfter - prevBefore}`,
+        detail: `pausedAfterClick=${pausedAfterClick} playingAfterSecond=${playingAfterSecond} pausedAfterDouble=${pausedAfterDouble} overlayStillPlaying=${overlayStillPlaying} overlayNext=${nextAfterOverlay - beforeOverlayClick} wheelNextReal=${nextAfterReal - nextBefore}(expected ${expectedReal}) wheelNextSynth=${nextAfter - nextBeforeSynth} wheelPrev=${prevAfter - prevBefore}`,
       };
     },
   },
@@ -4474,6 +4568,8 @@ async function main() {
 
     let browser = await launchSystemBrowser();
     const results = [];
+    let browserRestarts = 0;
+    let consecutiveOpenFailures = 0;
     try {
       // E2E_ONLY='(#68)' のようにカンマ区切りの部分文字列を指定すると、名前が一致するシナリオだけ実行する
       // （デバッグ用。未指定なら全件）。
@@ -4487,8 +4583,9 @@ async function main() {
         // 英語ロケールを検証するシナリオは `locale: 'en-US'` を個別に指定する。
         // #124: 高負荷・メモリ逼迫でブラウザプロセス自体が落ちる（`Target page, context or
         // browser has been closed`）ことがあり、1つの browser を使い回していると以後の全シナリオが
-        // 巻き添えになる。ページ作成に失敗したら（またはブラウザが切断されていたら）起動し直して
-        // 1回だけ再試行する（シナリオ自体の FAIL は再試行しない）。
+        // 巻き添えになる。「ブラウザの切断・終了」が原因と判断できる失敗（isConnected() が false、
+        // またはエラーが closed/disconnected/crashed）に限り、起動し直して1回だけ再試行する
+        // （goto のタイムアウト等、ブラウザが生きている失敗では再起動しない。シナリオ自体の FAIL も再試行しない）。
         const consoleErrors = [];
         const openPage = async () => {
           const pg = await browser.newPage({
@@ -4504,16 +4601,48 @@ async function main() {
           await pg.goto(`${BASE_URL}/#${scenario.hash}`);
           return pg;
         };
+        const isBrowserGone = (err) =>
+          !browser.isConnected() || /closed|disconnected|crashed/i.test(String(err && err.message));
         let page;
+        let retried = null;
         try {
           if (!browser.isConnected()) throw new Error('browser disconnected');
           page = await openPage();
         } catch (err) {
-          console.warn(`[e2e] ブラウザを再起動して再試行: ${err.message}`);
+          if (!isBrowserGone(err)) {
+            results.push({
+              name: scenario.name,
+              pass: false,
+              detail: `ページを開けなかった（ブラウザは生存）: ${err.message}`,
+              consoleErrors: [],
+            });
+            continue;
+          }
+          retried = err.message.split('\n')[0].slice(0, 80);
+          browserRestarts++;
+          console.warn(`[e2e] ブラウザを再起動して再試行: ${retried}`);
           await browser.close().catch(() => {});
-          browser = await launchSystemBrowser();
           consoleErrors.length = 0;
-          page = await openPage();
+          try {
+            browser = await launchSystemBrowser();
+            page = await openPage();
+            consecutiveOpenFailures = 0;
+          } catch (err2) {
+            // 再起動後も開けない: このシナリオを FAIL として記録して続行する。
+            // 連続で失敗する場合だけ打ち切る（それまでの結果は必ず出力する）。
+            results.push({
+              name: scenario.name,
+              pass: false,
+              detail: `ブラウザ再起動後もページを開けなかった: ${err2.message}`,
+              retried,
+              consoleErrors: [],
+            });
+            if (++consecutiveOpenFailures >= 2) {
+              console.warn('[e2e] ブラウザ再起動が連続で失敗したため打ち切ります');
+              break;
+            }
+            continue;
+          }
         }
         // #66: 複数ページを同じbrowserで使い回す中、直前のシナリオがフォーカス
         // トラップ（モーダルを開いてフォーカスを奪う）を使うと、後続シナリオの
@@ -4528,11 +4657,16 @@ async function main() {
         } catch (err) {
           outcome = { pass: false, detail: `例外: ${err.message}` };
         }
-        results.push({ name: scenario.name, ...outcome, consoleErrors: consoleErrors.slice(0, 3) });
-        await page.close();
+        results.push({
+          name: scenario.name,
+          ...outcome,
+          ...(retried ? { retried } : {}),
+          consoleErrors: consoleErrors.slice(0, 3),
+        });
+        await page.close().catch(() => {});
       }
     } finally {
-      await browser.close();
+      await browser.close().catch(() => {});
     }
 
     console.log('\n[e2e] 結果:');
@@ -4540,11 +4674,14 @@ async function main() {
     for (const r of results) {
       const mark = r.pass ? 'PASS' : 'FAIL';
       if (!r.pass) allPass = false;
-      console.log(`  [${mark}] ${r.name}\n        ${r.detail}`);
+      console.log(
+        `  [${mark}] ${r.name}${r.retried ? ` (retried: browser restarted: ${r.retried})` : ''}\n        ${r.detail}`,
+      );
       if (r.consoleErrors.length > 0) {
         console.log(`        console errors: ${r.consoleErrors.join(' | ')}`);
       }
     }
+    if (browserRestarts > 0) console.log(`[e2e] ブラウザを再起動した回数: ${browserRestarts}`);
     console.log('');
     if (!allPass) {
       console.error('[e2e] 失敗したシナリオがあります');

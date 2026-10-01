@@ -310,6 +310,8 @@
           // 呼ばれるまで完了を保留する（起動時の背景スキャンは即完了）。
           if (sc === 'exrescan' && window.__rescanGateArmed)
             await new Promise((r) => {
+              // 二重呼び出しで先の resolver が残らないよう、新しいゲートの前に既存を解放する。
+              if (typeof window.__rescanRelease === 'function') window.__rescanRelease();
               window.__rescanRelease = r;
             });
           if (sc === 'unreach') {
