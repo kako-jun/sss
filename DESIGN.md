@@ -184,6 +184,15 @@ rounded-lg px-2 py-1 text-xs transition-colors
 The padding enlarges the click target; offset it with margins (`mt-5 -mb-1` in place
 of the former `mt-6`) so the card's vertical rhythm is unchanged.
 
+### Inline Notice with Action (#111)
+
+A short status/notice block inside a Settings tab that carries one Standard button
+(e.g. "exclude rules changed — rescan to apply" + "Rescan now"). Use the Panels &
+Cards surface (`p-3 bg-black/30 rounded-lg`), body text `text-white/60 text-sm`,
+errors `text-red-400/70`. The button is **Standard** (the tab already has its own
+Primary button), shows `animate-spin` on its icon and is disabled while running.
+Give the block `role="status"`; there is at most one such block per tab.
+
 ### Input Fields
 
 ```

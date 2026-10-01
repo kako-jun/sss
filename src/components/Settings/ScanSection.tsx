@@ -5,9 +5,15 @@ import { selectAndScan, rescanLastDirectory, getLastDirectoryPath } from '../../
 import type { ScanProgress } from '../../types';
 import { useT, resolveScanErrorMessage } from '../../lib/i18n';
 import type { MessageKey } from '../../lib/i18n';
+import type { ExcludeRescanController } from './useExcludeRescan';
 
 interface ScanSectionProps {
   onScanComplete: () => void;
+  /**
+   * #111: スキャン全般の単一ガードと、除外ルール変更の反映待ち管理（`useExcludeRescan`）。
+   * 除外ルールタブの再スキャンと並走させず、成功したら開始時点までの反映待ちを外す。
+   */
+  guard?: Pick<ExcludeRescanController, 'begin' | 'end' | 'clearUpTo'>;
 }
 
 // #82レビューshould1: エラーは確定済みの表示文言でなく、辞書キー or バックエンドの
@@ -17,7 +23,7 @@ type ScanErrorState =
   | { kind: 'key'; key: MessageKey }
   | { kind: 'code'; raw: string; directory: string };
 
-export function ScanSection({ onScanComplete }: ScanSectionProps) {
+export function ScanSection({ onScanComplete, guard }: ScanSectionProps) {
   const t = useT();
   const [selectedDirectory, setSelectedDirectory] = useState<string>('');
   const [isScanning, setIsScanning] = useState(false);
@@ -54,6 +60,13 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
   const runScan = async (run: () => Promise<ScanProgress | null>) => {
     let unlisten: UnlistenFn | null = null;
 
+    const token = guard ? guard.begin() : 0;
+    if (token === null) {
+      // 除外ルールタブの再スキャンが実行中。並走させない。
+      setError({ kind: 'code', raw: 'scanInProgress', directory: selectedDirectory });
+      return;
+    }
+
     try {
       setIsScanning(true);
       setError(null);
@@ -76,6 +89,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
         console.error('Failed to load last directory path:', err);
       }
       // スキャン完了を通知するが、設定画面は閉じない
+      guard?.clearUpTo(token);
       onScanComplete();
     } catch (err) {
       console.error('Failed to scan directory:', err);
@@ -90,6 +104,7 @@ export function ScanSection({ onScanComplete }: ScanSectionProps) {
         setError({ kind: 'key', key: 'failedToScanDirectory' });
       }
     } finally {
+      guard?.end();
       setIsScanning(false);
       if (unlisten) {
         unlisten();
