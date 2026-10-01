@@ -139,3 +139,86 @@ describe('useRollbackSave ordering (#115)', () => {
     off();
   });
 });
+
+describe('useRollbackSave: success-side guard and stale loads (#115)', () => {
+  it('an older save succeeding does not clear the failure notice while a newer save is still in flight', async () => {
+    const { result } = renderHook(() => useRollbackSave<number>(vi.fn(), 0, 'intervalSaveFailed'));
+    // 先に失敗させて通知を出しておく
+    await act(async () => {
+      await result.current.save(1, async () => {
+        throw new Error('x');
+      });
+    });
+    expect(result.current.saveFailed).toBe(true);
+
+    const a = deferred();
+    const b = deferred();
+    let pa!: Promise<boolean>;
+    let pb!: Promise<boolean>;
+    act(() => {
+      pa = result.current.save(2, () => a.promise);
+      pb = result.current.save(3, () => b.promise);
+    });
+    await act(async () => {
+      a.resolve();
+      await pa;
+    });
+    // 古い保存(2)が成功しても、新しい保存(3)の結果が出るまで通知は消さない
+    expect(result.current.saveFailed).toBe(true);
+    await act(async () => {
+      b.resolve();
+      await pb;
+    });
+    expect(result.current.saveFailed).toBe(false);
+  });
+
+  it('a load that started before the user saved does not overwrite the saved value', async () => {
+    const setValue = vi.fn();
+    const { result } = renderHook(() => useRollbackSave<number>(setValue, 0, 'intervalSaveFailed'));
+    const token = result.current.beginLoad(); // 取得開始
+    await act(async () => {
+      await result.current.save(5, async () => {}); // 取得中にユーザーが保存
+    });
+    // 古い DB 読み取り(7)が遅れて届く → 無視される
+    let applied = true;
+    act(() => {
+      applied = result.current.markLoaded(7, token);
+    });
+    expect(applied).toBe(false);
+    // 次の保存が失敗したら、古い読み取り(7)でなくユーザーが保存した 5 に戻る
+    await act(async () => {
+      await result.current.save(9, async () => {
+        throw new Error('x');
+      });
+    });
+    expect(setValue).toHaveBeenLastCalledWith(5);
+  });
+
+  it('a load with no intervening save is applied and becomes the rollback target', async () => {
+    const setValue = vi.fn();
+    const { result } = renderHook(() => useRollbackSave<number>(setValue, 0, 'intervalSaveFailed'));
+    const token = result.current.beginLoad();
+    let applied = false;
+    act(() => {
+      applied = result.current.markLoaded(7, token);
+    });
+    expect(applied).toBe(true);
+    await act(async () => {
+      await result.current.save(9, async () => {
+        throw new Error('x');
+      });
+    });
+    expect(setValue).toHaveBeenLastCalledWith(7);
+  });
+
+  it('without a successful load, the first failed save rolls back to the default', async () => {
+    const setValue = vi.fn();
+    const { result } = renderHook(() => useRollbackSave<number>(setValue, 5, 'intervalSaveFailed'));
+    await act(async () => {
+      await result.current.save(9, async () => {
+        throw new Error('x');
+      });
+    });
+    expect(setValue).toHaveBeenLastCalledWith(5);
+  });
+});

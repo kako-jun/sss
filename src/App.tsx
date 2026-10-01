@@ -283,6 +283,17 @@ function App() {
     [],
   );
 
+  // 既に画像が表示された後に起動シーケンスが失敗した場合（案内カードは画像が無いときだけ出る）は、
+  // 見えないままにせず上部の通知で伝える。
+  useEffect(() => {
+    if (startupFailure !== 'initialize' || !currentImage) return;
+    setStartupFailure(null);
+    setWindowModeError((prev) => ({
+      text: tRef.current('startupInitFailedTitle'),
+      seq: (prev?.seq ?? 0) + 1,
+    }));
+  }, [startupFailure, currentImage]);
+
   // 画像が変わったらプレイリスト情報を更新。復帰できたので古いディレクトリエラーは消す。
   useEffect(() => {
     if (currentImage) {
@@ -401,7 +412,8 @@ function App() {
   // #103: 失敗通知は数秒で自動的に消す
   useEffect(() => {
     if (!windowModeError) return;
-    const timer = setTimeout(() => setWindowModeError(null), 5000);
+    // 全文を読み切れるよう、折り返した長い通知（フォールバックの旨など）の分だけ長めに出す。
+    const timer = setTimeout(() => setWindowModeError(null), 8000);
     return () => clearTimeout(timer);
   }, [windowModeError]);
 
@@ -604,6 +616,9 @@ function App() {
     // 手動スキャンなのでディレクトリは確定済み。
     setHasDirectory(true);
     setDirectoryError(null);
+    // 設定でフォルダを選び直してスキャンできたなら、起動失敗の案内は役目を終える。
+    // （表示できる画像が0件でも、「前回のフォルダを読み込めませんでした」を出し続けない）
+    setStartupFailure(null);
     await initialize();
     setIsInitialized(true);
     // 設定画面は閉じない（ユーザーが結果を確認できるように）
@@ -805,7 +820,7 @@ function App() {
           <div
             role="alert"
             title={windowModeError.text}
-            className="pointer-events-auto max-w-full truncate bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-full border border-white/10"
+            className="pointer-events-auto max-w-full whitespace-normal break-words text-center bg-black/80 backdrop-blur-sm text-white/70 text-xs px-4 py-2 rounded-2xl border border-white/10"
           >
             {windowModeError.text}
           </div>
@@ -945,7 +960,11 @@ function App() {
                 }
               >
                 <SettingsIcon size={16} />
-                {hasDirectory ? t('openSettings') : t('selectFolder')}
+                {startupFailure
+                  ? t('chooseAnotherFolder')
+                  : hasDirectory
+                    ? t('openSettings')
+                    : t('selectFolder')}
               </button>
             </div>
             {!hasDirectory && !startupFailure && (

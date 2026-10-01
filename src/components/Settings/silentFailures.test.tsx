@@ -167,7 +167,7 @@ describe('削除失敗は成功に見えず通知される (#115)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '解除' }));
     expect(await screen.findByTestId('exclude-remove-error')).toBeTruthy();
-    expect(screen.getByText('除外ルールを削除できませんでした')).toBeTruthy();
+    expect(screen.getByText('除外ルール「*.tmp」を解除できませんでした')).toBeTruthy();
     expect(screen.getByText('*.tmp')).toBeTruthy();
   });
 

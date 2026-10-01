@@ -64,8 +64,8 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
     DEFAULT_VIDEO_MAX_DURATION_SEC,
     'videoSaveFailed',
   );
-  const { markLoaded: markAudioLoaded } = audioSave;
-  const { markLoaded: markMaxDurationLoaded } = maxDurationSave;
+  const { beginLoad: beginAudioLoad, markLoaded: markAudioLoaded } = audioSave;
+  const { beginLoad: beginMaxDurationLoad, markLoaded: markMaxDurationLoaded } = maxDurationSave;
 
   // 読込が完了する前にユーザーが操作した場合、遅れて届いた保存値で上書きしない。
   const audioTouchedRef = useRef(false);
@@ -74,6 +74,8 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
   useEffect(() => {
     let cancelled = false;
     let failed = false;
+    const audioToken = beginAudioLoad();
+    const maxDurationToken = beginMaxDurationLoad();
     const onLoadError = (what: string) => (err: unknown) => {
       console.error(`Failed to load ${what}:`, err);
       failed = true;
@@ -83,15 +85,19 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
       getSetting(SETTING_VIDEO_AUDIO_ENABLED)
         .then((value) => {
           if (cancelled) return;
-          markAudioLoaded(parseVideoAudioEnabled(value));
-          if (!audioTouchedRef.current) setAudioEnabled(parseVideoAudioEnabled(value));
+          const parsed = parseVideoAudioEnabled(value);
+          if (markAudioLoaded(parsed, audioToken) && !audioTouchedRef.current) {
+            setAudioEnabled(parsed);
+          }
         })
         .catch(onLoadError('video audio setting')),
       getSetting(SETTING_VIDEO_MAX_DURATION_SEC)
         .then((value) => {
           if (cancelled) return;
-          markMaxDurationLoaded(parseVideoMaxDuration(value));
-          if (!maxDurationTouchedRef.current) setMaxDurationSec(parseVideoMaxDuration(value));
+          const parsed = parseVideoMaxDuration(value);
+          if (markMaxDurationLoaded(parsed, maxDurationToken) && !maxDurationTouchedRef.current) {
+            setMaxDurationSec(parsed);
+          }
         })
         .catch(onLoadError('video max duration setting')),
     ]).then(() => {
@@ -100,7 +106,7 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
     return () => {
       cancelled = true;
     };
-  }, [attempt, markAudioLoaded, markMaxDurationLoaded]);
+  }, [attempt, beginAudioLoad, beginMaxDurationLoad, markAudioLoaded, markMaxDurationLoaded]);
 
   const handleAudioChange = async (checked: boolean) => {
     audioTouchedRef.current = true;

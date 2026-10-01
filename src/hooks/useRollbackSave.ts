@@ -41,8 +41,15 @@ export function useRollbackSave<T>(
     };
   }, []);
 
-  const markLoaded = useCallback((value: T) => {
+  // 取得の世代管理: 取得を始めた時点の保存操作の番号を控え、取得が返ってきたときに
+  // その間にユーザーが保存を始めていたら（古い DB 読み取りになるので）保存済みの値を上書きしない。
+  const beginLoad = useCallback(() => seqRef.current, []);
+
+  /** 取得できた保存値を反映する。反映した（古い取得でなかった）ときだけ true。 */
+  const markLoaded = useCallback((value: T, token: number): boolean => {
+    if (token !== seqRef.current) return false;
     savedRef.current = value;
+    return true;
   }, []);
 
   const save = useCallback(async (next: T, persist: (value: T) => Promise<void>) => {
@@ -73,5 +80,5 @@ export function useRollbackSave<T>(
     return result;
   }, []);
 
-  return { saveFailed, save, markLoaded };
+  return { saveFailed, save, beginLoad, markLoaded };
 }

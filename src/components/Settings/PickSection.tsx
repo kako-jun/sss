@@ -26,7 +26,7 @@ export function PickSection() {
       setDeleteError(null);
     } catch (err) {
       console.error('Failed to delete picked image:', err);
-      setDeleteError(t('deletePickedFailed'));
+      setDeleteError(t('deletePickedFailed', { name: path.split(/[\\/]/).pop() || path }));
     }
   };
 

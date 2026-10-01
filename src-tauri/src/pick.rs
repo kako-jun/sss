@@ -67,7 +67,35 @@ fn fail(stage: &str, e: &io::Error, code: &'static str) -> String {
 
 /// ピック先フォルダを（無ければ親ごと）作る。失敗は原因別のコードで返す（#115）。
 pub fn ensure_pick_dir(dir: &Path) -> Result<(), String> {
-    fs::create_dir_all(dir).map_err(|e| fail("create_dir_all", &e, pick_io_error_code(&e)))
+    fs::create_dir_all(dir).map_err(|e| {
+        // ピック先のパスにファイルが居座っている場合、Windows は AlreadyExists（os error 183）、
+        // Unix は NotADirectory を返す。どちらも「ピック先として使えない」で同じ扱いにする。
+        let code = if e.kind() == io::ErrorKind::AlreadyExists {
+            "pickDestinationMissing"
+        } else {
+            pick_io_error_code(&e)
+        };
+        fail("create_dir_all", &e, code)
+    })
+}
+
+/// コピー元が存在し読み取れる状態かを確認する（#115）。親ディレクトリの権限エラーを
+/// 「存在しない」と取り違えず、`pickSourceUnreadable` に分類する（`Path::exists` は権限エラーも
+/// false にしてしまう）。
+pub fn check_source_exists(source: &Path) -> Result<(), String> {
+    fs::metadata(source)
+        .map(|_| ())
+        .map_err(|e| fail("stat source", &e, pick_source_error_code(&e)))
+}
+
+/// `fs::copy` の失敗を分類する。宛先は予約済み・元ファイルは事前に開けているので、ここでの
+/// NotFound は「確認後に元ファイルが消えた」。それ以外は書き込み側（容量・権限）として扱う。
+fn copy_failure_code(e: &io::Error) -> &'static str {
+    if e.kind() == io::ErrorKind::NotFound {
+        "imageFileNotFound"
+    } else {
+        pick_io_error_code(e)
+    }
 }
 
 /// `source` を `dest_dir` にコピーし、実際に作られたパスを返す。
@@ -107,13 +135,7 @@ pub fn copy_with_unique_name(source: &Path, dest_dir: &Path) -> Result<PathBuf, 
             }
             Err(e) => {
                 let _ = fs::remove_file(&dest);
-                // 元ファイルは確認済み・宛先は予約済みなので、ここでの NotFound は確認後に元ファイルが
-                // 消えた場合。それ以外はコピー中の書き込み側の失敗（容量・権限）として分類する。
-                if e.kind() == io::ErrorKind::NotFound {
-                    Err(fail("copy", &e, "imageFileNotFound"))
-                } else {
-                    Err(fail("copy", &e, pick_io_error_code(&e)))
-                }
+                Err(fail("copy", &e, copy_failure_code(&e)))
             }
         };
     }
@@ -302,6 +324,57 @@ mod tests {
         assert_eq!(code(ErrorKind::NotFound), "imageFileNotFound");
         assert_eq!(code(ErrorKind::PermissionDenied), "pickSourceUnreadable");
         assert_eq!(code(ErrorKind::Other), "pickCopyFailed");
+    }
+
+    #[test]
+    fn copy_failure_code_treats_not_found_as_source_vanished() {
+        use std::io::{Error, ErrorKind};
+        assert_eq!(
+            copy_failure_code(&Error::from(ErrorKind::NotFound)),
+            "imageFileNotFound"
+        );
+        assert_eq!(
+            copy_failure_code(&Error::from(ErrorKind::StorageFull)),
+            "pickDiskFull"
+        );
+        assert_eq!(
+            copy_failure_code(&Error::from(ErrorKind::PermissionDenied)),
+            "pickPermissionDenied"
+        );
+    }
+
+    #[test]
+    fn check_source_exists_distinguishes_missing_from_ok() {
+        let dir = workspace("check_source");
+        let f = dir.join("a.jpg");
+        fs::write(&f, b"x").unwrap();
+        assert_eq!(check_source_exists(&f), Ok(()));
+        assert_eq!(
+            check_source_exists(&dir.join("nope.jpg")),
+            Err("imageFileNotFound".to_string())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn check_source_exists_reports_unreadable_parent_as_source_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = workspace("check_parent");
+        let sub = dir.join("locked");
+        fs::create_dir_all(&sub).unwrap();
+        let f = sub.join("a.jpg");
+        fs::write(&f, b"x").unwrap();
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o000)).unwrap();
+        // root は権限を無視するので、その場合は検証できない
+        if fs::metadata(&f).is_err() {
+            assert_eq!(
+                check_source_exists(&f),
+                Err("pickSourceUnreadable".to_string())
+            );
+        }
+        let _ = fs::set_permissions(&sub, fs::Permissions::from_mode(0o755));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

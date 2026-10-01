@@ -39,6 +39,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
   const {
     saveFailed,
     save: saveWithRollback,
+    beginLoad,
     markLoaded,
   } = useRollbackSave<number>(
     (ms) => {
@@ -68,13 +69,15 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
 
   useEffect(() => {
     let cancelled = false;
+    const token = beginLoad();
     getSetting('display_interval')
       .then((value) => {
         if (cancelled) return;
         setLoadFailed(false);
         if (!value) return;
         const ms = clampDisplayInterval(parseInt(value, 10));
-        markLoaded(ms);
+        // 取得中にユーザーが操作していたら、古い DB 読み取りで上書きしない
+        if (!markLoaded(ms, token)) return;
         setDisplayInterval(ms);
         setNumberText(String(ms / 1000));
       })
@@ -85,7 +88,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
     return () => {
       cancelled = true;
     };
-  }, [attempt, markLoaded]);
+  }, [attempt, beginLoad, markLoaded]);
 
   useEffect(() => {
     return () => {

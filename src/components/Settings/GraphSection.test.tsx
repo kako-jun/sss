@@ -369,7 +369,9 @@ describe('GraphSection reset flow (#67)', () => {
     expect(container.querySelectorAll('tbody tr').length).toBe(1);
     expect(screen.getByTestId('fairness-badge').textContent).toBe('均等（差は1回以内）');
     expect(container.textContent).toContain('0 / 2');
-    expect(container.querySelector('.u-over')).not.toBeNull();
+    // uPlot のチャートは表の描画とは別の passive effect で後から作られる（reload は loading を
+    // 挟むため、その間隔が広がる）。表の行が出た時点でチャートがあるとは限らないので待つ。
+    await waitFor(() => expect(container.querySelector('.u-over')).not.toBeNull());
     expect(screen.queryByText('データがありません。スキャンを実行してください。')).toBeNull();
     expect(resetAllDisplayCounts).toHaveBeenCalledTimes(1);
     expect(getDisplayStats).toHaveBeenCalledTimes(2);

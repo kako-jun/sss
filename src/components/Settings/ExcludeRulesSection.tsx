@@ -51,7 +51,7 @@ export function ExcludeRulesSection({ rescan }: ExcludeRulesSectionProps = {}) {
     } catch (err) {
       console.error('Failed to remove ignore pattern:', err);
       // #115: 削除失敗は一覧に残したまま、失敗を伝える（成功したように見せない）。
-      setRemoveError(t('removeRuleFailed'));
+      setRemoveError(t('removeRuleFailed', { pattern }));
     }
   };
 

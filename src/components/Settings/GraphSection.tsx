@@ -91,7 +91,15 @@ export function GraphSection() {
   }
 
   if (loadFailed) {
-    return <LoadError onRetry={load.reload} testId="stats-load-error" />;
+    return (
+      <LoadError
+        onRetry={() => {
+          setResetError(null);
+          load.reload();
+        }}
+        testId="stats-load-error"
+      />
+    );
   }
 
   if (!displayStats || displayStats.files === 0) {

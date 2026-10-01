@@ -149,10 +149,8 @@ pub async fn pick_image<R: tauri::Runtime>(
     let source_path = crate::pick::ensure_managed_media_path(source_path, &share_directory, known)?;
     let source_path = source_path.as_path();
 
-    if !source_path.exists() {
-        eprintln!("pick_image: source does not exist (imageFileNotFound)");
-        return Err("imageFileNotFound".to_string());
-    }
+    // 存在確認（親ディレクトリの権限エラーを「存在しない」と取り違えない）
+    crate::pick::check_source_exists(source_path)?;
 
     // ディレクトリが存在しない場合は作成
     if !share_directory.exists() {

@@ -2726,7 +2726,7 @@ const scenarios = [
       await page.waitForTimeout(300);
       await page.click('button[title="解除"]');
       await page.waitForTimeout(300);
-      const noticeShown = await isVisible(page, '除外ルールを削除できませんでした');
+      const noticeShown = await isVisible(page, '除外ルール「*.keepme」を解除できませんでした');
       const stillListed = await isVisible(page, '*.keepme');
       const pass = noticeShown && stillListed;
       return { pass, detail: `noticeShown=${noticeShown} stillListed=${stillListed}` };
@@ -2761,7 +2761,7 @@ const scenarios = [
       );
       const selectShown = await page.evaluate(() =>
         [...document.querySelectorAll('button')].some((b) =>
-          b.textContent.includes('フォルダを選択'),
+          b.textContent.includes('ほかのフォルダを選ぶ'),
         ),
       );
       await page.evaluate(() => window.__e2eHealFailures());
