@@ -441,6 +441,114 @@ async function confirmResetScenario(page, lang, kind = 'info') {
   return { pass, detail: detail.join(' | ') };
 }
 
+/**
+ * #122: 設定の checkbox / range が自前描画(appearance: none)でダークテーマに合うことを
+ * 全状態(未チェック/チェック/フォーカス/disabled)で computed style から検証する。
+ * E2E_SHOT_DIR を指定すると各状態のスクリーンショットを保存する(目視確認用)。
+ */
+async function inputDarkScenario(page, lang) {
+  const shotDir = process.env.E2E_SHOT_DIR;
+  const shot = async (loc, name) => {
+    if (shotDir) await loc.screenshot({ path: path.join(shotDir, `${lang}-${name}.png`) });
+  };
+  const lum = (rgba) => {
+    const m = rgba.match(/[\d.]+/g).map(Number);
+    return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255;
+  };
+  const read = (el) =>
+    el.evaluate((e) => {
+      const cs = getComputedStyle(e);
+      const after = getComputedStyle(e, '::after');
+      const r = e.getBoundingClientRect();
+      return {
+        appearance: cs.appearance,
+        bg: cs.backgroundColor,
+        border: cs.borderTopColor,
+        w: r.width,
+        h: r.height,
+        outlineStyle: cs.outlineStyle,
+        outlineColor: cs.outlineColor,
+        opacity: cs.opacity,
+        afterDisplay: after.display,
+        afterClip: after.clipPath,
+      };
+    });
+
+  await page.waitForSelector('svg.lucide-settings', { state: 'attached', timeout: 5000 });
+  await openSettingsModal(page);
+  await page.click('#tab-options');
+  // 遷移途中の色を読まないよう transition を切り、設定の非同期読み込み完了を待つ。
+  await page.addStyleTag({ content: '*, *::after { transition: none !important; }' });
+  await page.waitForTimeout(800);
+  const boxes = page.locator('input[type="checkbox"]');
+  const n = await boxes.count();
+  const details = [];
+  let pass = n >= 2;
+  for (let i = 0; i < n; i++) {
+    const box = boxes.nth(i);
+    if (await box.isChecked()) await box.evaluate((e) => e.click());
+    await page.waitForTimeout(250);
+    const off = await read(box);
+    await shot(box, `checkbox${i}-unchecked`);
+    await box.evaluate((e) => e.click());
+    await page.waitForTimeout(250);
+    const on = await read(box);
+    await shot(box, `checkbox${i}-checked`);
+    // キーボード操作でフォーカスさせ :focus-visible を成立させる
+    await box.evaluate((e) => e.blur());
+    await page.keyboard.press('Tab');
+    await box.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(100);
+    const focused = await read(box);
+    await shot(box, `checkbox${i}-focus`);
+    await box.evaluate((e) => (e.disabled = true));
+    const dis = await read(box);
+    await shot(box, `checkbox${i}-disabled`);
+    await box.evaluate((e) => (e.disabled = false));
+    const ok =
+      off.appearance === 'none' &&
+      lum(off.bg) < 0.2 &&
+      lum(off.border) > 0.45 && // 枠 vs 黒背景で 3:1 以上
+      off.afterDisplay === 'none' &&
+      on.appearance === 'none' &&
+      lum(on.bg) > 0.8 &&
+      on.afterDisplay === 'block' &&
+      on.afterClip.startsWith('polygon') &&
+      off.w >= 20 &&
+      off.h >= 20 &&
+      focused.outlineStyle === 'solid' &&
+      lum(focused.outlineColor) > 0.5 &&
+      Number(dis.opacity) < 1;
+    if (!ok) pass = false;
+    details.push(
+      `cb${i}=${ok} off=${off.bg}/${off.border} on=${on.bg} focus=${focused.outlineStyle}/${focused.outlineColor} dis=${dis.opacity} size=${off.w}x${off.h}`,
+    );
+  }
+  // range は全タブを巡って探す（所属タブに依存しない）
+  let rangeInfo = 'range not found';
+  const tabIds = await page.$$eval('[role="tab"]', (els) => els.map((e) => e.id));
+  for (const id of tabIds) {
+    await page.click(`#${id}`);
+    await page.waitForTimeout(200);
+    const range = page.locator('input[type="range"]');
+    if ((await range.count()) === 0) continue;
+    const r = await range.first().evaluate((e) => {
+      const cs = getComputedStyle(e);
+      const b = e.getBoundingClientRect();
+      return { appearance: cs.appearance, h: b.height };
+    });
+    await shot(range.first(), 'range');
+    const ok = r.appearance === 'none' && r.h >= 20;
+    if (!ok) pass = false;
+    rangeInfo = `range=${ok} appearance=${r.appearance} h=${r.h}`;
+    break;
+  }
+  if (rangeInfo === 'range not found') pass = false;
+  return { pass, detail: `checkboxes=${n} ${details.join(' ')} ${rangeInfo}` };
+}
+
 const scenarios = [
   {
     // #65レビューM1(must): 画像→動画→動画→画像と回すあいだ、動画が
@@ -2497,6 +2605,23 @@ const scenarios = [
     locale: 'en-US',
     async run(page) {
       return confirmResetScenario(page, 'en', 'pick');
+    },
+  },
+  {
+    // #122: 設定の checkbox / range が appearance: none の自前描画でダークテーマに合う
+    // (WebKitGTK では未チェック時にネイティブの白い箱になっていた)。全状態を computed style で検証。
+    name: 'settings checkbox/range use the explicit dark styling in every state (ja) (#122)',
+    hash: 'slides',
+    async run(page) {
+      return inputDarkScenario(page, 'ja');
+    },
+  },
+  {
+    name: 'settings checkbox/range use the explicit dark styling in every state (en) (#122)',
+    hash: 'slides',
+    locale: 'en-US',
+    async run(page) {
+      return inputDarkScenario(page, 'en');
     },
   },
   {

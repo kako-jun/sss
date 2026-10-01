@@ -92,3 +92,147 @@ a:focus-visible,
   background-color: #0a0a0a;
   color: rgba(255, 255, 255, 0.87);
 }
+
+/* #122: checkbox / radio / range はOS既定だと、未チェック時に白い箱になる
+   (Linux WebKitGTK で確認。Chrome は color-scheme: dark が効くため差が出ない)。
+   appearance: none で自前描画に統一し、WebKit/Chromium/Firefox で同じ見た目にする。
+   - 枠は rgba(255,255,255,0.5)。bg-neutral-950 (#0a0a0a) に対し約 5:1 で、
+     非文字コントラスト 3:1 (WCAG 1.4.11) を満たす。
+   - チェックマーク・ドットは CSS (clip-path / border-radius) のみ。画像・絵文字は使わない。
+   - サイズは 20px (ヒットエリア最小)。フォーカスは :focus-visible のみ。
+   - margin: 2px とフォーカスリング outline-offset: 0 は、設定モーダルのスクロール領域の端で
+     リングが切れないようにするため(大域の 2px オフセットだと左端で欠ける)。
+   全ての <input type="checkbox|radio|range"> はこのクラスを付ける
+   (src/test/inputDark.test.ts が走査で担保)。 */
+.sss-checkbox,
+.sss-radio {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  color-scheme: dark;
+  position: relative;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin: 2px;
+  background-color: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition:
+    background-color 150ms,
+    border-color 150ms;
+}
+
+.sss-checkbox {
+  border-radius: 4px;
+}
+
+.sss-radio {
+  border-radius: 50%;
+}
+
+.sss-checkbox:hover,
+.sss-radio:hover {
+  border-color: rgba(255, 255, 255, 0.75);
+}
+
+.sss-checkbox:checked,
+.sss-radio:checked {
+  background-color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.9);
+}
+
+.sss-checkbox::after,
+.sss-radio::after {
+  content: '';
+  position: absolute;
+  display: none;
+  background-color: #0a0a0a;
+}
+
+.sss-checkbox::after {
+  inset: 3px;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0, 43% 62%);
+}
+
+.sss-radio::after {
+  inset: 5px;
+  border-radius: 50%;
+}
+
+.sss-checkbox:checked::after,
+.sss-radio:checked::after {
+  display: block;
+}
+
+.sss-checkbox:focus-visible,
+.sss-radio:focus-visible,
+.sss-range:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 0;
+}
+
+.sss-checkbox:disabled,
+.sss-radio:disabled,
+.sss-range:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* range: トラック 4px (白 25%)、つまみ 20px の白丸。Firefox は塗り済み部分も明示する。 */
+.sss-range {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  color-scheme: dark;
+  height: 20px;
+  margin: 2px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sss-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+.sss-range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+.sss-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.6);
+}
+
+.sss-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -8px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.sss-range::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.sss-range:hover::-webkit-slider-thumb {
+  background-color: #fff;
+}
+
+.sss-range:hover::-moz-range-thumb {
+  background-color: #fff;
+}

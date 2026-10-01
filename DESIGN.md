@@ -244,18 +244,39 @@ Caveat: on macOS WKWebView / Linux WebKitGTK the popup is drawn natively and
 the option CSS (and even `color-scheme: dark`) may not take effect; this is
 unverified on real devices. Windows (WebView2) is the primary target.
 
-### Range Sliders
+### Checkboxes / Radios / Range Sliders (#122)
 
 ```
-h-1 bg-white/10 rounded-lg accent-white/60
+checkbox / radio:  sss-checkbox | sss-radio      (no Tailwind sizing/colour classes)
+range:             sss-range flex-1
 ```
 
-### Checkboxes
+Native form controls render with the OS theme: on Linux WebKitGTK an unchecked
+checkbox is a **white box** even under `color-scheme: dark` (Chromium hides the
+difference), clashing with the dark UI. Every `<input type="checkbox|radio|range">`
+MUST carry the matching shared class from `src/index.css`, which draws it
+explicitly with `appearance: none` so all engines look the same:
 
-```
-w-4 h-4 rounded border-white/20
-bg-white/5 accent-white/50
-```
+- **Box**: 20x20px (minimum hit area), `margin: 2px`, 4px radius (radio: circle),
+  `bg rgba(0,0,0,0.4)` (same glass as inputs) and a `1px rgba(255,255,255,0.5)`
+  border (about 5:1 against `#0a0a0a`, above the 3:1 non-text contrast of WCAG
+  1.4.11; the old `white/20` was about 1.8:1). Hover brightens the border to 0.75.
+- **Checked**: `rgba(255,255,255,0.9)` fill with a `#0a0a0a` mark drawn in CSS
+  (`::after` + `clip-path: polygon` for the check, `border-radius` for the radio dot).
+  No image, icon font or emoji.
+- **Focus**: `:focus-visible` only, 2px `rgba(255,255,255,0.6)` ring with
+  `outline-offset: 0` (the global 2px offset is clipped at the left edge of the
+  settings scroll area; the 2px margin keeps the ring inside).
+- **Disabled**: opacity 0.4, `not-allowed` cursor.
+- **Range**: 4px rounded track (`white/25`), 20px round white thumb styled via
+  `::-webkit-slider-*` and `::-moz-range-*` (Firefox also fills the progress part).
+  Do not set a height with Tailwind on it; the 20px height is the hit area.
+
+`src/test/inputDark.test.ts` walks the TypeScript syntax tree and fails if any
+checkbox/radio/range lacks its class (a dynamic `className` such as `cn()` or a
+dynamic `type` counts as an offender) or if the CSS loses `appearance: none` etc.
+The e2e scenarios (#122) check every state in a real browser. Windows (WebView2)
+and the WebKitGTK app itself are unverified on real devices.
 
 ### Panels & Cards (#66: background over border)
 

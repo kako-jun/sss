@@ -97,7 +97,7 @@ export function VideoSection({ onAudioChange, onMaxDurationChange }: VideoSectio
           checked={audioEnabled}
           onChange={(e) => handleAudioChange(e.target.checked)}
           aria-describedby={audioDescId}
-          className="mt-0.5 w-4 h-4 rounded border-white/20 bg-white/5 text-white/50 focus:ring-0 focus:ring-offset-0 accent-white/50 cursor-pointer"
+          className="sss-checkbox"
         />
         <div>
           <label htmlFor={audioId} className="text-white/50 text-sm cursor-pointer">
