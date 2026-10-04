@@ -1,6 +1,6 @@
 # DESIGN.md
 
-SSS (Screen Shot Saver) — Design System
+Smart Slide Show (SSS) — Design System
 
 ## 1. Visual Theme & Atmosphere
 

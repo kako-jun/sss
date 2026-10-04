@@ -1110,7 +1110,7 @@ const scenarios = [
     hash: 'welcome',
     async run(page) {
       await page.waitForTimeout(500);
-      const pass = await isVisible(page, 'ようこそ SSS へ');
+      const pass = await isVisible(page, 'ようこそ Smart Slide Show へ');
       return { pass, detail: pass ? 'visible' : 'not visible' };
     },
   },
@@ -1121,7 +1121,7 @@ const scenarios = [
     hash: 'pickfirst',
     async run(page) {
       await page.waitForTimeout(500);
-      const welcomeBefore = await isVisible(page, 'ようこそ SSS へ');
+      const welcomeBefore = await isVisible(page, 'ようこそ Smart Slide Show へ');
       await openSettingsModal(page);
       await page.evaluate(() => {
         const btn = [...document.querySelectorAll('button')].find(
@@ -1231,7 +1231,7 @@ const scenarios = [
     async run(page) {
       await page.waitForTimeout(500);
       const emptyVisible = await isVisible(page, '表示できる写真がありません');
-      const welcomeVisible = await isVisible(page, 'ようこそ SSS へ');
+      const welcomeVisible = await isVisible(page, 'ようこそ Smart Slide Show へ');
       const pass = emptyVisible && !welcomeVisible;
       return { pass, detail: `emptyVisible=${emptyVisible} welcomeVisible=${welcomeVisible}` };
     },
@@ -1988,7 +1988,7 @@ const scenarios = [
     locale: 'en-US',
     async run(page) {
       await page.waitForTimeout(500);
-      const welcomeVisible = await isVisible(page, 'Welcome to SSS');
+      const welcomeVisible = await isVisible(page, 'Welcome to Smart Slide Show');
       // 「フォルダを選択」ボタンはアイコン(SVG)とテキストが兄弟要素のため、
       // isVisible()の葉ノード限定チェックには乗らない。ボタン本文で直接確認する。
       const selectFolderVisible = await page.evaluate(() =>
@@ -1996,7 +1996,7 @@ const scenarios = [
           b.textContent.includes('Select Folder'),
         ),
       );
-      const notJapanese = !(await isVisible(page, 'ようこそ SSS へ'));
+      const notJapanese = !(await isVisible(page, 'ようこそ Smart Slide Show へ'));
       const htmlLang = await page.evaluate(() => document.documentElement.lang);
       const pass = welcomeVisible && selectFolderVisible && notJapanese && htmlLang === 'en';
       return {
@@ -3900,7 +3900,7 @@ const scenarios = [
     hash: 'slides?fail=get_last_directory_path',
     async run(page) {
       await page.waitForSelector('text=前回のフォルダを読み込めませんでした');
-      const welcomeShown = await isVisible(page, 'ようこそ SSS へ');
+      const welcomeShown = await isVisible(page, 'ようこそ Smart Slide Show へ');
       const retryShown = await page.evaluate(() =>
         [...document.querySelectorAll('button')].some((b) => b.textContent.includes('再試行')),
       );

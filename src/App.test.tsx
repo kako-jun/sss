@@ -141,7 +141,7 @@ describe('App empty-state notice display (#65 問題1・9: ようこそ/空/接�
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
     expect(screen.getByText('フォルダを選択')).toBeTruthy();
   });
@@ -156,7 +156,7 @@ describe('App empty-state notice display (#65 問題1・9: ようこそ/空/接�
     });
     // #65 問題1: ディレクトリ設定済みなので「フォルダを選択」ではなく「設定を開く」。
     expect(screen.getByText('設定を開く')).toBeTruthy();
-    expect(screen.queryByText('ようこそ SSS へ')).toBeNull();
+    expect(screen.queryByText('ようこそ Smart Slide Show へ')).toBeNull();
   });
 
   it('shows the rootUnavailable notice text', async () => {
@@ -290,7 +290,7 @@ describe('App empty-state notice display (#65 問題1・9: ようこそ/空/接�
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.queryByText('ようこそ SSS へ')).toBeNull();
+      expect(screen.queryByText('ようこそ Smart Slide Show へ')).toBeNull();
       expect(screen.queryByText('表示できる写真がありません')).toBeNull();
     });
   });
@@ -313,7 +313,7 @@ describe('App directoryError notice (#65レビュー: 起動時スキャン失�
       screen.getByText('前回のフォルダに接続できませんでした: permission denied'),
     ).toBeTruthy();
     // ディレクトリは設定済み（前回パスがあった）なので「ようこそ」ではない。
-    expect(screen.queryByText('ようこそ SSS へ')).toBeNull();
+    expect(screen.queryByText('ようこそ Smart Slide Show へ')).toBeNull();
     // 起動失敗直後でも設定を開けること（フォルダを選び直せる）。
     expect(screen.getByText('設定を開く')).toBeTruthy();
   });
@@ -339,7 +339,7 @@ describe('App directoryError notice (#65レビュー: 起動時スキャン失�
 
     // 復元成功パスは即座に最初の画像を表示する。
     await waitFor(() => {
-      expect(screen.queryByText('ようこそ SSS へ')).toBeNull();
+      expect(screen.queryByText('ようこそ Smart Slide Show へ')).toBeNull();
       expect(screen.queryByText('前回のフォルダを読めません')).toBeNull();
     });
 
@@ -506,7 +506,7 @@ describe('App keyboard shortcut: e.repeat is ignored (#65)', () => {
 
     // 初期化(setTimeout 0)完了を待つ。ようこそ画面が出ればハンドラは張られている。
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
     getNextImage.mockClear();
 
@@ -537,7 +537,7 @@ describe('App i18n (#80): language setting resolution', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('Welcome to SSS')).toBeTruthy();
+      expect(screen.getByText('Welcome to Smart Slide Show')).toBeTruthy();
     });
     expect(screen.getByText('Select Folder')).toBeTruthy();
     expect(document.documentElement.lang).toBe('en');
@@ -550,7 +550,7 @@ describe('App i18n (#80): language setting resolution', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
     expect(document.documentElement.lang).toBe('ja');
   });
@@ -563,7 +563,7 @@ describe('App i18n (#80): language setting resolution', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('Welcome to SSS')).toBeTruthy();
+      expect(screen.getByText('Welcome to Smart Slide Show')).toBeTruthy();
     });
     expect(document.documentElement.lang).toBe('en');
   });
@@ -574,7 +574,7 @@ describe('App i18n (#80): language setting resolution', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(win.setTitle).toHaveBeenCalledWith('sss - Smart Slide Show');
+      expect(win.setTitle).toHaveBeenCalledWith('Smart Slide Show');
     });
   });
 
@@ -592,7 +592,7 @@ describe('App i18n (#80): language setting resolution', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
   });
 
@@ -608,7 +608,7 @@ describe('App i18n (#80): language setting resolution', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('Welcome to SSS')).toBeTruthy();
+      expect(screen.getByText('Welcome to Smart Slide Show')).toBeTruthy();
     });
     expect(document.documentElement.lang).toBe('en');
   });
@@ -621,7 +621,7 @@ describe('App i18n (#80): language setting resolution', () => {
 
     // navigator.languageは既定でja-JPなので、OSロケール取得に失敗してもjaになる。
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
     expect(document.documentElement.lang).toBe('ja');
   });
@@ -640,7 +640,7 @@ describe('App Escape key (#66 問題1)', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     // App自身が描画する設定ボタン（右上）をクリックして開く（Settingsコンポーネント
@@ -662,7 +662,7 @@ describe('App Escape key (#66 問題1)', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -679,7 +679,7 @@ describe('App Escape key (#66 問題1)', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -721,7 +721,7 @@ describe('App keyboard shortcuts: Space, F, ? (#66 問題4)', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
     // 起動時のisFullscreen()解決(true)を待つ。
     await waitFor(() => {
@@ -741,7 +741,7 @@ describe('App keyboard shortcuts: Space, F, ? (#66 問題4)', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     fireEvent.keyDown(document, { key: '?' });
@@ -762,7 +762,7 @@ describe('App keyboard shortcuts: Space, F, ? (#66 問題4)', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     const hint = screen.getByRole('button', { name: 'ショートカット一覧を表示' });
@@ -867,7 +867,7 @@ describe('App keyboard shortcut F toggles correctly across repeated presses (#66
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     // 起動直後のuseState(true)による初期表示は「ウィンドウモードに切り替え」
@@ -912,7 +912,7 @@ describe('App top-right pill suppresses focus-stealing on mouse click (#66レビ
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     const settingsButton = screen.getByTitle('設定');
@@ -930,7 +930,7 @@ describe('App keyboard shortcuts ignore modifier-key combinations (#66レビュ�
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     fireEvent.keyDown(document, { key: 'f', metaKey: true });
@@ -945,7 +945,7 @@ describe('App keyboard shortcuts ignore modifier-key combinations (#66レビュ�
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     fireEvent.keyDown(document, { key: 'Escape', ctrlKey: true });
@@ -1081,7 +1081,7 @@ describe('App window mode toggle failure notice (#103)', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
     expect(screen.queryByRole('alert')).toBeNull();
 
@@ -1110,7 +1110,7 @@ describe('App window mode toggle failure notice (#103)', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     fireEvent.keyDown(document, { key: 'f' });
@@ -1140,7 +1140,7 @@ describe('App window mode toggle failure notice: partial failure and repeats (#1
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
@@ -1164,7 +1164,7 @@ describe('App window mode toggle failure notice: partial failure and repeats (#1
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -1208,7 +1208,7 @@ describe('App window mode toggle: re-sync failures are logged (#103)', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     try {
@@ -1230,7 +1230,7 @@ describe('App window mode toggle: re-sync failures are logged (#103)', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     try {
@@ -1311,7 +1311,7 @@ describe('App keeps the exclude-rescan state across Settings close/reopen (#111)
   it('keeps the notice and the running state (single IPC) after closing and reopening Settings', async () => {
     getLastDirectoryPath.mockResolvedValue(null);
     render(<App />);
-    await waitFor(() => expect(screen.getByText('ようこそ SSS へ')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy());
     rescanLastDirectory.mockClear();
 
     let resolve!: (v: { totalFiles: number }) => void;
@@ -1351,14 +1351,14 @@ describe('App startup failures (#115)', () => {
     render(<App />);
 
     expect(await screen.findByText('前回のフォルダを読み込めませんでした')).toBeTruthy();
-    expect(screen.queryByText('ようこそ SSS へ')).toBeNull();
+    expect(screen.queryByText('ようこそ Smart Slide Show へ')).toBeNull();
     // フォルダを選び直す導線(設定)も残す
     expect(screen.getByText('ほかのフォルダを選ぶ')).toBeTruthy();
 
     // 再試行で復旧すれば、本当の未設定としてようこそ画面になる
     getLastDirectoryPath.mockResolvedValue(null);
     fireEvent.click(screen.getByRole('button', { name: '再試行' }));
-    expect(await screen.findByText('ようこそ SSS へ')).toBeTruthy();
+    expect(await screen.findByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     expect(screen.queryByText('前回のフォルダを読み込めませんでした')).toBeNull();
     spy.mockRestore();
   });
@@ -1372,7 +1372,7 @@ describe('App startup failures (#115)', () => {
     render(<App />);
 
     expect(await screen.findByText(/保存済みの設定を読み込めませんでした/)).toBeTruthy();
-    expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+    expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     spy.mockRestore();
   });
 
@@ -1396,7 +1396,7 @@ describe('App startup failures (#115)', () => {
   it('notifyFailure from an unmounted section shows the app-level toast', async () => {
     const { notifyFailure } = await import('./lib/failureNotice');
     render(<App />);
-    await screen.findByText('ようこそ SSS へ');
+    await screen.findByText('ようこそ Smart Slide Show へ');
     act(() => notifyFailure('languageSaveFailed'));
     expect(
       await screen.findByText('言語の設定を保存できませんでした。元の値に戻しました'),
@@ -1412,7 +1412,7 @@ describe('App top-right pill background (#113)', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('ようこそ SSS へ')).toBeTruthy();
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
     });
 
     const pill = screen.getByTitle('設定').closest('.backdrop-blur-md')!;

@@ -7,7 +7,7 @@
  */
 export const ja = {
   // === アプリ全体 ===
-  windowTitle: 'sss - 写真スライドショー',
+  windowTitle: 'Smart Slide Show',
   exitTooltip: 'ESCで終了',
   settingsTitle: '設定',
   switchToWindowMode: 'ウィンドウモードに切り替え',
@@ -37,7 +37,7 @@ export const ja = {
   shortcutsHintWelcome: 'ショートカット一覧を表示',
 
   // === 起動時の案内画面（#65） ===
-  welcomeTitle: 'ようこそ SSS へ',
+  welcomeTitle: 'ようこそ Smart Slide Show へ',
   welcomeSubtitle: '写真フォルダを選択してスライドショーを始めましょう',
   selectFolder: 'フォルダを選択',
   openSettings: '設定を開く',
