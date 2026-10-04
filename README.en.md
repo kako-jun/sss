@@ -1,4 +1,4 @@
-# sss - Smart Slide Show
+# Smart Slide Show (SSS)
 
 _[日本語版はこちら](README.md)_
 
@@ -211,9 +211,9 @@ See `CLAUDE.md` (Japanese) for details.
 **Recommended flow:**
 
 1. Use **photo-returns** to organize photos from your camera/phone into date-based folders
-2. Use **sss** to enjoy the organized folder as a slideshow
+2. Use **SSS** to enjoy the organized folder as a slideshow
 
-sss (which gives every photo a fair turn) and photo-returns (which keeps photos easy to find) work well together.
+SSS (which gives every photo a fair turn) and photo-returns (which keeps photos easy to find) work well together.
 
 ## License
 

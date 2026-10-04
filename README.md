@@ -1,4 +1,4 @@
-# sss - Smart Slide Show
+# Smart Slide Show (SSS)
 
 _[Read this in English](README.en.md)_
 
@@ -210,9 +210,9 @@ cd src-tauri && cargo test   # バックエンドのテスト
 **推奨フロー:**
 
 1. **photo-returns** でカメラやスマートフォンから取り込んだ写真を年月日フォルダへ整理
-2. **sss** で整理済みフォルダをスライドショーとして鑑賞
+2. **SSS** で整理済みフォルダをスライドショーとして鑑賞
 
-どの写真にも公平に出番が来る sss と、写真を見つけやすく整理する photo-returns は、組み合わせて使うことができます。
+どの写真にも公平に出番が来る SSS と、写真を見つけやすく整理する photo-returns は、組み合わせて使うことができます。
 
 ## ライセンス
 
