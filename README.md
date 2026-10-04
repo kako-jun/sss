@@ -65,6 +65,8 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
+macOS で現行ソースからビルドしたアプリは `src-tauri/target/release/bundle/macos/Smart Slide Show.app` に生成されます。上記の `/Applications/sss.app` は、公開済み v1.1.0 のアプリをインストールした場合のパスです。
+
 #### 開発用コマンド
 
 ```bash

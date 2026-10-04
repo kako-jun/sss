@@ -65,6 +65,8 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
+On macOS, the current source builds `src-tauri/target/release/bundle/macos/Smart Slide Show.app`. The `/Applications/sss.app` path above applies to the published v1.1.0 app.
+
 #### Development commands
 
 ```bash

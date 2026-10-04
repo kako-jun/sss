@@ -160,7 +160,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.event.inputs.version }}
-          releaseName: 'sss ${{ github.event.inputs.version }}'
+          releaseName: 'Smart Slide Show ${{ github.event.inputs.version }}'
           releaseBody: 'See https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md#${{ needs.validate.outputs.changelog-anchor }} for details.'
           releaseDraft: false
           prerelease: false
