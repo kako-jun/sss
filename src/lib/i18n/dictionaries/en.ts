@@ -7,7 +7,7 @@
  */
 export const en = {
   // === App-wide ===
-  windowTitle: 'sss - Smart Slide Show',
+  windowTitle: 'Smart Slide Show',
   exitTooltip: 'Exit (Esc)',
   settingsTitle: 'Settings',
   switchToWindowMode: 'Switch to windowed mode',
@@ -37,7 +37,7 @@ export const en = {
   shortcutsHintWelcome: 'Show keyboard shortcuts',
 
   // === Startup notice screens (#65) ===
-  welcomeTitle: 'Welcome to SSS',
+  welcomeTitle: 'Welcome to Smart Slide Show',
   welcomeSubtitle: 'Select a photo folder to start the slideshow',
   selectFolder: 'Select Folder',
   openSettings: 'Open Settings',

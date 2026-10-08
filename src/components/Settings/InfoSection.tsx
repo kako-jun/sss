@@ -79,7 +79,7 @@ export function InfoSection() {
     <div className="space-y-6">
       {/* アプリ情報 */}
       <div className="space-y-3">
-        <h3 className="text-base font-medium text-white/70">Smart Slide Show (sss)</h3>
+        <h3 className="text-base font-medium text-white/70">Smart Slide Show (SSS)</h3>
         <div className="select-text text-white/50 text-sm space-y-1">
           <div>
             {t('versionLabel', {

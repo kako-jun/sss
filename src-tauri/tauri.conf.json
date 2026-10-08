@@ -16,7 +16,7 @@
       "icons/icon.ico"
     ]
   },
-  "productName": "sss",
+  "productName": "Smart Slide Show",
   "mainBinaryName": "sss",
   "version": "1.1.0",
   "identifier": "com.kakojun.sss",
@@ -27,7 +27,7 @@
       {
         "fullscreen": true,
         "resizable": true,
-        "title": "sss - Smart Slide Show",
+        "title": "Smart Slide Show",
         "width": 1920,
         "height": 1080,
         "minWidth": 480,

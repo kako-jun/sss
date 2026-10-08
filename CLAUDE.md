@@ -1,8 +1,8 @@
-# Smart Slide Show (sss) - プロジェクト仕様書
+# Smart Slide Show (SSS) - プロジェクト仕様書
 
 ## プロジェクト概要
 
-**アプリ名**: sss (Smart Slide Show)
+**アプリ名**: Smart Slide Show（略称: SSS）
 **作者**: kako-jun
 **目的**: 10万枚以上の写真・動画を公平に表示するスライドショーアプリ
 
