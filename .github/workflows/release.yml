@@ -27,6 +27,7 @@ jobs:
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
           DISPATCH_REF: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
             echo "::error::リリースは main ブランチから実行してください（現在: $DISPATCH_REF）"
@@ -39,8 +40,13 @@ jobs:
           fi
 
           if git ls-remote --tags origin "refs/tags/$INPUT_VERSION" | grep -q .; then
-            echo "::error::タグ $INPUT_VERSION は既に存在します"
-            exit 1
+            # 同名タグだけがある状態での誤った再公開は拒否する。一方、既存Release
+            # への成果物添付が失敗した時は、このworkflowを安全に再試行できる。
+            if ! gh release view "$INPUT_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::error::タグ $INPUT_VERSION は既に存在しますが、対応するGitHub Releaseがありません"
+              exit 1
+            fi
+            echo "既存Release $INPUT_VERSION への再試行です"
           fi
 
       - name: Setup Node
@@ -214,4 +220,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ github.event.inputs.version }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
-        run: gh release upload "$RELEASE_VERSION" "$ARCHIVE" --repo "$GITHUB_REPOSITORY" --clobber
+        run: gh release upload "$env:RELEASE_VERSION" "$env:ARCHIVE" --repo "$env:GITHUB_REPOSITORY" --clobber
