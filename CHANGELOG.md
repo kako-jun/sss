@@ -7,6 +7,12 @@ Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-09
+
+### Changed
+
+- Windows の配布を NSIS インストーラーから portable ZIP へ変更。任意のフォルダへ展開して `sss.exe` を実行でき、インストール・ショートカット作成・アンインストールは不要。Release workflow では installer を生成せず、`tauri build -- --no-bundle` の実行ファイルだけを ZIP として GitHub Releases へ添付する (#141)
+
 ## [1.2.0] - 2026-10-09
 
 ### Changed

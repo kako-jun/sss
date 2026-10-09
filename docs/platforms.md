@@ -4,7 +4,7 @@
 
 | OS      | サポート状況                                                                            |
 | ------- | --------------------------------------------------------------------------------------- |
-| Windows | 対応（CI は windows-latest でビルド・テスト。配布物は NSIS の `setup.exe`）             |
+| Windows | 対応（CI は windows-latest でビルド・テスト。配布物は portable ZIP）                    |
 | Linux   | 対応（CI は Ubuntu 22.04 でビルド・テスト。WebKitGTK 4.1 が必要。AppImage / deb / rpm） |
 | macOS   | 対応（CI は macos-latest でビルド・テスト。配布物は universal の `.dmg`）               |
 
