@@ -18,7 +18,7 @@
   },
   "productName": "Smart Slide Show",
   "mainBinaryName": "sss",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "identifier": "com.kakojun.sss",
   "plugins": {},
   "app": {

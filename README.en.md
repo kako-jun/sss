@@ -26,11 +26,11 @@ A slideshow app that shows 100,000+ photos fairly.
 
 Download the file for your OS from [Releases](https://github.com/kako-jun/sss/releases).
 
-| OS      | File                                                            |
-| ------- | --------------------------------------------------------------- |
-| Windows | `sss_*_x64-setup.exe` (NSIS installer)                          |
-| macOS   | `sss_*_universal.dmg` (Apple Silicon and Intel)                 |
-| Linux   | `sss_*_amd64.AppImage` / `sss_*_amd64.deb` / `sss-*.x86_64.rpm` |
+| OS      | File                                                              |
+| ------- | ----------------------------------------------------------------- |
+| Windows | `Smart.Slide.Show_*_x64-portable.zip` (extract and run `sss.exe`) |
+| macOS   | `sss_*_universal.dmg` (Apple Silicon and Intel)                   |
+| Linux   | `sss_*_amd64.AppImage` / `sss_*_amd64.deb` / `sss-*.x86_64.rpm`   |
 
 #### About the unsigned app warning
 
@@ -39,6 +39,8 @@ The distributed files are not code-signed, so the OS shows a warning on first la
 - **Windows (SmartScreen)**: when "Windows protected your PC" appears, choose "More info" -> "Run anyway"
 - **macOS (Gatekeeper)**: when the app "cannot be opened because the developer cannot be verified", right-click (Control-click) the app in Finder and choose "Open", or click "Open Anyway" under System Settings -> Privacy & Security. If it still won't open, run `xattr -dr com.apple.quarantine /Applications/sss.app` in Terminal
 - **Linux**: no warning. Make an AppImage executable first with `chmod +x sss_*.AppImage`
+
+The Windows ZIP is portable: extract it anywhere and run `sss.exe`. No installation, shortcuts, or uninstall step is required. Settings, viewing history, and cache are stored in the Windows user app-data directory.
 
 ### Build from source
 

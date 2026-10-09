@@ -26,11 +26,11 @@ _[Read this in English](README.en.md)_
 
 [Releases](https://github.com/kako-jun/sss/releases) から、お使いのOS向けのファイルをダウンロードします。
 
-| OS      | ファイル                                                        |
-| ------- | --------------------------------------------------------------- |
-| Windows | `sss_*_x64-setup.exe`（NSISインストーラー）                     |
-| macOS   | `sss_*_universal.dmg`（Apple Silicon / Intel 共通）             |
-| Linux   | `sss_*_amd64.AppImage` / `sss_*_amd64.deb` / `sss-*.x86_64.rpm` |
+| OS      | ファイル                                                           |
+| ------- | ------------------------------------------------------------------ |
+| Windows | `Smart.Slide.Show_*_x64-portable.zip`（展開して `sss.exe` を実行） |
+| macOS   | `sss_*_universal.dmg`（Apple Silicon / Intel 共通）                |
+| Linux   | `sss_*_amd64.AppImage` / `sss_*_amd64.deb` / `sss-*.x86_64.rpm`    |
 
 #### 未署名アプリの警告について
 
@@ -39,6 +39,8 @@ _[Read this in English](README.en.md)_
 - **Windows（SmartScreen）**: 「Windows によって PC が保護されました」と表示されたら、「詳細情報」→「実行」を選びます
 - **macOS（Gatekeeper）**: 「開発元を確認できません」と表示されたら、Finder でアプリを右クリック（Control+クリック）→「開く」を選びます。または「システム設定 → プライバシーとセキュリティ」に出る「このまま開く」を押します。それでも開けない場合は、ターミナルで `xattr -dr com.apple.quarantine /Applications/sss.app` を実行します
 - **Linux**: 警告はありません。AppImage は `chmod +x sss_*.AppImage` で実行権限を付けてから起動します
+
+Windows の ZIP は任意のフォルダへ展開して `sss.exe` を実行します。インストール、ショートカット作成、アンインストール操作は不要です。設定・表示履歴・キャッシュは Windows のユーザーアプリデータ領域に保存されます。
 
 ### ソースからビルドする
 

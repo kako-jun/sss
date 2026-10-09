@@ -122,8 +122,6 @@ jobs:
             args: '--target universal-apple-darwin'
           - platform: 'ubuntu-22.04'
             args: ''
-          - platform: 'windows-latest'
-            args: '--bundles nsis'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -165,3 +163,55 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  windows-portable:
+    # macOS/Linux の tauri-action が Release とタグを作成してから、Windows の
+    # portable ZIP を同じ Release へ追加する。NSIS/WiX installer は生成しない。
+    needs: [validate, build]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build portable Windows executable
+        run: npm run tauri build -- --no-bundle
+
+      - name: Package portable Windows executable
+        id: package
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          $version = $env:RELEASE_VERSION -replace '^v', ''
+          $archive = "Smart.Slide.Show_${version}_x64-portable.zip"
+          $executable = 'src-tauri\target\release\sss.exe'
+          if (!(Test-Path -Path $executable -PathType Leaf)) {
+            throw "Missing portable executable: $executable"
+          }
+          Compress-Archive -Path $executable -DestinationPath $archive
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+
+      - name: Attach portable ZIP to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: gh release upload "$RELEASE_VERSION" "$ARCHIVE" --repo "$GITHUB_REPOSITORY" --clobber
