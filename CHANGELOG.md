@@ -7,6 +7,8 @@ Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-09
+
 ### Changed
 
 - 初回案内には正式名 Smart Slide Show を表示し、設定の情報欄では Smart Slide Show (SSS) と表記する。ウィンドウ・OS の表示名と案内文書も統一した。`sss` はファイル名や保存先などの技術識別子として維持する (#138)

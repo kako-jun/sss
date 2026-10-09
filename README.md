@@ -24,7 +24,7 @@ _[Read this in English](README.en.md)_
 
 ### ビルド済みバイナリ（Releases）
 
-[Releases](https://github.com/kako-jun/sss/releases) から、お使いのOS向けのファイルをダウンロードします（最新は v1.1.0）。
+[Releases](https://github.com/kako-jun/sss/releases) から、お使いのOS向けのファイルをダウンロードします。
 
 | OS      | ファイル                                                        |
 | ------- | --------------------------------------------------------------- |
@@ -65,7 +65,7 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
-macOS で現行ソースからビルドしたアプリは `src-tauri/target/release/bundle/macos/Smart Slide Show.app` に生成されます。上記の `/Applications/sss.app` は、公開済み v1.1.0 のアプリをインストールした場合のパスです。
+macOS で現行ソースからビルドしたアプリは `src-tauri/target/release/bundle/macos/Smart Slide Show.app` に生成されます。上記の `/Applications/sss.app` は、公開済みのアプリをインストールした場合のパスです。
 
 #### 開発用コマンド
 

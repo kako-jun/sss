@@ -24,7 +24,7 @@ A slideshow app that shows 100,000+ photos fairly.
 
 ### Prebuilt binaries (Releases)
 
-Download the file for your OS from [Releases](https://github.com/kako-jun/sss/releases) (the latest is v1.1.0).
+Download the file for your OS from [Releases](https://github.com/kako-jun/sss/releases).
 
 | OS      | File                                                            |
 | ------- | --------------------------------------------------------------- |
@@ -65,7 +65,7 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
-On macOS, the current source builds `src-tauri/target/release/bundle/macos/Smart Slide Show.app`. The `/Applications/sss.app` path above applies to the published v1.1.0 app.
+On macOS, the current source builds `src-tauri/target/release/bundle/macos/Smart Slide Show.app`. The `/Applications/sss.app` path above applies to a published app installed from Releases.
 
 #### Development commands
 
