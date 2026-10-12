@@ -14,13 +14,15 @@ pub mod image_processor;
 pub mod pick;
 pub mod playlist;
 pub mod scanner;
+pub mod startup_error;
+pub mod startup_ui;
 pub mod thumbnail;
 
 use asset_scope::startup_allow_dirs;
 use cache_worker::CacheWorker;
 use commands::file_operations::get_picked_directory;
 use commands::AppState;
-use database::Database;
+use startup_error::{StartupFailure, StartupPlan};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -69,14 +71,32 @@ pub fn run() {
                 })
                 .ok();
 
-            // データベースパスを取得
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("failed to get app data directory");
+            // アプリデータディレクトリ。失敗は expect(panic) でなく、原因と保存先を示す
+            // ダイアログを出して非 0 終了する（#144）。setup はイベントループ内で動くため
+            // ダイアログは非ブロッキング（`startup_ui::present`）。AppState を管理せず Ok で返す。
+            let app_data_dir = match app.path().app_data_dir() {
+                Ok(d) => d,
+                Err(e) => {
+                    startup_ui::present(
+                        app.handle(),
+                        StartupPlan::report(StartupFailure::Other, None, &e.to_string()),
+                    );
+                    return Ok(());
+                }
+            };
 
             // ディレクトリが存在しない場合は作成
-            std::fs::create_dir_all(&app_data_dir).expect("failed to create app data directory");
+            if let Err(e) = std::fs::create_dir_all(&app_data_dir) {
+                startup_ui::present(
+                    app.handle(),
+                    StartupPlan::report(
+                        startup_error::classify_io_error(&e),
+                        Some(&app_data_dir),
+                        &e.to_string(),
+                    ),
+                );
+                return Ok(());
+            }
 
             let db_path = app_data_dir.join("sss.db");
 
@@ -90,8 +110,16 @@ pub fn run() {
             // （詳細はその関数のドキュメントを参照。must5/should(4)/should(5)）。
             cache_worker::clear_cache_dir(&app_data_dir, &cache_dir);
 
-            // データベースを初期化
-            let db = Database::new(db_path).expect("failed to initialize database");
+            // データベースを初期化。壊れた DB は「退避して新しく作る／終了する」を選ばせ
+            // （退避後は再起動）、それ以外の失敗は原因とパスを示して終了する
+            // （#144。判断は startup_error.rs、表示は startup_ui.rs）。
+            let db = match startup_error::plan_db_open(&db_path) {
+                Ok(db) => db,
+                Err((_, plan)) => {
+                    startup_ui::present(app.handle(), plan);
+                    return Ok(());
+                }
+            };
 
             // asset scope（convertFileSrc が読み込めるディレクトリ）を動的に許可する。
             // tauri.conf.json の静的 scope は空にしてあるため、表示に必要な全ディレクトリを
