@@ -3966,7 +3966,6 @@ dependencies = [
  "md5",
  "rand",
  "rayon",
- "rfd",
  "rusqlite",
  "serde",
  "serde_json",

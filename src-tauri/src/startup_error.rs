@@ -1,7 +1,8 @@
 //! 起動時の致命的失敗（アプリデータディレクトリ・DB を開けない）の分類と復旧（#144）。
 //!
 //! 判断ロジック（エラー分類 → 取るべき行動）は UI に依存しない純粋関数にし、
-//! ダイアログ表示は `StartupUi` という薄い継ぎ目の裏に隠す（`lib.rs` が rfd 実装を渡す）。
+//! ダイアログ表示は `startup_ui.rs`（非ブロッキング・コールバック式）に分離し、ここは
+//! 「失敗 → 計画（`StartupPlan`）」「ユーザーの選択 → 後続（`Followup`）」の純粋な判断だけを持つ。
 //! DB 破損時の「退避」は元ファイルのリネームのみで、削除は決してしない。
 
 use crate::database::Database;
@@ -38,9 +39,8 @@ pub fn classify_db_error(err: &rusqlite::Error) -> StartupFailure {
         rusqlite::Error::SqliteFailure(e, _) => match e.code {
             ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase => StartupFailure::Corrupt,
             ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked => StartupFailure::Locked,
-            ErrorCode::PermissionDenied | ErrorCode::ReadOnly | ErrorCode::CannotOpen => {
-                StartupFailure::Permission
-            }
+            // CannotOpen は権限以外（パス不正・親がファイル等）でも返るため Permission にしない
+            ErrorCode::PermissionDenied | ErrorCode::ReadOnly => StartupFailure::Permission,
             ErrorCode::DiskFull => StartupFailure::DiskFull,
             _ => StartupFailure::Other,
         },
@@ -65,44 +65,53 @@ pub fn decide_action(failure: StartupFailure) -> StartupAction {
     }
 }
 
+/// 退避対象の付随ファイル接尾辞。このアプリは journal_mode を設定しないためロールバック
+/// ジャーナル（`-journal`）が既定だが、WAL 運用の DB が持ち込まれても安全なように全部扱う。
+const SIDE_SUFFIXES: [&str; 3] = ["-journal", "-wal", "-shm"];
+
 /// 壊れた DB を `<name>.broken-<ts>` へリネームして退避する（削除しない）。
-/// WAL/SHM が残っていると新 DB に誤適用されるため、同じ接尾辞で一緒に退避する。
+/// 付随ファイル（`-journal`/`-wal`/`-shm`）が残ると新 DB に誤適用されるため、同じ接尾辞で
+/// **本体より先に**退避する。どれか1つでも失敗したら、動かした分を戻してエラーを返す。
+/// 退避先は本体・付随ファイルのすべてで未使用の接尾辞を選ぶ（Windows の rename は上書きするため）。
 pub fn backup_broken_db(db_path: &Path, timestamp: u64) -> io::Result<PathBuf> {
     let name = db_path
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid db path"))?;
+    let side = |ext: &str| db_path.with_file_name(format!("{name}{ext}"));
     let mut n = 0u32;
-    let dest = loop {
+    let suffix = loop {
         let suffix = if n == 0 {
             format!("broken-{timestamp}")
         } else {
             format!("broken-{timestamp}-{n}")
         };
-        let candidate = db_path.with_file_name(format!("{name}.{suffix}"));
-        if !candidate.exists() {
-            break (candidate, suffix);
+        let taken = std::iter::once("")
+            .chain(SIDE_SUFFIXES)
+            .any(|ext| side(&format!("{ext}.{suffix}")).exists());
+        if !taken {
+            break suffix;
         }
         n += 1;
     };
-    std::fs::rename(db_path, &dest.0)?;
-    for ext in ["-wal", "-shm"] {
-        let side = db_path.with_file_name(format!("{name}{ext}"));
-        if side.exists() {
-            let _ = std::fs::rename(
-                &side,
-                db_path.with_file_name(format!("{name}{ext}.{}", dest.1)),
-            );
+    // (元, 退避先)。付随ファイルが先、本体が最後
+    let mut moves: Vec<(PathBuf, PathBuf)> = SIDE_SUFFIXES
+        .iter()
+        .map(|ext| (side(ext), side(&format!("{ext}.{suffix}"))))
+        .filter(|(from, _)| from.exists())
+        .collect();
+    moves.push((db_path.to_path_buf(), side(&format!(".{suffix}"))));
+    let mut done: Vec<&(PathBuf, PathBuf)> = vec![];
+    for m in &moves {
+        if let Err(e) = std::fs::rename(&m.0, &m.1) {
+            for (from, to) in done.iter().rev() {
+                let _ = std::fs::rename(to, from);
+            }
+            return Err(e);
         }
+        done.push(m);
     }
-    Ok(dest.0)
-}
-
-/// ダイアログ表示の継ぎ目（本番は rfd、テストは偽実装）。
-pub trait StartupUi {
-    fn show_error(&self, message: &str);
-    /// 「退避して新しく作る」なら true、「終了する」なら false。
-    fn confirm_backup(&self, message: &str) -> bool;
+    Ok(side(&format!(".{suffix}")))
 }
 
 fn cause_text(failure: StartupFailure) -> (&'static str, &'static str) {
@@ -154,82 +163,83 @@ pub fn backup_prompt_message(db_path: &Path, detail: &str) -> String {
 pub const BACKUP_LABEL: &str = "退避して新しく作る / Back up & start fresh";
 pub const EXIT_LABEL: &str = "終了する / Quit";
 
-/// 起動を中止すべきことを表す（呼び出し側が非 0 で終了する）。
-#[derive(Debug)]
-pub struct StartupAbort;
+/// 起動失敗時にユーザーへ見せる内容。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupPlan {
+    /// 原因を表示して終了する。
+    Report { message: String },
+    /// 「退避して新しく作る／終了する」を選ばせる。
+    Offer { db_path: PathBuf, message: String },
+}
 
-/// DB を開く。失敗したら分類し、ダイアログ経由で復旧（破損時のみ退避）か中止を決める。
-pub fn open_database_with_recovery(
-    db_path: &Path,
-    ui: &dyn StartupUi,
-    timestamp: u64,
-) -> Result<Database, StartupAbort> {
+impl StartupPlan {
+    pub fn report(failure: StartupFailure, path: Option<&Path>, detail: &str) -> Self {
+        StartupPlan::Report {
+            message: failure_message(failure, path, detail),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            StartupPlan::Report { message } | StartupPlan::Offer { message, .. } => message,
+        }
+    }
+}
+
+/// ユーザーの選択を受けた後に取るべき行動。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Followup {
+    /// そのまま非 0 で終了する。
+    Exit,
+    /// 退避に成功した。再起動して新しい DB で立ち上げる。
+    Restart,
+    /// 退避に失敗した。原因を表示して終了する。
+    ReportThenExit(String),
+}
+
+/// DB を開く。失敗したら分類して `StartupPlan` を返す（UI には触れない）。
+pub fn plan_db_open(db_path: &Path) -> Result<Database, (StartupFailure, StartupPlan)> {
     let err = match Database::new(db_path.to_path_buf()) {
         Ok(db) => return Ok(db),
         Err(e) => e,
     };
     let failure = classify_db_error(&err);
     let detail = err.to_string();
-    match decide_action(failure) {
-        StartupAction::ReportAndExit => {
-            ui.show_error(&failure_message(failure, Some(db_path), &detail));
-            Err(StartupAbort)
-        }
-        StartupAction::OfferBackup => {
-            if !ui.confirm_backup(&backup_prompt_message(db_path, &detail)) {
-                return Err(StartupAbort);
-            }
-            if let Err(e) = backup_broken_db(db_path, timestamp) {
-                let f = classify_io_error(&e);
-                ui.show_error(&failure_message(f, Some(db_path), &e.to_string()));
-                return Err(StartupAbort);
-            }
-            match Database::new(db_path.to_path_buf()) {
-                Ok(db) => Ok(db),
-                Err(e) => {
-                    let f = classify_db_error(&e);
-                    ui.show_error(&failure_message(f, Some(db_path), &e.to_string()));
-                    Err(StartupAbort)
-                }
-            }
-        }
+    let plan = match decide_action(failure) {
+        StartupAction::ReportAndExit => StartupPlan::report(failure, Some(db_path), &detail),
+        StartupAction::OfferBackup => StartupPlan::Offer {
+            db_path: db_path.to_path_buf(),
+            message: backup_prompt_message(db_path, &detail),
+        },
+    };
+    Err((failure, plan))
+}
+
+/// ユーザーが選択した後の行動を決める。`Offer` で承諾されたときだけ退避を実行する。
+pub fn follow_up(plan: &StartupPlan, accepted: bool, timestamp: u64) -> Followup {
+    match plan {
+        StartupPlan::Report { .. } => Followup::Exit,
+        StartupPlan::Offer { .. } if !accepted => Followup::Exit,
+        StartupPlan::Offer { db_path, .. } => match backup_broken_db(db_path, timestamp) {
+            Ok(_) => Followup::Restart,
+            Err(e) => Followup::ReportThenExit(failure_message(
+                classify_io_error(&e),
+                Some(db_path),
+                &e.to_string(),
+            )),
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
 
     fn tmp_dir(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("sss-144-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
-    }
-
-    struct FakeUi {
-        accept: bool,
-        errors: RefCell<Vec<String>>,
-        asked: RefCell<u32>,
-    }
-    impl FakeUi {
-        fn new(accept: bool) -> Self {
-            Self {
-                accept,
-                errors: RefCell::new(vec![]),
-                asked: RefCell::new(0),
-            }
-        }
-    }
-    impl StartupUi for FakeUi {
-        fn show_error(&self, m: &str) {
-            self.errors.borrow_mut().push(m.to_string());
-        }
-        fn confirm_backup(&self, _m: &str) -> bool {
-            *self.asked.borrow_mut() += 1;
-            self.accept
-        }
     }
 
     fn write_garbage(p: &Path) -> Vec<u8> {
@@ -240,31 +250,32 @@ mod tests {
         bytes
     }
 
+    fn plan_err(p: &Path) -> (StartupFailure, StartupPlan) {
+        plan_db_open(p).err().expect("must fail")
+    }
+
     #[test]
-    fn corrupt_db_file_is_classified_corrupt() {
+    fn corrupt_db_file_is_classified_corrupt_and_offers_backup() {
         let dir = tmp_dir("corrupt");
         let p = dir.join("sss.db");
         write_garbage(&p);
-        let err = Database::new(p).err().expect("garbage must fail");
+        let err = Database::new(p.clone()).err().expect("garbage must fail");
         assert_eq!(classify_db_error(&err), StartupFailure::Corrupt);
-        assert_eq!(
-            decide_action(StartupFailure::Corrupt),
-            StartupAction::OfferBackup
-        );
+        let (f, plan) = plan_err(&p);
+        assert_eq!(f, StartupFailure::Corrupt);
+        assert!(matches!(plan, StartupPlan::Offer { .. }));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn unopenable_location_is_not_corrupt_and_exits() {
-        // 親が通常ファイル → DB を作れない（権限/IO 系）。OS を問わず再現できる。
+    fn unopenable_location_is_not_corrupt_and_only_reports() {
+        // 親が通常ファイル → DB を作れない。OS を問わず再現できる。
         let dir = tmp_dir("unopenable");
         let blocker = dir.join("file");
         std::fs::write(&blocker, b"x").unwrap();
-        let p = blocker.join("sss.db");
-        let err = Database::new(p).err().expect("must fail");
-        let f = classify_db_error(&err);
+        let (f, plan) = plan_err(&blocker.join("sss.db"));
         assert_ne!(f, StartupFailure::Corrupt);
-        assert_eq!(decide_action(f), StartupAction::ReportAndExit);
+        assert!(matches!(&plan, StartupPlan::Report { message } if message.contains("sss.db")));
         let ioe = std::fs::create_dir_all(blocker.join("sub")).unwrap_err();
         assert_ne!(classify_io_error(&ioe), StartupFailure::Corrupt);
         let _ = std::fs::remove_dir_all(&dir);
@@ -272,50 +283,73 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn readonly_directory_is_permission_class() {
+    fn readonly_directory_is_permission_io_class_and_only_reports() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tmp_dir("ro");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
-        let probe = std::fs::write(dir.join("probe"), b"x");
-        if probe.is_ok() {
+        if std::fs::write(dir.join("probe"), b"x").is_ok() {
             // root 等で書けてしまう環境では検証できない
             std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
             let _ = std::fs::remove_dir_all(&dir);
             return;
         }
-        let err = Database::new(dir.join("sss.db")).err().expect("must fail");
-        assert_eq!(classify_db_error(&err), StartupFailure::Permission);
         let ioe = std::fs::create_dir_all(dir.join("sub")).unwrap_err();
         assert_eq!(classify_io_error(&ioe), StartupFailure::Permission);
+        let (f, plan) = plan_err(&dir.join("sss.db"));
+        assert_ne!(f, StartupFailure::Corrupt);
+        assert!(matches!(plan, StartupPlan::Report { .. }));
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn io_kind_classification() {
-        let e = io::Error::from(io::ErrorKind::PermissionDenied);
-        assert_eq!(classify_io_error(&e), StartupFailure::Permission);
-        let e = io::Error::from(io::ErrorKind::StorageFull);
-        assert_eq!(classify_io_error(&e), StartupFailure::DiskFull);
+    fn locked_db_only_reports_and_never_offers_backup() {
+        let dir = tmp_dir("locked");
+        let p = dir.join("sss.db");
+        drop(Database::new(p.clone()).unwrap());
+        let holder = rusqlite::Connection::open(&p).unwrap();
+        holder.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let (f, plan) = plan_err(&p);
+        assert_eq!(f, StartupFailure::Locked);
+        assert!(matches!(plan, StartupPlan::Report { .. }));
+        assert_eq!(follow_up(&plan, true, 1), Followup::Exit);
+        assert!(p.exists());
+        drop(holder);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn io_kind_classification_and_actions() {
         assert_eq!(
-            decide_action(StartupFailure::Locked),
-            StartupAction::ReportAndExit
+            classify_io_error(&io::Error::from(io::ErrorKind::PermissionDenied)),
+            StartupFailure::Permission
         );
         assert_eq!(
-            decide_action(StartupFailure::DiskFull),
-            StartupAction::ReportAndExit
+            classify_io_error(&io::Error::from(io::ErrorKind::StorageFull)),
+            StartupFailure::DiskFull
+        );
+        for f in [
+            StartupFailure::Locked,
+            StartupFailure::DiskFull,
+            StartupFailure::Permission,
+            StartupFailure::Other,
+        ] {
+            assert_eq!(decide_action(f), StartupAction::ReportAndExit);
+        }
+        assert_eq!(
+            decide_action(StartupFailure::Corrupt),
+            StartupAction::OfferBackup
         );
     }
 
     #[test]
-    fn backup_preserves_original_bytes() {
+    fn backup_preserves_original_bytes_and_avoids_collision() {
         let dir = tmp_dir("backup");
         let p = dir.join("sss.db");
         let bytes = write_garbage(&p);
         let dest = backup_broken_db(&p, 1700000000).unwrap();
         assert!(!p.exists());
         assert_eq!(std::fs::read(&dest).unwrap(), bytes);
-        // 同じ時刻で再度退避しても上書きしない
         write_garbage(&p);
         let dest2 = backup_broken_db(&p, 1700000000).unwrap();
         assert_ne!(dest, dest2);
@@ -324,39 +358,59 @@ mod tests {
     }
 
     #[test]
-    fn recovery_backs_up_and_creates_fresh_db_when_accepted() {
-        let dir = tmp_dir("recover");
+    fn backup_moves_side_files_with_same_suffix_and_checks_their_collisions() {
+        let dir = tmp_dir("sidefiles");
+        let p = dir.join("sss.db");
+        write_garbage(&p);
+        for (ext, body) in [("-journal", b"J"), ("-wal", b"W"), ("-shm", b"S")] {
+            std::fs::write(dir.join(format!("sss.db{ext}")), body).unwrap();
+        }
+        // 本体の退避先は空いているが、-wal の退避先だけ既に存在する → 別接尾辞を選ぶ
+        std::fs::write(dir.join("sss.db-wal.broken-7"), b"OLD").unwrap();
+        let dest = backup_broken_db(&p, 7).unwrap();
+        assert_eq!(dest, dir.join("sss.db.broken-7-1"));
+        assert_eq!(
+            std::fs::read(dir.join("sss.db-journal.broken-7-1")).unwrap(),
+            b"J"
+        );
+        assert_eq!(
+            std::fs::read(dir.join("sss.db-wal.broken-7-1")).unwrap(),
+            b"W"
+        );
+        assert_eq!(
+            std::fs::read(dir.join("sss.db-shm.broken-7-1")).unwrap(),
+            b"S"
+        );
+        assert_eq!(
+            std::fs::read(dir.join("sss.db-wal.broken-7")).unwrap(),
+            b"OLD"
+        );
+        for ext in ["", "-journal", "-wal", "-shm"] {
+            assert!(!dir.join(format!("sss.db{ext}")).exists());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn follow_up_accepted_backs_up_then_restarts_and_fresh_db_opens() {
+        let dir = tmp_dir("accept");
         let p = dir.join("sss.db");
         let bytes = write_garbage(&p);
-        let ui = FakeUi::new(true);
-        assert!(open_database_with_recovery(&p, &ui, 42).is_ok());
-        assert_eq!(*ui.asked.borrow(), 1);
+        let (_, plan) = plan_err(&p);
+        assert_eq!(follow_up(&plan, true, 42), Followup::Restart);
         assert_eq!(std::fs::read(dir.join("sss.db.broken-42")).unwrap(), bytes);
         assert!(Database::new(p).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn recovery_declined_leaves_file_untouched() {
+    fn follow_up_declined_leaves_file_untouched() {
         let dir = tmp_dir("decline");
         let p = dir.join("sss.db");
         let bytes = write_garbage(&p);
-        let ui = FakeUi::new(false);
-        assert!(open_database_with_recovery(&p, &ui, 42).is_err());
+        let (_, plan) = plan_err(&p);
+        assert_eq!(follow_up(&plan, false, 42), Followup::Exit);
         assert_eq!(std::fs::read(&p).unwrap(), bytes);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn non_corrupt_failure_only_reports() {
-        let dir = tmp_dir("report");
-        let blocker = dir.join("file");
-        std::fs::write(&blocker, b"x").unwrap();
-        let ui = FakeUi::new(true);
-        assert!(open_database_with_recovery(&blocker.join("sss.db"), &ui, 1).is_err());
-        assert_eq!(*ui.asked.borrow(), 0);
-        assert_eq!(ui.errors.borrow().len(), 1);
-        assert!(ui.errors.borrow()[0].contains("sss.db"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

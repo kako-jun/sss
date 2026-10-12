@@ -15,51 +15,17 @@ pub mod pick;
 pub mod playlist;
 pub mod scanner;
 pub mod startup_error;
+pub mod startup_ui;
 pub mod thumbnail;
 
 use asset_scope::startup_allow_dirs;
 use cache_worker::CacheWorker;
 use commands::file_operations::get_picked_directory;
 use commands::AppState;
-use startup_error::{StartupFailure, StartupUi};
+use startup_error::{StartupFailure, StartupPlan};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
-
-/// 起動時ダイアログの本番実装。`tauri-plugin-dialog` の `blocking_show` はメインスレッド不可で、
-/// setup（メインスレッド・イベントループ開始前）では使えないため rfd を同期で直接呼ぶ。
-struct RfdUi;
-
-impl StartupUi for RfdUi {
-    fn show_error(&self, message: &str) {
-        eprintln!("startup failure: {message}");
-        rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Error)
-            .set_title("Smart Slide Show")
-            .set_description(message)
-            .set_buttons(rfd::MessageButtons::Ok)
-            .show();
-    }
-
-    fn confirm_backup(&self, message: &str) -> bool {
-        eprintln!("startup failure (corrupt db): {message}");
-        let res = rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Error)
-            .set_title("Smart Slide Show")
-            .set_description(message)
-            .set_buttons(rfd::MessageButtons::OkCancelCustom(
-                startup_error::BACKUP_LABEL.to_string(),
-                startup_error::EXIT_LABEL.to_string(),
-            ))
-            .show();
-        // Linux の rfd は Custom を返さず Ok/Cancel になるため両方を受ける
-        match res {
-            rfd::MessageDialogResult::Custom(s) => s == startup_error::BACKUP_LABEL,
-            rfd::MessageDialogResult::Ok | rfd::MessageDialogResult::Yes => true,
-            _ => false,
-        }
-    }
-}
 
 /// Tauri アプリを起動する。
 pub fn run() {
@@ -105,30 +71,31 @@ pub fn run() {
                 })
                 .ok();
 
-            // データベースパスを取得。失敗は expect(panic) でなくネイティブダイアログで
-            // 原因と保存先を示して非 0 終了する（#144）。メインウィンドウ・イベントループの
-            // 前に呼ばれるため、ダイアログは rfd を同期で直接使う（`RfdUi` 参照）。
-            let ui = RfdUi;
+            // アプリデータディレクトリ。失敗は expect(panic) でなく、原因と保存先を示す
+            // ダイアログを出して非 0 終了する（#144）。setup はイベントループ内で動くため
+            // ダイアログは非ブロッキング（`startup_ui::present`）。AppState を管理せず Ok で返す。
             let app_data_dir = match app.path().app_data_dir() {
                 Ok(d) => d,
                 Err(e) => {
-                    ui.show_error(&startup_error::failure_message(
-                        StartupFailure::Other,
-                        None,
-                        &e.to_string(),
-                    ));
-                    std::process::exit(1);
+                    startup_ui::present(
+                        app.handle(),
+                        StartupPlan::report(StartupFailure::Other, None, &e.to_string()),
+                    );
+                    return Ok(());
                 }
             };
 
             // ディレクトリが存在しない場合は作成
             if let Err(e) = std::fs::create_dir_all(&app_data_dir) {
-                ui.show_error(&startup_error::failure_message(
-                    startup_error::classify_io_error(&e),
-                    Some(&app_data_dir),
-                    &e.to_string(),
-                ));
-                std::process::exit(1);
+                startup_ui::present(
+                    app.handle(),
+                    StartupPlan::report(
+                        startup_error::classify_io_error(&e),
+                        Some(&app_data_dir),
+                        &e.to_string(),
+                    ),
+                );
+                return Ok(());
             }
 
             let db_path = app_data_dir.join("sss.db");
@@ -143,16 +110,15 @@ pub fn run() {
             // （詳細はその関数のドキュメントを参照。must5/should(4)/should(5)）。
             cache_worker::clear_cache_dir(&app_data_dir, &cache_dir);
 
-            // データベースを初期化
-            // 壊れた DB は「退避して新しく作る／終了する」を選ばせ、それ以外の失敗は
-            // 原因とパスを示して終了する（#144。判断ロジックは startup_error.rs）。
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let db = match startup_error::open_database_with_recovery(&db_path, &ui, timestamp) {
+            // データベースを初期化。壊れた DB は「退避して新しく作る／終了する」を選ばせ
+            // （退避後は再起動）、それ以外の失敗は原因とパスを示して終了する
+            // （#144。判断は startup_error.rs、表示は startup_ui.rs）。
+            let db = match startup_error::plan_db_open(&db_path) {
                 Ok(db) => db,
-                Err(startup_error::StartupAbort) => std::process::exit(1),
+                Err((_, plan)) => {
+                    startup_ui::present(app.handle(), plan);
+                    return Ok(());
+                }
             };
 
             // asset scope（convertFileSrc が読み込めるディレクトリ）を動的に許可する。
