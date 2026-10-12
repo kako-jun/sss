@@ -33,18 +33,24 @@ pub fn present(app: &AppHandle, plan: StartupPlan) {
         StartupPlan::Report { .. } => builder.buttons(MessageDialogButtons::Ok),
     };
     builder.show(move |accepted| {
-        // コールバックはメインスレッド外で呼ばれる
+        // コールバックはメインスレッド外で呼ばれる。
+        // `app.exit()`/`app.restart()` は RunEvent::Exit を発火し、tauri-plugin-window-state が
+        // 隠れたメインウィンドウの状態（全画面でない既定サイズ等）を保存してしまい、次回の通常起動が
+        // ウィンドウ表示になる（サイネージ用途の退行）。失敗経路ではその保存を避けるため、
+        // Exit は `process::exit`、Restart は single-instance を解放してから直接再起動する。
         match startup_error::follow_up(&plan, accepted, timestamp) {
-            Followup::Exit => handle.exit(1),
-            Followup::Restart => handle.restart(),
+            Followup::Exit => std::process::exit(1),
+            Followup::Restart => {
+                tauri_plugin_single_instance::destroy(&handle);
+                tauri::process::restart(&handle.env());
+            }
             Followup::ReportThenExit(message) => {
-                let h = handle.clone();
                 handle
                     .dialog()
                     .message(message)
                     .title("Smart Slide Show")
                     .kind(MessageDialogKind::Error)
-                    .show(move |_| h.exit(1));
+                    .show(|_| std::process::exit(1));
             }
         }
     });

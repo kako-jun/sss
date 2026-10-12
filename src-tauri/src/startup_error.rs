@@ -74,6 +74,15 @@ const SIDE_SUFFIXES: [&str; 3] = ["-journal", "-wal", "-shm"];
 /// **本体より先に**退避する。どれか1つでも失敗したら、動かした分を戻してエラーを返す。
 /// 退避先は本体・付随ファイルのすべてで未使用の接尾辞を選ぶ（Windows の rename は上書きするため）。
 pub fn backup_broken_db(db_path: &Path, timestamp: u64) -> io::Result<PathBuf> {
+    backup_broken_db_with(db_path, timestamp, &|from, to| std::fs::rename(from, to))
+}
+
+/// `backup_broken_db` の本体。rename を差し替えられる（巻き戻し経路のテスト用）。
+fn backup_broken_db_with(
+    db_path: &Path,
+    timestamp: u64,
+    rename: &dyn Fn(&Path, &Path) -> io::Result<()>,
+) -> io::Result<PathBuf> {
     let name = db_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -103,11 +112,24 @@ pub fn backup_broken_db(db_path: &Path, timestamp: u64) -> io::Result<PathBuf> {
     moves.push((db_path.to_path_buf(), side(&format!(".{suffix}"))));
     let mut done: Vec<&(PathBuf, PathBuf)> = vec![];
     for m in &moves {
-        if let Err(e) = std::fs::rename(&m.0, &m.1) {
+        if let Err(e) = rename(&m.0, &m.1) {
+            // 動かした分を戻す。戻せなかったファイルは利用者に伝える（半端な状態の場所を示す）
+            let mut stranded: Vec<String> = vec![];
             for (from, to) in done.iter().rev() {
-                let _ = std::fs::rename(to, from);
+                if let Err(re) = rename(to, from) {
+                    stranded.push(format!("{} ({re})", to.display()));
+                }
             }
-            return Err(e);
+            if stranded.is_empty() {
+                return Err(e);
+            }
+            return Err(io::Error::new(
+                e.kind(),
+                format!(
+                    "{e}; 元に戻せなかったファイル / could not be restored: {}",
+                    stranded.join(", ")
+                ),
+            ));
         }
         done.push(m);
     }
@@ -388,6 +410,52 @@ mod tests {
         for ext in ["", "-journal", "-wal", "-shm"] {
             assert!(!dir.join(format!("sss.db{ext}")).exists());
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn backup_failure_on_main_file_restores_side_files() {
+        let dir = tmp_dir("rollback");
+        let p = dir.join("sss.db");
+        let bytes = write_garbage(&p);
+        std::fs::write(dir.join("sss.db-journal"), b"J").unwrap();
+        std::fs::write(dir.join("sss.db-wal"), b"W").unwrap();
+        let main = p.clone();
+        let err = backup_broken_db_with(&p, 9, &|from, to| {
+            if from == main {
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            } else {
+                std::fs::rename(from, to)
+            }
+        })
+        .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&p).unwrap(), bytes);
+        assert_eq!(std::fs::read(dir.join("sss.db-journal")).unwrap(), b"J");
+        assert_eq!(std::fs::read(dir.join("sss.db-wal")).unwrap(), b"W");
+        assert!(!dir.join("sss.db-journal.broken-9").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn backup_rollback_failure_names_stranded_files() {
+        let dir = tmp_dir("stranded");
+        let p = dir.join("sss.db");
+        write_garbage(&p);
+        std::fs::write(dir.join("sss.db-wal"), b"W").unwrap();
+        let main = p.clone();
+        let err = backup_broken_db_with(&p, 9, &|from, to| {
+            if from == main {
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            } else if to.to_string_lossy().ends_with("sss.db-wal") {
+                // 巻き戻し（退避先 → 元）の rename を失敗させる
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            } else {
+                std::fs::rename(from, to)
+            }
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("sss.db-wal.broken-9"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

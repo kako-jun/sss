@@ -53,7 +53,7 @@
 ### 2. スライドショー
 
 - **表示間隔**: 5〜60秒でカスタマイズ可能（設定画面から変更）
-- **動画の音声・最大再生時間**（#68）: 設定画面オプションタブの「動画」セクション。`app_settings` の `video_audio_enabled`（`'true'|'false'`、既定オフ=無音）と `video_max_duration_sec`（秒、`0`=無制限が既定、選択肢は `0/30/60/120/300`）。既存の `save_setting`/`get_setting` に乗せ、Rust側の検証・コマンド追加は無い。破損値は `constants.ts` の `parseVideoAudioEnabled`/`parseVideoMaxDuration`/`normalizeVideoMaxDuration` が既定へ丸める（`clampDisplayInterval` と同じ「唯一の検証経路」）。`Slideshow.tsx` は音声オンなら `muted=false`、上限は壁時計タイマーでなく `timeupdate` の `currentTime` で判定し、`ended` と共通の `finishVideo`（`finishedKeyRef` で1本につき1回）から `onAdvance` する。詳細は `docs/architecture.md` §6-(h)
+- **動画の音声・最大再生時間**（#68）: 設定画面オプションタブの「動画」セクション。`app_settings` の `video_audio_enabled`（`'true'|'false'`、既定オフ=無音）と `video_max_duration_sec`（秒、`0`=無制限が既定、選択肢は `0/30/60/120/300`）。既存の `save_setting`/`get_setting` に乗せ、Rust側の検証・コマンド追加は無い。破損値は `constants.ts` の `parseVideoAudioEnabled`/`parseVideoMaxDuration`/`normalizeVideoMaxDuration` が既定へ丸める（`clampDisplayInterval` と同じ「唯一の検証経路」）。`Slideshow.tsx` は音声オンなら `muted=false`、上限は壁時計タイマーでなく `timeupdate` の `currentTime` で判定し、`ended` と共通の `finishVideo`（`finishedKeyRef` で1本につき1回）から `onAdvance` する。終了は `process::exit(1)`、再起動は `single_instance::destroy`＋`tauri::process::restart` で行い（`app.exit()`/`restart()` だと `RunEvent::Exit` で window-state が隠れたウィンドウの状態を保存し、次回起動が全画面でなくなるため）、`tauri dev` 中の再起動は再 spawn されたアプリが孤児化しうる（開発時のみ）。詳細は `docs/architecture.md` §6-(h)
 - **対象ファイル**:
   - 画像: JPG/JPEG, PNG, GIF, BMP, WEBP, TIFF/TIF（`scanner.rs` の `IMAGE_EXTENSIONS`）
   - 動画: MP4, WebM, OGV, M4V（`VIDEO_EXTENSIONS`。旧フォーマットはffmpeg同梱後に対応予定 #45）
