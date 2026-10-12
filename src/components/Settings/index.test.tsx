@@ -6,6 +6,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 vi.mock('./ScanSection', () => ({ ScanSection: () => null }));
 vi.mock('./IntervalSection', () => ({ IntervalSection: () => null }));
 vi.mock('./VideoSection', () => ({ VideoSection: () => null }));
+vi.mock('./MapSection', () => ({ MapSection: () => null }));
 vi.mock('./ShareDirectorySection', () => ({ ShareDirectorySection: () => null }));
 vi.mock('./LanguageSection', () => ({ LanguageSection: () => null }));
 vi.mock('./ExcludeRulesSection', () => ({ ExcludeRulesSection: () => null }));

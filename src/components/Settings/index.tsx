@@ -5,6 +5,7 @@ import { ScanSection } from './ScanSection';
 import { IntervalSection } from './IntervalSection';
 import { SettingsSection } from './SettingsSection';
 import { VideoSection } from './VideoSection';
+import { MapSection } from './MapSection';
 import { ShareDirectorySection } from './ShareDirectorySection';
 import { LanguageSection } from './LanguageSection';
 import { ExcludeRulesSection } from './ExcludeRulesSection';
@@ -32,6 +33,8 @@ interface SettingsProps {
   onVideoAudioChange?: (enabled: boolean) => void;
   /** #68: 動画の最大再生時間（秒、0=無制限）が変わったときの通知。 */
   onVideoMaxDurationChange?: (sec: number) => void;
+  /** #145: 地図サムネイルのON/OFFが変わったときの通知（操作バーへ即時反映する）。 */
+  onMapThumbnailChange?: (enabled: boolean) => void;
   initialTab?: TabType;
   /**
    * このモーダルを開いた操作がマウスクリックだったか（#66レビュー3巡目
@@ -62,6 +65,7 @@ export function Settings({
   onIntervalChange,
   onVideoAudioChange,
   onVideoMaxDurationChange,
+  onMapThumbnailChange,
   initialTab,
   openedViaMouse = false,
 }: SettingsProps) {
@@ -248,6 +252,7 @@ export function Settings({
                 onAudioChange={onVideoAudioChange}
                 onMaxDurationChange={onVideoMaxDurationChange}
               />
+              <MapSection onChange={onMapThumbnailChange} />
               <ShareDirectorySection />
               <LanguageSection />
             </div>

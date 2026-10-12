@@ -543,6 +543,102 @@ describe('OverlayUI map button (openUrl)', () => {
   });
 });
 
+// #145: 地図タイルは「設定ON かつ 操作バーが実際に見えている」間だけ取得する。
+describe('OverlayUI map thumbnail privacy (#145)', () => {
+  const gpsImage = () =>
+    makeImage({
+      exif: {
+        dateTime: null,
+        gpsLatitude: 35.6812,
+        gpsLongitude: 139.7671,
+        width: null,
+        height: null,
+      },
+    });
+
+  it('renders the OSM tile image with attribution while visible and enabled', () => {
+    const { container } = render(<OverlayUI image={gpsImage()} {...requiredProps} />);
+    const img = screen.getByAltText('位置情報の地図') as HTMLImageElement;
+    expect(img.src).toMatch(/^https:\/\/tile\.openstreetmap\.org\/13\/\d+\/\d+\.png$/);
+    expect(container.textContent).toContain('© OpenStreetMap contributors');
+  });
+
+  it('does not render the tile image (no fetch) while the bar is idle-hidden', () => {
+    const { container } = render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).not.toContain('OpenStreetMap');
+  });
+
+  it('starts fetching again when the bar becomes visible, and stops when it hides', () => {
+    const { rerender } = render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+    rerender(<OverlayUI image={gpsImage()} {...requiredProps} isIdle={false} />);
+    expect(screen.getByAltText('位置情報の地図')).toBeTruthy();
+    rerender(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+  });
+
+  describe('keyboard focus inside an idle bar', () => {
+    let matches: { mockRestore: () => void };
+    beforeEach(() => {
+      // jsdom は :focus-visible を評価できないため、キーボードフォーカス相当として真を返させる
+      matches = vi.spyOn(Element.prototype, 'matches').mockReturnValue(true);
+    });
+    afterEach(() => matches.mockRestore());
+
+    it('keeps fetching while the bar is visible through keyboard focus, and stops on blur', () => {
+      render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+      expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+      act(() => screen.getByLabelText('位置情報の地図').focus());
+      expect(screen.getByAltText('位置情報の地図')).toBeTruthy();
+      act(() => screen.getByLabelText('位置情報の地図').blur());
+      expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+    });
+
+    it('stays visible when focus moves to another element inside the bar', () => {
+      render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+      act(() => screen.getByLabelText('位置情報の地図').focus());
+      act(() => screen.getByTitle('次へ (→)').focus());
+      expect(screen.getByAltText('位置情報の地図')).toBeTruthy();
+    });
+
+    it('does not fetch for the next GPS image after the focused element was removed without blur', () => {
+      const { rerender } = render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+      act(() => screen.getByLabelText('位置情報の地図').focus());
+      expect(screen.getByAltText('位置情報の地図')).toBeTruthy();
+      // GPS なしの画像へ: フォーカス中の地図ボタンが DOM から消える（blur は発火しない想定）
+      rerender(<OverlayUI image={makeImage()} {...requiredProps} isIdle />);
+      expect(document.activeElement).toBe(document.body);
+      // 次の GPS 画像でも、バーは隠れているので取得しない
+      rerender(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+      expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+    });
+  });
+
+  it('exposes the full attribution in the tooltip and screen-reader text', () => {
+    const { container } = render(<OverlayUI image={gpsImage()} {...requiredProps} />);
+    expect(screen.getByLabelText('位置情報の地図').getAttribute('title')).toContain(
+      '© OpenStreetMap contributors',
+    );
+    expect(container.querySelector('.sr-only')?.textContent).toBe('© OpenStreetMap contributors');
+  });
+
+  it('does not render the tile image or attribution when the setting is off', () => {
+    const { container } = render(
+      <OverlayUI image={gpsImage()} {...requiredProps} showMapThumbnail={false} />,
+    );
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).not.toContain('OpenStreetMap');
+  });
+
+  it('keeps the open-in-Google-Maps button when the thumbnail is off', () => {
+    render(<OverlayUI image={gpsImage()} {...requiredProps} showMapThumbnail={false} />);
+    fireEvent.click(screen.getByLabelText('位置情報の地図'));
+    expect(openUrl).toHaveBeenCalledWith('https://www.google.com/maps?q=35.6812,139.7671');
+  });
+});
+
 // #78: 除外/ピック直後の取り消しトースト。確認ダイアログは増やさず、直後の数秒だけ
 // 「取り消す」を出す。
 describe('OverlayUI undo toast (#78)', () => {

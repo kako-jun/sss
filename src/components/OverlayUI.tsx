@@ -38,7 +38,7 @@ import {
   resolvePickErrorMessage,
 } from '../lib/i18n/errors';
 import { idleFadeClassName } from '../constants';
-import { createButtonFocusGuard } from '../lib/keyboardShortcuts';
+import { createButtonFocusGuard, isFocusVisible } from '../lib/keyboardShortcuts';
 
 interface OverlayUIProps {
   image: ImageInfo | null;
@@ -69,6 +69,11 @@ interface OverlayUIProps {
    * いることが分かる最低限の手がかりを残すため）。
    */
   isIdle: boolean;
+  /**
+   * 地図サムネイルを出すか（#145。設定 `map_thumbnail_enabled`、既定ON）。オフのときは
+   * OpenStreetMap へ一切接続しない。
+   */
+  showMapThumbnail?: boolean;
   onPrevious: () => void;
   onNext: () => void;
   /**
@@ -93,6 +98,9 @@ interface OverlayUIProps {
    */
   onExcludeUndone?: () => void;
 }
+
+/** OpenStreetMap のタイル利用条件が求める帰属表示（#145）。 */
+const OSM_ATTRIBUTION = '© OpenStreetMap contributors';
 
 /** 除外/ピック直後に「取り消す」を出しておく時間（#78）。 */
 const UNDO_TOAST_MS = 6000;
@@ -131,6 +139,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
     progressDurationMs,
     isPausedByUser,
     isIdle,
+    showMapThumbnail = true,
     onPrevious,
     onNext,
     onOpenPickTab,
@@ -383,8 +392,22 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   useFixedWidthVar(nameRowRef, [fileNameParts.tail]);
   useFixedWidthVar(metaRowRef, [capturedDate, positionText]);
 
+  // #145: タイルは「設定がON」かつ「操作バーが実際に見えている（idleでフェードしていない）」間
+  // だけ取得する。opacity 0 のまま img を残すと見えないのに接続し続けるので、URL を作らず
+  // img ごとアンマウントする。
+  // バー自体は idle でも、キーボードの :focus-visible がバー内にある間は CSS
+  // （IDLE_FADE_BASE の has-[:focus-visible]）で見え続ける。その実態に合わせて取得も続ける。
+  // フォーカスの有無は状態に持たず、描画のたびに DOM から導出する（フォーカス中の要素が
+  // blur なしで DOM から消えても、次の描画で false に戻り、非表示のバーで取得し続けない）。
+  // 再描画のきっかけは idle/画像の変化と、下の focus/blur で進める `focusTick`。
+  const [, setFocusTick] = useState(0);
+  const active = typeof document === 'undefined' ? null : document.activeElement;
+  const barKeyboardFocused =
+    !!active && !!barContainerRef.current?.contains(active) && isFocusVisible(active);
+  const mapVisible = showMapThumbnail && (!isIdle || barKeyboardFocused);
   const tileUrl = useMemo(() => {
-    if (!hasGps || !image?.exif?.gpsLatitude || !image?.exif?.gpsLongitude) return null;
+    if (!mapVisible || !hasGps || !image?.exif?.gpsLatitude || !image?.exif?.gpsLongitude)
+      return null;
     const lat = image.exif.gpsLatitude;
     const lon = image.exif.gpsLongitude;
     const zoom = 13;
@@ -396,7 +419,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
         Math.pow(2, zoom),
     );
     return `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
-  }, [hasGps, image?.exif?.gpsLatitude, image?.exif?.gpsLongitude]);
+  }, [mapVisible, hasGps, image?.exif?.gpsLatitude, image?.exif?.gpsLongitude]);
 
   // #78: 取り消しトースト。除外の結果プレイリストが空になり `image` が null に
   // なっても（最後の1枚を除外した直後）取り消せるよう、画像の有無に依存させない。
@@ -520,6 +543,8 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
           className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-[max(36rem,40vw)]"
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
+          onFocus={() => setFocusTick((n) => n + 1)}
+          onBlur={() => setFocusTick((n) => n + 1)}
         >
           <div className="flex items-center gap-1 bg-black/75 backdrop-blur-md rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl">
             {/* 左: 情報クラスタ（GPSサムネ[任意] + ファイル名 · 撮影日 · 位置n/N） */}
@@ -532,16 +557,31 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
                   }}
                   onMouseDown={guardButtonMouseDown}
                   className="relative shrink-0 w-8 h-8 rounded-lg overflow-hidden border border-white/10 hover:border-white/20 transition-colors group"
-                  title={t('locationMapAlt')}
+                  title={
+                    tileUrl ? `${t('locationMapAlt')} ${OSM_ATTRIBUTION}` : t('locationMapAlt')
+                  }
                   aria-label={t('locationMapAlt')}
                 >
                   {/* OpenStreetMap Tile Usage Policy: img タグではカスタム User-Agent を送れないため、
                     高速に写真をスキップするとレート制限を受ける可能性がある */}
-                  <img
-                    src={tileUrl!}
-                    alt={t('locationMapAlt')}
-                    className="w-full h-full object-cover grayscale opacity-70 group-hover:opacity-100 group-hover:grayscale-0 transition-all"
-                  />
+                  {tileUrl && (
+                    <>
+                      <img
+                        src={tileUrl}
+                        alt={t('locationMapAlt')}
+                        className="w-full h-full object-cover grayscale opacity-70 group-hover:opacity-100 group-hover:grayscale-0 transition-all"
+                      />
+                      {/* OSM のタイル利用条件: 帰属表示。32px のサムネに全文は入らないので、見える
+                          「©」と全文のスクリーンリーダー用テキスト（ツールチップにも全文）で示す。 */}
+                      <span
+                        data-overlay="map-attribution"
+                        className="absolute bottom-0 right-0 px-0.5 text-[7px] leading-[9px] text-white/80 bg-black/50 pointer-events-none"
+                      >
+                        <span aria-hidden="true">© OSM</span>
+                        <span className="sr-only">{OSM_ATTRIBUTION}</span>
+                      </span>
+                    </>
+                  )}
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/10">
                     <MapPin size={12} className="text-white drop-shadow" fill="currentColor" />
                   </div>

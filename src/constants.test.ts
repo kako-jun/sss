@@ -7,6 +7,7 @@ import {
   idleFadeClassName,
   normalizeVideoMaxDuration,
   parseVideoAudioEnabled,
+  parseMapThumbnailEnabled,
   parseVideoMaxDuration,
 } from './constants';
 
@@ -151,5 +152,19 @@ describe('parseVideoAudioEnabled (#68)', () => {
     expect(parseVideoAudioEnabled('')).toBe(false);
     expect(parseVideoAudioEnabled('1')).toBe(false);
     expect(parseVideoAudioEnabled('TRUE')).toBe(false);
+  });
+});
+
+describe('parseMapThumbnailEnabled (#145)', () => {
+  it('parses the saved strings', () => {
+    expect(parseMapThumbnailEnabled('true')).toBe(true);
+    expect(parseMapThumbnailEnabled('false')).toBe(false);
+  });
+  it('falls back to the default (ON) for missing or corrupt values', () => {
+    expect(parseMapThumbnailEnabled(null)).toBe(true);
+    expect(parseMapThumbnailEnabled(undefined)).toBe(true);
+    expect(parseMapThumbnailEnabled('')).toBe(true);
+    expect(parseMapThumbnailEnabled('0')).toBe(true);
+    expect(parseMapThumbnailEnabled('FALSE')).toBe(true);
   });
 });

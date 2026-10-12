@@ -191,6 +191,11 @@ export const en = {
   videoMaxDurationUnlimited: 'Unlimited',
   videoMaxDurationSeconds: '{count}s',
   videoMaxDurationMinutes: '{count} min',
+  mapSectionTitle: 'Map',
+  mapThumbnailLabel: 'Show a map thumbnail for photos with location data',
+  mapThumbnailDescription:
+    'Only while the control bar is visible, the app fetches map tiles from the OpenStreetMap tile server (tile.openstreetmap.org). It receives the tile coordinates (your approximate photo location), your IP address and standard HTTP headers such as User-Agent. When off, the app makes no external connections.',
+  mapSaveFailed: "Couldn't save the map setting. Reverted to the previous value.",
   pickDestinationTitle: 'Pick Destination Folder',
 
   // === Settings: Exclude Rules ===
