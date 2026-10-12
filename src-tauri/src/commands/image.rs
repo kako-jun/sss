@@ -153,7 +153,10 @@ pub async fn get_next_image(state: State<'_, AppState>) -> Result<ImageNavigatio
     // 何度もadvanceし直しても、この設定自体はループの外で一度読めば十分。
     let apply_rotation = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        crate::commands::settings::get_bool_setting(&db, "apply_exif_rotation")
+        crate::commands::settings::get_bool_setting(
+            &db,
+            crate::commands::settings::APPLY_EXIF_ROTATION_KEY,
+        )
     };
 
     for _ in 0..MAX_MISSING_FILE_SKIPS {
@@ -250,7 +253,10 @@ pub async fn get_previous_image(
     // apply_exif_rotation 設定を取得（デフォルト true）
     let apply_rotation = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        crate::commands::settings::get_bool_setting(&db, "apply_exif_rotation")
+        crate::commands::settings::get_bool_setting(
+            &db,
+            crate::commands::settings::APPLY_EXIF_ROTATION_KEY,
+        )
     };
 
     for _ in 0..MAX_MISSING_FILE_SKIPS {

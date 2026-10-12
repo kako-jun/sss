@@ -15,8 +15,7 @@ vi.mock('../../lib/tauri', () => ({
 }));
 
 import { IntervalSection } from './IntervalSection';
-import { DEFAULT_DISPLAY_INTERVAL } from '../../constants';
-import { SETTING_DISPLAY_INTERVAL } from '../../constants';
+import { DEFAULT_DISPLAY_INTERVAL, SETTING_DISPLAY_INTERVAL } from '../../constants';
 
 beforeEach(() => {
   getSetting.mockReset();

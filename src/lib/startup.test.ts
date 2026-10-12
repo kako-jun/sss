@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { runStartupSequence, type StartupDeps } from './startup';
+import {
+  SETTING_DISPLAY_INTERVAL,
+  SETTING_MAP_THUMBNAIL_ENABLED,
+  SETTING_VIDEO_AUDIO_ENABLED,
+  SETTING_VIDEO_MAX_DURATION_SEC,
+} from '../constants';
 
 // #62レビューS1: 起動シーケンス（前回状態の復元→可能なら即表示、スキャンは
 // バックグラウンド）を、Reactをマウントせず純粋関数として直接検証する。
@@ -363,8 +369,8 @@ describe('runStartupSequence: video settings (#68)', () => {
 
   it('restores saved audio ON and a 60s cap', async () => {
     const { deps, audio, maxDuration } = makeDeps({
-      video_audio_enabled: 'true',
-      video_max_duration_sec: '60',
+      [SETTING_VIDEO_AUDIO_ENABLED]: 'true',
+      [SETTING_VIDEO_MAX_DURATION_SEC]: '60',
     });
     await runStartupSequence(deps);
     expect(audio).toEqual([true]);
@@ -380,8 +386,8 @@ describe('runStartupSequence: video settings (#68)', () => {
 
   it('rounds corrupt saved values to the defaults', async () => {
     const { deps, audio, maxDuration } = makeDeps({
-      video_audio_enabled: 'yes',
-      video_max_duration_sec: '-5',
+      [SETTING_VIDEO_AUDIO_ENABLED]: 'yes',
+      [SETTING_VIDEO_MAX_DURATION_SEC]: '-5',
     });
     await runStartupSequence(deps);
     expect(audio).toEqual([false]);
@@ -396,7 +402,7 @@ describe('runStartupSequence: video settings (#68)', () => {
       ['x', true],
     ] as const) {
       const got: boolean[] = [];
-      const { deps } = makeDeps(saved === null ? {} : { map_thumbnail_enabled: saved }, {
+      const { deps } = makeDeps(saved === null ? {} : { [SETTING_MAP_THUMBNAIL_ENABLED]: saved }, {
         setMapThumbnailEnabled: (v: boolean) => got.push(v),
       });
       await runStartupSequence(deps);
@@ -468,7 +474,7 @@ describe('runStartupSequence: startup failures are surfaced (#115)', () => {
     const getLastDirectoryPath = vi.fn(async () => null);
     const { deps, failures, initialized } = makeDeps({
       getSetting: async (key) => {
-        if (key === 'display_interval') throw new Error('db down');
+        if (key === SETTING_DISPLAY_INTERVAL) throw new Error('db down');
         return null;
       },
       getLastDirectoryPath,

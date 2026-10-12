@@ -12,7 +12,8 @@ const rustSource = readFileSync(
 function rustBlock(name: string): string {
   const m = rustSource.match(new RegExp(`pub const ${name}:[^=]*=\\s*&\\[([\\s\\S]*?)\\];`));
   if (!m) throw new Error(`${name} not found in settings.rs`);
-  return m[1];
+  // コメント内の文字列をキーと誤認しないよう除去する
+  return m[1].replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
 describe('setting keys single source (#148)', () => {

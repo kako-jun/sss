@@ -140,7 +140,11 @@ pub fn run() {
                 .into_iter()
                 .map(PathBuf::from)
                 .collect();
-            if let Some(last) = db.get_setting("last_directory_path").ok().flatten() {
+            if let Some(last) = db
+                .get_setting(commands::settings::LAST_DIRECTORY_KEY)
+                .ok()
+                .flatten()
+            {
                 let last = PathBuf::from(last);
                 if !scanned_directories.contains(&last) {
                     scanned_directories.push(last);

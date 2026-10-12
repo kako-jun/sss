@@ -10,6 +10,7 @@ import {
   normalizeLocaleTag,
   clearOsLocaleCache,
 } from './store';
+import { SETTING_LANGUAGE } from '../../constants';
 
 /** #80: 言語設定('ja'|'en'|'auto')→実ロケール解決と、購読/初期化ロジックの検証。 */
 describe('i18n locale resolution (#80)', () => {
@@ -99,7 +100,7 @@ describe('i18n locale resolution (#80)', () => {
 
   it('initLocale loads the saved setting via getSetting("language")', async () => {
     setNavigatorLanguage('en-US');
-    const getSetting = async (key: string) => (key === 'language' ? 'ja' : null);
+    const getSetting = async (key: string) => (key === SETTING_LANGUAGE ? 'ja' : null);
     await initLocale(getSetting);
     expect(getLanguageSetting()).toBe('ja');
     expect(getLocale()).toBe('ja');
@@ -143,7 +144,7 @@ describe('initLocale keeps the OS locale cache warm for a later switch to "auto"
 
   it('calls getOsLocale even when the saved setting is an explicit "ja" (not "auto")', async () => {
     setNavigatorLanguage('ja-JP'); // navigator側はja。OS側はenを返させ、両者を区別する。
-    const getSetting = async (key: string) => (key === 'language' ? 'ja' : null);
+    const getSetting = async (key: string) => (key === SETTING_LANGUAGE ? 'ja' : null);
     const getOsLocale = vi.fn(async () => 'en-US');
 
     await initLocale(getSetting, getOsLocale);
@@ -161,7 +162,7 @@ describe('initLocale keeps the OS locale cache warm for a later switch to "auto"
 
   it('calls getOsLocale even when the saved setting is an explicit "en"', async () => {
     setNavigatorLanguage('en-US');
-    const getSetting = async (key: string) => (key === 'language' ? 'en' : null);
+    const getSetting = async (key: string) => (key === SETTING_LANGUAGE ? 'en' : null);
     const getOsLocale = vi.fn(async () => 'ja_JP.UTF-8');
 
     await initLocale(getSetting, getOsLocale);
@@ -225,7 +226,7 @@ describe('initLocale times out a hanging getSetting/getOsLocale instead of hangi
   it('does not wait the full timeout when getSetting resolves quickly', async () => {
     vi.useFakeTimers();
     setNavigatorLanguage('en-US');
-    const getSetting = async (key: string) => (key === 'language' ? 'ja' : null);
+    const getSetting = async (key: string) => (key === SETTING_LANGUAGE ? 'ja' : null);
 
     const done = initLocale(getSetting);
     // タイムアウト(1000ms)より十分前に解決していることを確認する。

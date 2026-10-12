@@ -14,6 +14,13 @@ use tauri::{AppHandle, Manager, State};
 /// WebView から直接書き換えられると、ダイアログを経ずに任意フォルダを管理下にできてしまう
 /// ため、これらは専用コマンド（`select_and_scan` / `select_share_directory`）経由でしか
 /// 書かれない。新しい UI 設定を足すときはここにキーを追加する。
+/// `apply_exif_rotation` のキー（`image.rs` からも使う、#148）。
+pub const APPLY_EXIF_ROTATION_KEY: &str = "apply_exif_rotation";
+/// スキャン対象ディレクトリのキー（専用コマンド経由でのみ書かれる、許可リスト外）。
+pub const LAST_DIRECTORY_KEY: &str = "last_directory_path";
+/// ピック先ディレクトリのキー（専用コマンド経由でのみ書かれる、許可リスト外）。
+pub const SHARE_DIRECTORY_KEY: &str = "share_directory_path";
+
 pub const WRITABLE_SETTING_KEYS: &[&str] = &[
     "display_interval",
     "language",
@@ -99,7 +106,7 @@ pub fn perform_select_share_directory<P: DirectoryPicker>(
         return Err("shareDirectoryInvalid".to_string());
     }
     let db = db_mutex.lock().map_err(|e| e.to_string())?;
-    db.save_setting("share_directory_path", &directory.to_string_lossy())
+    db.save_setting(SHARE_DIRECTORY_KEY, &directory.to_string_lossy())
         .map_err(|e| format!("Failed to save setting: {e}"))?;
     Ok(Some(directory))
 }
@@ -171,7 +178,7 @@ pub async fn get_setting(
 pub async fn get_last_directory_path(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
     let path = db
-        .get_setting("last_directory_path")
+        .get_setting(LAST_DIRECTORY_KEY)
         .map_err(|e| format!("Database error: {e}"))?;
     Ok(path)
 }
@@ -213,6 +220,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn key_consts_match_the_tables() {
+        assert!(WRITABLE_SETTING_KEYS.contains(&APPLY_EXIF_ROTATION_KEY));
+        assert!(BOOL_SETTING_DEFAULTS
+            .iter()
+            .any(|(k, _)| *k == APPLY_EXIF_ROTATION_KEY));
+        // 管理下パスの基準は WebView から書けない
+        assert!(!WRITABLE_SETTING_KEYS.contains(&LAST_DIRECTORY_KEY));
+        assert!(!WRITABLE_SETTING_KEYS.contains(&SHARE_DIRECTORY_KEY));
     }
 
     #[test]

@@ -2,18 +2,24 @@ import { useState, useEffect } from 'react';
 import { getSetting, saveSetting } from '../../lib/tauri';
 import { useT } from '../../lib/i18n';
 import { useRollbackSave } from '../../hooks/useRollbackSave';
-import { SETTING_APPLY_EXIF_ROTATION, parseBoolSetting } from '../../constants';
+import {
+  BOOL_SETTING_DEFAULTS,
+  SETTING_APPLY_EXIF_ROTATION,
+  parseBoolSetting,
+} from '../../constants';
 import { InlineError } from './SectionErrors';
 
 export function SettingsSection() {
   const t = useT();
-  const [applyExifRotation, setApplyExifRotation] = useState(true);
+  const [applyExifRotation, setApplyExifRotation] = useState<boolean>(
+    BOOL_SETTING_DEFAULTS[SETTING_APPLY_EXIF_ROTATION],
+  );
   // #115: 取得失敗（既定値表示）と保存失敗（巻き戻し）を利用者に伝える。
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const { saveFailed, save, beginLoad, markLoaded } = useRollbackSave<boolean>(
     setApplyExifRotation,
-    true,
+    BOOL_SETTING_DEFAULTS[SETTING_APPLY_EXIF_ROTATION],
     'exifSaveFailed',
   );
 
@@ -30,7 +36,7 @@ export function SettingsSection() {
         if (markLoaded(parsed, token)) setApplyExifRotation(parsed);
       })
       .catch((err) => {
-        console.error('Failed to load setting:', err);
+        console.error(`Failed to load ${SETTING_APPLY_EXIF_ROTATION}:`, err);
         if (!cancelled) setLoadFailed(true);
       });
     return () => {

@@ -618,7 +618,7 @@ where
 /// `last_directory_path`（前回スキャンしたフォルダ）を保存する `app_settings` のキー。
 /// #93: このキーは `save_setting`（WebView から呼べる）では書き込めない。書き込むのは
 /// ダイアログ経由で選ばれたパスのスキャン成功後（[`scan_chosen_directory`]）だけ。
-pub const LAST_DIRECTORY_KEY: &str = "last_directory_path";
+pub use crate::commands::settings::LAST_DIRECTORY_KEY;
 
 /// 選ばれた（または DB 保存済みの）ディレクトリを検証してスキャンし、成功したら
 /// `last_directory_path` に保存する本体（Tauri 非依存、#93）。
