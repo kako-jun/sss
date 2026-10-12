@@ -26,21 +26,25 @@ A slideshow app that shows 100,000+ photos fairly.
 
 Download the file for your OS from [Releases](https://github.com/kako-jun/sss/releases).
 
-| OS      | File                                                              |
-| ------- | ----------------------------------------------------------------- |
-| Windows | `Smart.Slide.Show_*_x64-portable.zip` (extract and run `sss.exe`) |
-| macOS   | `sss_*_universal.dmg` (Apple Silicon and Intel)                   |
-| Linux   | `sss_*_amd64.AppImage` / `sss_*_amd64.deb` / `sss-*.x86_64.rpm`   |
+| OS      | File                                                                                                   |
+| ------- | ------------------------------------------------------------------------------------------------------ |
+| Windows | `Smart.Slide.Show_*_x64-portable.zip` (extract and run `sss.exe`; requires the WebView2 Runtime)       |
+| macOS   | `Smart.Slide.Show_*_universal.dmg` (Apple Silicon and Intel; contains `Smart Slide Show.app`)          |
+| Linux   | `Smart.Slide.Show_*_amd64.AppImage` / `Smart.Slide.Show_*_amd64.deb` / `Smart.Slide.Show-*.x86_64.rpm` |
+
+Example of the real file names (v1.2.1): `Smart.Slide.Show_1.2.1_x64-portable.zip` / `Smart.Slide.Show_1.2.1_universal.dmg` / `Smart.Slide.Show_1.2.1_amd64.AppImage` / `Smart.Slide.Show_1.2.1_amd64.deb` / `Smart.Slide.Show-1.2.1-1.x86_64.rpm`
 
 #### About the unsigned app warning
 
 The distributed files are not code-signed, so the OS shows a warning on first launch.
 
 - **Windows (SmartScreen)**: when "Windows protected your PC" appears, choose "More info" -> "Run anyway"
-- **macOS (Gatekeeper)**: when the app "cannot be opened because the developer cannot be verified", right-click (Control-click) the app in Finder and choose "Open", or click "Open Anyway" under System Settings -> Privacy & Security. If it still won't open, run `xattr -dr com.apple.quarantine /Applications/sss.app` in Terminal
-- **Linux**: no warning. Make an AppImage executable first with `chmod +x sss_*.AppImage`
+- **macOS (Gatekeeper)**: move `Smart Slide Show.app` to `/Applications` and open it, then follow whichever of these matches the message you see (on recent macOS, right-click -> "Open" no longer bypasses it)
+  - "is damaged and can't be opened" (no "Open" button, and no "Open Anyway" will appear): run `xattr -dr com.apple.quarantine "/Applications/Smart Slide Show.app"` in Terminal, then open the app again (the quotes are required because of the spaces)
+  - "cannot be opened because the developer cannot be verified" / "was not opened": dismiss it, open System Settings -> Privacy & Security, scroll down and click "Open Anyway", and confirm in the dialog
+- **Linux**: no warning. Make an AppImage executable first with `chmod +x Smart.Slide.Show_*_amd64.AppImage`
 
-The Windows ZIP is portable: extract it anywhere and run `sss.exe`. No installation, shortcuts, or uninstall step is required. Settings, viewing history, and cache are stored in the Windows user app-data directory.
+The Windows ZIP is portable: extract it anywhere and run `sss.exe`. The ZIP does not bundle the WebView2 Runtime, so install the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/consumer/) first (Windows 11 and up-to-date Windows 10 usually already have it; if the app does not start, get the Evergreen version from the official download page). No installation, shortcuts, or uninstall step is required. Settings, viewing history, and cache are stored in the Windows user app-data directory.
 
 ### Build from source
 
@@ -67,7 +71,7 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
-On macOS, the current source builds `src-tauri/target/release/bundle/macos/Smart Slide Show.app`. The `/Applications/sss.app` path above applies to a published app installed from Releases.
+On macOS, the current source builds `src-tauri/target/release/bundle/macos/Smart Slide Show.app`. The `/Applications/Smart Slide Show.app` path above applies to a published app installed from Releases.
 
 #### Development commands
 

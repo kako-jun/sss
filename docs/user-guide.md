@@ -1,5 +1,9 @@
 # 使い方ガイド
 
+## インストール
+
+配布ファイルの選び方と、未署名アプリの警告の回避手順は [README](../README.md) を参照してください。Windows の portable ZIP を使う場合は、事前に [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/consumer/) が必要です（Windows 11 と更新済みの Windows 10 には通常すでに入っています。入っていなければ公式ダウンロードページから Evergreen 版をインストールしてください）。
+
 ## 初回起動
 
 1. アプリを起動すると、フォルダを一度も設定していない場合は「ようこそ Smart Slide Show へ」画面が表示されます（初回は全画面で起動します）
