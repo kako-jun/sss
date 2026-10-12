@@ -10,11 +10,11 @@
 
 Windows・Linux・macOSのすべてで同じ操作感を提供します。ファイルマネージャーとの連携もOS別に実装されています（Windows: エクスプローラー、macOS: Finder、Linux: nautilus / dolphin / xdg-open）。
 
-配布物（[Releases](https://github.com/kako-jun/sss/releases)）にはコード署名をしていないため、初回起動時に Windows SmartScreen / macOS Gatekeeper の警告が出ます。回避手順は README を参照してください。
+配布物（[Releases](https://github.com/kako-jun/sss/releases)）にはコード署名をしていないため、初回起動時に Windows SmartScreen / macOS Gatekeeper の警告が出ます。回避手順（macOS の「壊れているため開けません」への対処を含む）は README を参照してください。
 
 ### Windows の前提: WebView2 Runtime
 
-portable ZIP は `--no-bundle` でビルドしており、WebView2 Runtime を同梱しません。Windows 11 と更新済みの Windows 10 には通常すでに入っていますが、入っていない環境では起動しません。その場合は公式の [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) ダウンロードページから Evergreen 版をインストールしてください。
+portable ZIP は `--no-bundle` でビルドしており、WebView2 Runtime を同梱しません。Windows 11 と更新済みの Windows 10 には通常すでに入っていますが、入っていない環境では起動しません。その場合は公式の [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/consumer/) ダウンロードページから Evergreen 版をインストールしてください。
 
 ## 対応ファイル形式
 
