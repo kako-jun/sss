@@ -1,3 +1,46 @@
+// 設定キー（`app_settings`）の唯一の定義（#148）。
+// `save_setting` で書けるキーの集合は Rust の `WRITABLE_SETTING_KEYS`（commands/settings.rs）が正本で、
+// `settingKeys.test.ts` が両者の一致を検証する。キーを足すときは Rust の許可リストと
+// ここ（`SETTING_KEYS`）の両方に足す。コンポーネント・テストで文字列リテラルを直書きしない。
+export const SETTING_DISPLAY_INTERVAL = 'display_interval';
+export const SETTING_LANGUAGE = 'language';
+export const SETTING_APPLY_EXIF_ROTATION = 'apply_exif_rotation';
+export const SETTING_VIDEO_AUDIO_ENABLED = 'video_audio_enabled';
+export const SETTING_VIDEO_MAX_DURATION_SEC = 'video_max_duration_sec';
+export const SETTING_MAP_THUMBNAIL_ENABLED = 'map_thumbnail_enabled';
+
+/** WebView から `saveSetting` で書けるキーの全体。Rust の `WRITABLE_SETTING_KEYS` と一致させる。 */
+export const SETTING_KEYS = [
+  SETTING_DISPLAY_INTERVAL,
+  SETTING_LANGUAGE,
+  SETTING_APPLY_EXIF_ROTATION,
+  SETTING_VIDEO_AUDIO_ENABLED,
+  SETTING_VIDEO_MAX_DURATION_SEC,
+  SETTING_MAP_THUMBNAIL_ENABLED,
+] as const;
+
+/**
+ * 真偽値設定の既定値。**正本は Rust の `BOOL_SETTING_DEFAULTS`**（commands/settings.rs）で、
+ * これはその写し（`settingKeys.test.ts` が一致を検証する）。
+ */
+export const BOOL_SETTING_DEFAULTS = {
+  [SETTING_APPLY_EXIF_ROTATION]: true,
+  [SETTING_VIDEO_AUDIO_ENABLED]: false,
+  [SETTING_MAP_THUMBNAIL_ENABLED]: true,
+} as const satisfies Record<string, boolean>;
+
+export type BoolSettingKey = keyof typeof BOOL_SETTING_DEFAULTS;
+
+/**
+ * 保存済みの文字列から真偽値設定を復元する（#148）。`'true'`→true、`'false'`→false、
+ * それ以外（未設定・破損値）はそのキーの既定値。Rust の `parse_bool_setting` と同じ規則。
+ */
+export function parseBoolSetting(key: BoolSettingKey, value: string | null | undefined): boolean {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return BOOL_SETTING_DEFAULTS[key];
+}
+
 // スライドショー設定
 export const DEFAULT_DISPLAY_INTERVAL = 10000; // ミリ秒
 export const MIN_DISPLAY_INTERVAL = 5; // 秒
@@ -18,10 +61,8 @@ export function clampDisplayInterval(ms: number): number {
 }
 
 // 動画設定（#68）
-export const SETTING_VIDEO_AUDIO_ENABLED = 'video_audio_enabled';
-export const SETTING_VIDEO_MAX_DURATION_SEC = 'video_max_duration_sec';
 /** 動画の音声は既定でOFF（無音のまま次々に流れる、これまでの挙動を維持する）。 */
-export const DEFAULT_VIDEO_AUDIO_ENABLED = false;
+export const DEFAULT_VIDEO_AUDIO_ENABLED = BOOL_SETTING_DEFAULTS[SETTING_VIDEO_AUDIO_ENABLED];
 /** 動画の最大再生時間の既定。0 = 無制限（動画の長さ分そのまま再生する）。 */
 export const DEFAULT_VIDEO_MAX_DURATION_SEC = 0;
 /** 設定UIに出す選択肢（秒）。0 = 無制限。 */
@@ -41,9 +82,7 @@ export function normalizeVideoMaxDuration(sec: number): number {
 
 /** 保存済みの文字列（`app_settings`）から動画音声ON/OFFを復元する。未設定・破損は既定。 */
 export function parseVideoAudioEnabled(value: string | null | undefined): boolean {
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  return DEFAULT_VIDEO_AUDIO_ENABLED;
+  return parseBoolSetting(SETTING_VIDEO_AUDIO_ENABLED, value);
 }
 
 /** 保存済みの文字列から動画の最大再生時間（秒）を復元する。未設定・破損は既定（無制限）。 */
@@ -53,18 +92,15 @@ export function parseVideoMaxDuration(value: string | null | undefined): number 
 }
 
 // 地図サムネイル設定（#145）
-export const SETTING_MAP_THUMBNAIL_ENABLED = 'map_thumbnail_enabled';
 /**
  * 地図サムネイルは既定でON（従来の挙動を維持する）。ONのときだけ、操作バーが見えている間に
  * OpenStreetMap のタイルサーバーへ接続する。
  */
-export const DEFAULT_MAP_THUMBNAIL_ENABLED = true;
+export const DEFAULT_MAP_THUMBNAIL_ENABLED = BOOL_SETTING_DEFAULTS[SETTING_MAP_THUMBNAIL_ENABLED];
 
 /** 保存済みの文字列（`app_settings`）から地図サムネイルON/OFFを復元する。未設定・破損は既定（ON）。 */
 export function parseMapThumbnailEnabled(value: string | null | undefined): boolean {
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  return DEFAULT_MAP_THUMBNAIL_ENABLED;
+  return parseBoolSetting(SETTING_MAP_THUMBNAIL_ENABLED, value);
 }
 
 // アニメーション

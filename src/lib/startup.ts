@@ -6,6 +6,7 @@ import {
   parseVideoAudioEnabled,
   parseMapThumbnailEnabled,
   SETTING_MAP_THUMBNAIL_ENABLED,
+  SETTING_DISPLAY_INTERVAL,
   parseVideoMaxDuration,
 } from '../constants';
 
@@ -120,7 +121,7 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     // 設定の取得失敗で起動全体を止めない（既定値で続行し、失敗は利用者に伝える）。
     let settingsFailure: unknown = null;
     try {
-      const intervalSetting = await getSetting('display_interval');
+      const intervalSetting = await getSetting(SETTING_DISPLAY_INTERVAL);
       if (intervalSetting) {
         setDisplayInterval(parseInt(intervalSetting, 10));
       }

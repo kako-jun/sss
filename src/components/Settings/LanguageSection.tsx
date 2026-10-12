@@ -3,6 +3,7 @@ import { useT, getLanguageSetting, setLanguageSetting } from '../../lib/i18n';
 import type { LanguageSetting } from '../../lib/i18n';
 import { saveSetting } from '../../lib/tauri';
 import { useRollbackSave } from '../../hooks/useRollbackSave';
+import { SETTING_LANGUAGE } from '../../constants';
 import { InlineError } from './SectionErrors';
 
 const OPTIONS: LanguageSetting[] = ['auto', 'ja', 'en'];
@@ -33,7 +34,7 @@ export function LanguageSection() {
   const handleChange = async (next: LanguageSetting) => {
     setLanguageSetting(next);
     setSetting(next);
-    await save(next, (v) => saveSetting('language', v));
+    await save(next, (v) => saveSetting(SETTING_LANGUAGE, v));
   };
 
   const labelFor = (option: LanguageSetting): string => {

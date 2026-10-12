@@ -10,6 +10,7 @@ vi.mock('../../lib/tauri', () => ({
 }));
 
 import { VideoSection } from './VideoSection';
+import { SETTING_VIDEO_AUDIO_ENABLED, SETTING_VIDEO_MAX_DURATION_SEC } from '../../constants';
 
 /**
  * #68: 動画の音声ON/OFFと最大再生時間の設定UI。保存・復元・破損値の丸め・
@@ -42,7 +43,11 @@ describe('VideoSection (#68)', () => {
 
   it('restores saved values', async () => {
     getSetting.mockImplementation(async (key: string) =>
-      key === 'video_audio_enabled' ? 'true' : key === 'video_max_duration_sec' ? '60' : null,
+      key === SETTING_VIDEO_AUDIO_ENABLED
+        ? 'true'
+        : key === SETTING_VIDEO_MAX_DURATION_SEC
+          ? '60'
+          : null,
     );
     render(<VideoSection />);
     const checkbox = screen.getByLabelText('動画の音声を再生する') as HTMLInputElement;
@@ -53,7 +58,7 @@ describe('VideoSection (#68)', () => {
 
   it('rounds corrupt saved values to the defaults', async () => {
     getSetting.mockImplementation(async (key: string) =>
-      key === 'video_audio_enabled' ? 'maybe' : '45',
+      key === SETTING_VIDEO_AUDIO_ENABLED ? 'maybe' : '45',
     );
     render(<VideoSection />);
     const checkbox = screen.getByLabelText('動画の音声を再生する') as HTMLInputElement;
@@ -71,11 +76,15 @@ describe('VideoSection (#68)', () => {
     fireEvent.click(checkbox);
     expect(checkbox.checked).toBe(true);
     expect(onAudioChange).toHaveBeenLastCalledWith(true);
-    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('video_audio_enabled', 'true'));
+    await waitFor(() =>
+      expect(saveSetting).toHaveBeenCalledWith(SETTING_VIDEO_AUDIO_ENABLED, 'true'),
+    );
 
     fireEvent.click(checkbox);
     expect(onAudioChange).toHaveBeenLastCalledWith(false);
-    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('video_audio_enabled', 'false'));
+    await waitFor(() =>
+      expect(saveSetting).toHaveBeenCalledWith(SETTING_VIDEO_AUDIO_ENABLED, 'false'),
+    );
   });
 
   it('changing the max duration saves seconds and notifies the parent', async () => {
@@ -86,11 +95,15 @@ describe('VideoSection (#68)', () => {
     fireEvent.change(select, { target: { value: '120' } });
     expect(select.value).toBe('120');
     expect(onMaxDurationChange).toHaveBeenLastCalledWith(120);
-    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('video_max_duration_sec', '120'));
+    await waitFor(() =>
+      expect(saveSetting).toHaveBeenCalledWith(SETTING_VIDEO_MAX_DURATION_SEC, '120'),
+    );
 
     fireEvent.change(select, { target: { value: '0' } });
     expect(onMaxDurationChange).toHaveBeenLastCalledWith(0);
-    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('video_max_duration_sec', '0'));
+    await waitFor(() =>
+      expect(saveSetting).toHaveBeenCalledWith(SETTING_VIDEO_MAX_DURATION_SEC, '0'),
+    );
   });
 
   it('offers unlimited plus 30s/1min/2min/5min options', () => {
@@ -143,8 +156,8 @@ describe('VideoSection (#68)', () => {
       expect(checkbox.checked).toBe(true);
 
       await act(async () => {
-        resolvers['video_audio_enabled']('false');
-        resolvers['video_max_duration_sec'](null);
+        resolvers[SETTING_VIDEO_AUDIO_ENABLED]('false');
+        resolvers[SETTING_VIDEO_MAX_DURATION_SEC](null);
       });
       expect(checkbox.checked).toBe(true);
     });
@@ -158,8 +171,8 @@ describe('VideoSection (#68)', () => {
       expect(select.value).toBe('120');
 
       await act(async () => {
-        resolvers['video_audio_enabled'](null);
-        resolvers['video_max_duration_sec']('0');
+        resolvers[SETTING_VIDEO_AUDIO_ENABLED](null);
+        resolvers[SETTING_VIDEO_MAX_DURATION_SEC]('0');
       });
       expect(select.value).toBe('120');
     });
@@ -173,8 +186,8 @@ describe('VideoSection (#68)', () => {
       fireEvent.click(checkbox);
 
       await act(async () => {
-        resolvers['video_audio_enabled']('false');
-        resolvers['video_max_duration_sec']('60');
+        resolvers[SETTING_VIDEO_AUDIO_ENABLED]('false');
+        resolvers[SETTING_VIDEO_MAX_DURATION_SEC]('60');
       });
       expect(checkbox.checked).toBe(true);
       expect(select.value).toBe('60');

@@ -16,6 +16,7 @@ vi.mock('../../lib/tauri', () => ({
 
 import { IntervalSection } from './IntervalSection';
 import { DEFAULT_DISPLAY_INTERVAL } from '../../constants';
+import { SETTING_DISPLAY_INTERVAL } from '../../constants';
 
 beforeEach(() => {
   getSetting.mockReset();
@@ -48,7 +49,7 @@ describe('IntervalSection number input (#65 問題7)', () => {
 
     fireEvent.blur(input);
     // 3秒は最小値5未満なのでclampされる
-    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('display_interval', '5000'));
+    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith(SETTING_DISPLAY_INTERVAL, '5000'));
     expect(input.value).toBe('5');
   });
 
@@ -61,7 +62,7 @@ describe('IntervalSection number input (#65 問題7)', () => {
 
     await waitFor(() =>
       expect(saveSetting).toHaveBeenCalledWith(
-        'display_interval',
+        SETTING_DISPLAY_INTERVAL,
         String(DEFAULT_DISPLAY_INTERVAL),
       ),
     );
@@ -78,7 +79,9 @@ describe('IntervalSection number input (#65 問題7)', () => {
     fireEvent.change(input, { target: { value: '30' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('display_interval', '30000'));
+    await waitFor(() =>
+      expect(saveSetting).toHaveBeenCalledWith(SETTING_DISPLAY_INTERVAL, '30000'),
+    );
   });
 
   it('notifies onIntervalChange with the clamped value on commit', async () => {
@@ -115,7 +118,7 @@ describe('IntervalSection slider (#65 問題7: 毎ステップDB書込しない)
 
     // debounce後、最後の値だけが1回保存される
     expect(saveSetting).toHaveBeenCalledTimes(1);
-    expect(saveSetting).toHaveBeenCalledWith('display_interval', '30000');
+    expect(saveSetting).toHaveBeenCalledWith(SETTING_DISPLAY_INTERVAL, '30000');
   });
 
   it('still updates the visible value and calls onIntervalChange immediately per step', () => {
@@ -141,7 +144,7 @@ describe('IntervalSection slider (#65 問題7: 毎ステップDB書込しない)
 
     // 以前はclearTimeoutするだけで、この保留中の保存が静かに失われていた。
     expect(saveSetting).toHaveBeenCalledTimes(1);
-    expect(saveSetting).toHaveBeenCalledWith('display_interval', '45000');
+    expect(saveSetting).toHaveBeenCalledWith(SETTING_DISPLAY_INTERVAL, '45000');
   });
 
   it('does not double-save on unmount when nothing is pending (already committed)', async () => {

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { getSetting, saveSetting } from '../../lib/tauri';
 import { useT } from '../../lib/i18n';
 import { useRollbackSave } from '../../hooks/useRollbackSave';
+import { SETTING_APPLY_EXIF_ROTATION, parseBoolSetting } from '../../constants';
 import { InlineError } from './SectionErrors';
 
 export function SettingsSection() {
@@ -20,16 +21,16 @@ export function SettingsSection() {
     let cancelled = false;
     const token = beginLoad();
     // apply_exif_rotation設定を読み込む
-    getSetting('apply_exif_rotation')
+    getSetting(SETTING_APPLY_EXIF_ROTATION)
       .then((value) => {
         if (cancelled) return;
         setLoadFailed(false);
-        if (value !== null) {
-          if (markLoaded(value === 'true', token)) setApplyExifRotation(value === 'true');
-        }
+        // 未設定・破損値は Rust 側と同じく既定（ON）に倒す（#148）
+        const parsed = parseBoolSetting(SETTING_APPLY_EXIF_ROTATION, value);
+        if (markLoaded(parsed, token)) setApplyExifRotation(parsed);
       })
       .catch((err) => {
-        console.error('Failed to load apply_exif_rotation:', err);
+        console.error('Failed to load setting:', err);
         if (!cancelled) setLoadFailed(true);
       });
     return () => {
@@ -39,7 +40,9 @@ export function SettingsSection() {
 
   const handleExifRotationChange = async (checked: boolean) => {
     setApplyExifRotation(checked);
-    const ok = await save(checked, (v) => saveSetting('apply_exif_rotation', v ? 'true' : 'false'));
+    const ok = await save(checked, (v) =>
+      saveSetting(SETTING_APPLY_EXIF_ROTATION, v ? 'true' : 'false'),
+    );
     if (ok) setLoadFailed(false);
   };
 
