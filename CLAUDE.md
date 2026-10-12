@@ -269,6 +269,8 @@
 
 保存キー（`app_settings`）: `last_directory_path` / `display_interval`（ms） / `apply_exif_rotation` / `share_directory_path` / `language` / `video_audio_enabled` / `video_max_duration_sec` / `map_thumbnail_enabled` / `sssignore_migrated`。
 
+設定キーの定義は Rust の `WRITABLE_SETTING_KEYS`（`commands/settings.rs`）が正本で、フロントは `src/constants.ts` の `SETTING_*`/`SETTING_KEYS` を使い文字列リテラルを直書きしない（一致は `src/settingKeys.test.ts` が検証、#148）。真偽値設定は「`true`/`false` 以外は既定値」の1規則で、Rust は `parse_bool_setting`/`get_bool_setting`、フロントは `parseBoolSetting`。既定値の正本は Rust の `BOOL_SETTING_DEFAULTS`（フロントは写しでテスト検証）。詳細は `docs/architecture.md` §6-(j)。
+
 ### 8. 国際化（i18n、#80）
 
 - **辞書**: `src/lib/i18n/dictionaries/{ja,en}.ts`。キー→文言のフラットなオブジェクト（ネストしない）。`{param}`形式のプレースホルダは `t(key, params?)`（`src/lib/i18n/t.ts`）が置換する

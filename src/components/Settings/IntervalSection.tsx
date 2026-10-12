@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getSetting, saveSetting } from '../../lib/tauri';
 import {
+  SETTING_DISPLAY_INTERVAL,
   DEFAULT_DISPLAY_INTERVAL,
   MIN_DISPLAY_INTERVAL,
   MAX_DISPLAY_INTERVAL,
@@ -61,7 +62,9 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
   );
   const persist = useCallback(
     async (ms: number) => {
-      const ok = await saveWithRollback(ms, (v) => saveSetting('display_interval', v.toString()));
+      const ok = await saveWithRollback(ms, (v) =>
+        saveSetting(SETTING_DISPLAY_INTERVAL, v.toString()),
+      );
       // 保存できたなら、DBは正常に書ける。取得失敗の表示（既定値の注記）は役目を終える。
       if (ok) setLoadFailed(false);
     },
@@ -71,7 +74,7 @@ export function IntervalSection({ onIntervalChange }: IntervalSectionProps) {
   useEffect(() => {
     let cancelled = false;
     const token = beginLoad();
-    getSetting('display_interval')
+    getSetting(SETTING_DISPLAY_INTERVAL)
       .then((value) => {
         if (cancelled) return;
         setLoadFailed(false);

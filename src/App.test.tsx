@@ -110,6 +110,11 @@ vi.mock('./components/Settings', () => ({
 import App from './App';
 import { setLanguageSetting } from './lib/i18n/store';
 import { confirmDialog } from './lib/confirmDialog';
+import {
+  SETTING_DISPLAY_INTERVAL,
+  SETTING_LANGUAGE,
+  SETTING_MAP_THUMBNAIL_ENABLED,
+} from './constants';
 
 beforeEach(() => {
   getSetting.mockReset().mockResolvedValue(null);
@@ -549,7 +554,7 @@ describe('App i18n (#80): language setting resolution', () => {
 
   it('renders in Japanese when the saved language setting is "ja", even if navigator.language is English', async () => {
     Object.defineProperty(navigator, 'language', { value: 'en-US', configurable: true });
-    getSetting.mockImplementation(async (key: string) => (key === 'language' ? 'ja' : null));
+    getSetting.mockImplementation(async (key: string) => (key === SETTING_LANGUAGE ? 'ja' : null));
     getLastDirectoryPath.mockResolvedValue(null);
     render(<App />);
 
@@ -562,7 +567,7 @@ describe('App i18n (#80): language setting resolution', () => {
   it('renders in English when the saved language setting is "en", even if navigator.language is Japanese', async () => {
     // src/test/setup.ts の既定（ja-JP）のまま。settingが常にnavigatorに勝つことを
     // 前のテスト（ja設定がnavigator=enに勝つ）と逆方向でも確認する。
-    getSetting.mockImplementation(async (key: string) => (key === 'language' ? 'en' : null));
+    getSetting.mockImplementation(async (key: string) => (key === SETTING_LANGUAGE ? 'en' : null));
     getLastDirectoryPath.mockResolvedValue(null);
     render(<App />);
 
@@ -573,7 +578,7 @@ describe('App i18n (#80): language setting resolution', () => {
   });
 
   it('sets the native window title to the translated windowTitle for the resolved locale', async () => {
-    getSetting.mockImplementation(async (key: string) => (key === 'language' ? 'en' : null));
+    getSetting.mockImplementation(async (key: string) => (key === SETTING_LANGUAGE ? 'en' : null));
     getLastDirectoryPath.mockResolvedValue(null);
     render(<App />);
 
@@ -589,7 +594,7 @@ describe('App i18n (#80): language setting resolution', () => {
   // ことを、App全体を通した回帰テストとして固定する。
   it('does not hang on the loading screen when getSetting("language") rejects (#82 must)', async () => {
     getSetting.mockImplementation(async (key: string) => {
-      if (key === 'language') throw new Error('db locked');
+      if (key === SETTING_LANGUAGE) throw new Error('db locked');
       return null;
     });
     getLastDirectoryPath.mockResolvedValue(null);
@@ -1370,7 +1375,7 @@ describe('App startup failures (#115)', () => {
   it('a failed settings read starts with defaults but tells the user once the app is ready', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     getSetting.mockImplementation(async (key: string) => {
-      if (key === 'display_interval') throw new Error('db locked');
+      if (key === SETTING_DISPLAY_INTERVAL) throw new Error('db locked');
       return null;
     });
     render(<App />);
@@ -1452,7 +1457,7 @@ describe('App map thumbnail setting wiring (#145)', () => {
     unmount();
 
     getSetting.mockImplementation(async (key: string) =>
-      key === 'map_thumbnail_enabled' ? 'false' : null,
+      key === SETTING_MAP_THUMBNAIL_ENABLED ? 'false' : null,
     );
     render(<App />);
     await waitFor(() => expect(screen.getByLabelText(MAP_ALT)).toBeTruthy());

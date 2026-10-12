@@ -7,6 +7,8 @@
  * 実装）。Reactからは `useT.ts` の `useSyncExternalStore` 経由で購読する。
  */
 
+import { SETTING_LANGUAGE } from '../../constants';
+
 export type Locale = 'ja' | 'en';
 export type LanguageSetting = Locale | 'auto';
 
@@ -132,7 +134,7 @@ export async function initLocale(
 ): Promise<void> {
   let setting: LanguageSetting = 'auto';
   try {
-    const saved = await withTimeout(getSetting('language'), LOCALE_FETCH_TIMEOUT_MS);
+    const saved = await withTimeout(getSetting(SETTING_LANGUAGE), LOCALE_FETCH_TIMEOUT_MS);
     setting = saved === 'ja' || saved === 'en' ? saved : 'auto';
   } catch (err) {
     console.error('Failed to load the language setting, falling back to "auto":', err);

@@ -9,10 +9,11 @@ vi.mock('../../lib/tauri', () => ({
 }));
 
 import { LanguageSection } from './LanguageSection';
+import { SETTING_LANGUAGE } from '../../constants';
 
 /**
  * #80: 言語切替UI。これまでテストが無く、「切替の即時反映」（ストア更新→
- * この場での即時表示切替）と「永続化」（`saveSetting('language', ...)`呼び出し、
+ * この場での即時表示切替）と「永続化」（`saveSetting(SETTING_LANGUAGE, ...)`呼び出し、
  * 失敗時の扱い）が未検証だった。ストアレベルの反映は store.test.ts でピン留め
  * 済みだが、実際のUIコンポーネントが正しい引数で呼ぶこと自体は別物として
  * ここで固定する。
@@ -44,7 +45,7 @@ describe('LanguageSection (#80)', () => {
 
     // 永続化: app_settings への保存が正しい引数で呼ばれる
     await waitFor(() => {
-      expect(saveSetting).toHaveBeenCalledWith('language', 'ja');
+      expect(saveSetting).toHaveBeenCalledWith(SETTING_LANGUAGE, 'ja');
     });
     expect(getLanguageSetting()).toBe('ja');
   });
@@ -61,7 +62,7 @@ describe('LanguageSection (#80)', () => {
       expect(screen.getByText('Auto (system)')).toBeTruthy();
       expect(screen.getByText('English').closest('button')!.className).toContain('bg-white/15');
     });
-    expect(saveSetting).toHaveBeenCalledWith('language', 'en');
+    expect(saveSetting).toHaveBeenCalledWith(SETTING_LANGUAGE, 'en');
   });
 
   it('rolls back the UI selection and tells the user when saveSetting rejects (#115)', async () => {

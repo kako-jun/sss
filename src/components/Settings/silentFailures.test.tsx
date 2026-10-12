@@ -61,6 +61,7 @@ import { InfoSection } from './InfoSection';
 import { ScanSection } from './ScanSection';
 import { ConfirmDialogHost } from '../ConfirmDialog';
 import { setLanguageSetting } from '../../lib/i18n/store';
+import { SETTING_VIDEO_MAX_DURATION_SEC } from '../../constants';
 
 beforeEach(() => {
   for (const fn of Object.values(tauri)) fn.mockReset();
@@ -259,7 +260,7 @@ describe('保存失敗は元の値へ巻き戻して通知される (#115)', () 
 
   it('VideoSection: 最大再生時間の保存失敗 → 元の選択に戻る', async () => {
     tauri.getSetting.mockImplementation(async (key: string) =>
-      key === 'video_max_duration_sec' ? '60' : null,
+      key === SETTING_VIDEO_MAX_DURATION_SEC ? '60' : null,
     );
     tauri.saveSetting.mockRejectedValue(new Error('io'));
     render(<VideoSection />);

@@ -15,6 +15,7 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
 }));
 
 import { MapSection } from './MapSection';
+import { SETTING_MAP_THUMBNAIL_ENABLED } from '../../constants';
 
 const LABEL = '位置情報のある写真に地図サムネイルを表示する';
 
@@ -31,7 +32,7 @@ describe('MapSection (#145)', () => {
   it('defaults to ON when nothing is saved', async () => {
     render(<MapSection />);
     const checkbox = screen.getByLabelText(LABEL) as HTMLInputElement;
-    await waitFor(() => expect(getSetting).toHaveBeenCalledWith('map_thumbnail_enabled'));
+    await waitFor(() => expect(getSetting).toHaveBeenCalledWith(SETTING_MAP_THUMBNAIL_ENABLED));
     expect(checkbox.checked).toBe(true);
   });
 
@@ -56,7 +57,9 @@ describe('MapSection (#145)', () => {
     const checkbox = screen.getByLabelText(LABEL) as HTMLInputElement;
     await waitFor(() => expect(getSetting).toHaveBeenCalled());
     fireEvent.click(checkbox);
-    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('map_thumbnail_enabled', 'false'));
+    await waitFor(() =>
+      expect(saveSetting).toHaveBeenCalledWith(SETTING_MAP_THUMBNAIL_ENABLED, 'false'),
+    );
     expect(onChange).toHaveBeenCalledWith(false);
     expect(checkbox.checked).toBe(false);
   });
