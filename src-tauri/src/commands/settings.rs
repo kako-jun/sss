@@ -20,6 +20,7 @@ pub const WRITABLE_SETTING_KEYS: &[&str] = &[
     "apply_exif_rotation",
     "video_audio_enabled",
     "video_max_duration_sec",
+    "map_thumbnail_enabled",
 ];
 
 /// 設定を保存

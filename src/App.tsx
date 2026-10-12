@@ -27,6 +27,7 @@ import {
   clampDisplayInterval,
   DEFAULT_DISPLAY_INTERVAL,
   DEFAULT_VIDEO_AUDIO_ENABLED,
+  DEFAULT_MAP_THUMBNAIL_ENABLED,
   DEFAULT_VIDEO_MAX_DURATION_SEC,
   idleFadeClassName,
   normalizeVideoMaxDuration,
@@ -66,6 +67,9 @@ function App() {
   // #68: 動画の音声ON/OFFと最大再生時間（秒。0=無制限）。永続化は設定画面が担い、
   // ここは起動時の復元値と設定画面からの変更通知を受けてSlideshowへ渡すだけ。
   const [videoAudioEnabled, setVideoAudioEnabled] = useState<boolean>(DEFAULT_VIDEO_AUDIO_ENABLED);
+  const [mapThumbnailEnabled, setMapThumbnailEnabled] = useState<boolean>(
+    DEFAULT_MAP_THUMBNAIL_ENABLED,
+  );
   const [videoMaxDurationSec, setVideoMaxDurationSec] = useState<number>(
     DEFAULT_VIDEO_MAX_DURATION_SEC,
   );
@@ -211,6 +215,7 @@ function App() {
       setIsInitialized,
       setDisplayInterval: (ms) => setDisplayInterval(clampDisplayInterval(ms)),
       setVideoAudioEnabled,
+      setMapThumbnailEnabled,
       setVideoMaxDurationSec: (sec) => setVideoMaxDurationSec(normalizeVideoMaxDuration(sec)),
       updatePlaylistInfo,
       setHasDirectory,
@@ -1016,6 +1021,7 @@ function App() {
         progressDurationMs={progressDurationMs}
         isPausedByUser={isPausedByUser}
         isIdle={isIdle}
+        showMapThumbnail={mapThumbnailEnabled}
         onPrevious={handlePrevious}
         onNext={handleNext}
         onOpenPickTab={handleOpenPickTab}
@@ -1042,6 +1048,7 @@ function App() {
         excludeRescan={excludeRescan}
         onIntervalChange={handleIntervalChange}
         onVideoAudioChange={setVideoAudioEnabled}
+        onMapThumbnailChange={setMapThumbnailEnabled}
         onVideoMaxDurationChange={handleVideoMaxDurationChange}
         initialTab={settingsInitialTab}
         openedViaMouse={settingsOpenedViaMouse}

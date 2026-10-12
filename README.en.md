@@ -103,7 +103,7 @@ On later launches the previous folder is restored automatically and shown right 
   - **Next**: advances immediately
   - **Pick** (hand icon): copies the current file into the pick destination folder (default: `sss-picked` in your Pictures folder)
   - **"…" menu**: open in file manager, view picks, exclude (by date taken / folder / file)
-  - **Map thumbnail** (photos with GPS only): click to open Google Maps
+  - **Map thumbnail** (photos with GPS only): click to open Google Maps. The thumbnail is fetched from the OpenStreetMap tile server (`tile.openstreetmap.org`); see [Network access](#network-access)
 - **Undo**: for a few seconds right after an exclude or a pick, a small toast offers "Undo". It removes the exclude rule and puts the photo back into the unplayed part of the playlist, or deletes the file the pick just copied (no confirmation dialog)
 - **Top-right buttons** (from left: shortcuts, window mode, settings, exit): shown while you're using the mouse, and fade out on idle just like the overlay
 - **Window state is remembered**: the window mode (fullscreen/windowed), position and size are saved on exit and restored on the next launch. If the saved display is gone, the window opens at the default position
@@ -130,7 +130,7 @@ Open it with the gear button at the top right (or the button on the welcome scre
 | Tab           | Contents                                                                                                                                              |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Folder        | Choose the photo folder (it is scanned right away) or re-scan the selected folder (result: files, new, deleted, duration, read errors)                |
-| Options       | Display interval (5-60 s), follow EXIF rotation, video audio (default: off) and max playback time, pick destination folder, language                  |
+| Options       | Display interval (5-60 s), follow EXIF rotation, video audio (default: off) and max playback time, map thumbnail (default: on), pick destination folder, language                  |
 | Exclude Rules | List, remove and manually add exclude rules                                                                                                           |
 | Picks         | List and delete picked photos/videos                                                                                                                  |
 | History       | Recently shown photos (latest 100) and excluding from there                                                                                           |
@@ -138,6 +138,12 @@ Open it with the gear button at the top right (or the button on the welcome scre
 | Info          | Version, GitHub link, "Reset All Data" (erases all data and restarts the app; picked files are kept, but the pick destination returns to the default) |
 
 A video advances after it plays to the end (or reaches the "Maximum video playback time"), not after the display interval. The language can be Auto (OS locale) / 日本語 / English.
+
+## Network access
+
+SSS never uploads your photos. The only external connection is the **map thumbnail, and only while a photo with GPS data is shown and the control bar is visible**. In that case the [OpenStreetMap](https://www.openstreetmap.org/copyright) tile server (`tile.openstreetmap.org`) receives the map tile coordinates (roughly where the photo was taken) and your IP address. While the bar is hidden, nothing is fetched.
+
+Turn the thumbnail off in Settings → Options → Map; while it is off the app makes no external connections at all (clicking the thumbnail opens Google Maps in your browser only when you click). The thumbnail carries the "© OpenStreetMap contributors" attribution.
 
 ## Tech Stack
 

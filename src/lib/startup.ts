@@ -4,6 +4,8 @@ import {
   SETTING_VIDEO_AUDIO_ENABLED,
   SETTING_VIDEO_MAX_DURATION_SEC,
   parseVideoAudioEnabled,
+  parseMapThumbnailEnabled,
+  SETTING_MAP_THUMBNAIL_ENABLED,
   parseVideoMaxDuration,
 } from '../constants';
 
@@ -44,6 +46,8 @@ export interface StartupDeps {
   setVideoAudioEnabled?: (value: boolean) => void;
   /** #68: 動画の最大再生時間（秒、0=無制限）。未設定・破損時は既定（0）で呼ぶ。省略時は復元しない。 */
   setVideoMaxDurationSec?: (value: number) => void;
+  /** #145: 地図サムネイルのON/OFF（保存済みの値。未設定・破損時は既定のONで呼ぶ）。省略時は復元しない。 */
+  setMapThumbnailEnabled?: (value: boolean) => void;
   updatePlaylistInfo: () => Promise<void>;
   /**
    * 前回ディレクトリが確認できた時点で呼ぶ（#65: 「本当に未設定」（ようこそ画面）と
@@ -104,6 +108,7 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
     setDisplayInterval,
     setVideoAudioEnabled,
     setVideoMaxDurationSec,
+    setMapThumbnailEnabled,
     updatePlaylistInfo,
     setHasDirectory,
     onDirectoryError,
@@ -135,6 +140,17 @@ export async function runStartupSequence(deps: StartupDeps): Promise<void> {
         setVideoMaxDurationSec?.(parseVideoMaxDuration(maxDurationSetting));
       } catch (err) {
         console.error('Failed to load video settings:', err);
+        settingsFailure = err;
+      }
+    }
+    // #145: 地図サムネイル設定。読込失敗でも起動全体は止めない（既定のONのまま続行）。
+    if (setMapThumbnailEnabled) {
+      try {
+        setMapThumbnailEnabled(
+          parseMapThumbnailEnabled(await getSetting(SETTING_MAP_THUMBNAIL_ENABLED)),
+        );
+      } catch (err) {
+        console.error('Failed to load map thumbnail setting:', err);
         settingsFailure = err;
       }
     }

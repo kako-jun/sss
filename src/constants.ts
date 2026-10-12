@@ -52,6 +52,21 @@ export function parseVideoMaxDuration(value: string | null | undefined): number 
   return normalizeVideoMaxDuration(parseInt(value, 10));
 }
 
+// 地図サムネイル設定（#145）
+export const SETTING_MAP_THUMBNAIL_ENABLED = 'map_thumbnail_enabled';
+/**
+ * 地図サムネイルは既定でON（従来の挙動を維持する）。ONのときだけ、操作バーが見えている間に
+ * OpenStreetMap のタイルサーバーへ接続する。
+ */
+export const DEFAULT_MAP_THUMBNAIL_ENABLED = true;
+
+/** 保存済みの文字列（`app_settings`）から地図サムネイルON/OFFを復元する。未設定・破損は既定（ON）。 */
+export function parseMapThumbnailEnabled(value: string | null | undefined): boolean {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return DEFAULT_MAP_THUMBNAIL_ENABLED;
+}
+
 // アニメーション
 export const MODAL_ANIMATION_DURATION = 0.2; // 秒
 

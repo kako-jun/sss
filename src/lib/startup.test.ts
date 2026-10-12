@@ -388,6 +388,22 @@ describe('runStartupSequence: video settings (#68)', () => {
     expect(maxDuration).toEqual([0]);
   });
 
+  it('restores the map thumbnail setting (default ON, corrupt -> ON)', async () => {
+    for (const [saved, expected] of [
+      ['false', false],
+      ['true', true],
+      [null, true],
+      ['x', true],
+    ] as const) {
+      const got: boolean[] = [];
+      const { deps } = makeDeps(saved === null ? {} : { map_thumbnail_enabled: saved }, {
+        setMapThumbnailEnabled: (v: boolean) => got.push(v),
+      });
+      await runStartupSequence(deps);
+      expect(got).toEqual([expected]);
+    }
+  });
+
   it('does not abort startup when reading the video settings fails', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const initialized: boolean[] = [];

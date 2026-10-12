@@ -543,6 +543,57 @@ describe('OverlayUI map button (openUrl)', () => {
   });
 });
 
+// #145: 地図タイルは「設定ON かつ 操作バーが実際に見えている」間だけ取得する。
+describe('OverlayUI map thumbnail privacy (#145)', () => {
+  const gpsImage = () =>
+    makeImage({
+      exif: {
+        dateTime: null,
+        gpsLatitude: 35.6812,
+        gpsLongitude: 139.7671,
+        width: null,
+        height: null,
+      },
+    });
+
+  it('renders the OSM tile image with attribution while visible and enabled', () => {
+    const { container } = render(<OverlayUI image={gpsImage()} {...requiredProps} />);
+    const img = screen.getByAltText('位置情報の地図') as HTMLImageElement;
+    expect(img.src).toMatch(/^https:\/\/tile\.openstreetmap\.org\/13\/\d+\/\d+\.png$/);
+    expect(container.textContent).toContain('© OpenStreetMap contributors');
+  });
+
+  it('does not render the tile image (no fetch) while the bar is idle-hidden', () => {
+    const { container } = render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).not.toContain('OpenStreetMap');
+  });
+
+  it('starts fetching again when the bar becomes visible, and stops when it hides', () => {
+    const { rerender } = render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+    rerender(<OverlayUI image={gpsImage()} {...requiredProps} isIdle={false} />);
+    expect(screen.getByAltText('位置情報の地図')).toBeTruthy();
+    rerender(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+  });
+
+  it('does not render the tile image or attribution when the setting is off', () => {
+    const { container } = render(
+      <OverlayUI image={gpsImage()} {...requiredProps} showMapThumbnail={false} />,
+    );
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).not.toContain('OpenStreetMap');
+  });
+
+  it('keeps the open-in-Google-Maps button when the thumbnail is off', () => {
+    render(<OverlayUI image={gpsImage()} {...requiredProps} showMapThumbnail={false} />);
+    fireEvent.click(screen.getByLabelText('位置情報の地図'));
+    expect(openUrl).toHaveBeenCalledWith('https://www.google.com/maps?q=35.6812,139.7671');
+  });
+});
+
 // #78: 除外/ピック直後の取り消しトースト。確認ダイアログは増やさず、直後の数秒だけ
 // 「取り消す」を出す。
 describe('OverlayUI undo toast (#78)', () => {

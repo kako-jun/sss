@@ -292,6 +292,7 @@ fn save_setting_saves_every_allowed_key() {
             "apply_exif_rotation",
             "video_audio_enabled",
             "video_max_duration_sec",
+            "map_thumbnail_enabled",
         ] {
             assert!(WRITABLE_SETTING_KEYS.contains(&key), "{key}");
         }

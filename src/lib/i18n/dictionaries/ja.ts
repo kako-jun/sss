@@ -191,6 +191,11 @@ export const ja = {
   videoMaxDurationUnlimited: '無制限',
   videoMaxDurationSeconds: '{count}秒',
   videoMaxDurationMinutes: '{count}分',
+  mapSectionTitle: '地図',
+  mapThumbnailLabel: '位置情報のある写真に地図サムネイルを表示する',
+  mapThumbnailDescription:
+    '操作バーが表示されている間だけ、OpenStreetMap のタイルサーバー（tile.openstreetmap.org）へ接続して地図を取得します。送信されるのはタイル座標（おおよその撮影場所）とIPアドレスです。オフにすると外部へは一切接続しません',
+  mapSaveFailed: '地図の設定を保存できませんでした。元の値に戻しました',
   pickDestinationTitle: 'ピック先フォルダ',
 
   // === 設定画面: 除外ルール ===
