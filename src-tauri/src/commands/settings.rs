@@ -7,13 +7,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
-/// `save_setting`（WebView から呼べる汎用の設定保存）で書き込める設定キー（#93）。
-///
-/// 許可リスト方式。スキャン対象・ピック先のような「管理下パス」の基準になる設定
-/// （`last_directory_path` / `share_directory_path`）や内部フラグ（`sssignore_migrated`）を
-/// WebView から直接書き換えられると、ダイアログを経ずに任意フォルダを管理下にできてしまう
-/// ため、これらは専用コマンド（`select_and_scan` / `select_share_directory`）経由でしか
-/// 書かれない。新しい UI 設定を足すときはここにキーを追加する。
 /// `apply_exif_rotation` のキー（`image.rs` からも使う、#148）。
 pub const APPLY_EXIF_ROTATION_KEY: &str = "apply_exif_rotation";
 /// スキャン対象ディレクトリのキー（専用コマンド経由でのみ書かれる、許可リスト外）。
@@ -21,6 +14,13 @@ pub const LAST_DIRECTORY_KEY: &str = "last_directory_path";
 /// ピック先ディレクトリのキー（専用コマンド経由でのみ書かれる、許可リスト外）。
 pub const SHARE_DIRECTORY_KEY: &str = "share_directory_path";
 
+/// `save_setting`（WebView から呼べる汎用の設定保存）で書き込める設定キー（#93）。
+///
+/// 許可リスト方式。スキャン対象・ピック先のような「管理下パス」の基準になる設定
+/// （`last_directory_path` / `share_directory_path`）や内部フラグ（`sssignore_migrated`）を
+/// WebView から直接書き換えられると、ダイアログを経ずに任意フォルダを管理下にできてしまう
+/// ため、これらは専用コマンド（`select_and_scan` / `select_share_directory`）経由でしか
+/// 書かれない。新しい UI 設定を足すときはここにキーを追加する。
 pub const WRITABLE_SETTING_KEYS: &[&str] = &[
     "display_interval",
     "language",
