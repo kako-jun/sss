@@ -2,15 +2,19 @@
 
 ## 対応OS
 
-| OS      | サポート状況                                                                            |
-| ------- | --------------------------------------------------------------------------------------- |
-| Windows | 対応（CI は windows-latest でビルド・テスト。配布物は portable ZIP）                    |
-| Linux   | 対応（CI は Ubuntu 22.04 でビルド・テスト。WebKitGTK 4.1 が必要。AppImage / deb / rpm） |
-| macOS   | 対応（CI は macos-latest でビルド・テスト。配布物は universal の `.dmg`）               |
+| OS      | サポート状況                                                                                  |
+| ------- | --------------------------------------------------------------------------------------------- |
+| Windows | 対応（CI は windows-latest でビルド・テスト。配布物は portable ZIP。WebView2 Runtime が必要） |
+| Linux   | 対応（CI は Ubuntu 22.04 でビルド・テスト。WebKitGTK 4.1 が必要。AppImage / deb / rpm）       |
+| macOS   | 対応（CI は macos-latest でビルド・テスト。配布物は universal の `.dmg`）                     |
 
 Windows・Linux・macOSのすべてで同じ操作感を提供します。ファイルマネージャーとの連携もOS別に実装されています（Windows: エクスプローラー、macOS: Finder、Linux: nautilus / dolphin / xdg-open）。
 
 配布物（[Releases](https://github.com/kako-jun/sss/releases)）にはコード署名をしていないため、初回起動時に Windows SmartScreen / macOS Gatekeeper の警告が出ます。回避手順は README を参照してください。
+
+### Windows の前提: WebView2 Runtime
+
+portable ZIP は `--no-bundle` でビルドしており、WebView2 Runtime を同梱しません。Windows 11 と更新済みの Windows 10 には通常すでに入っていますが、入っていない環境では起動しません。その場合は公式の [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) ダウンロードページから Evergreen 版をインストールしてください。
 
 ## 対応ファイル形式
 
