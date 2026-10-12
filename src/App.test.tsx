@@ -79,9 +79,11 @@ vi.mock('./components/Settings', () => ({
     isOpen,
     onScanComplete,
     excludeRescan,
+    onMapThumbnailChange,
   }: {
     isOpen: boolean;
     onScanComplete: () => void;
+    onMapThumbnailChange?: (enabled: boolean) => void;
     excludeRescan: {
       notice: { kind: string } | null;
       rescanning: boolean;
@@ -99,6 +101,8 @@ vi.mock('./components/Settings', () => ({
         />
         <button data-testid="stub-rescan" onClick={() => excludeRescan.rescan()} />
         <button data-testid="stub-scan-complete" onClick={() => onScanComplete()} />
+        <button data-testid="stub-map-off" onClick={() => onMapThumbnailChange?.(false)} />
+        <button data-testid="stub-map-on" onClick={() => onMapThumbnailChange?.(true)} />
       </div>
     ) : null,
 }));
@@ -1418,5 +1422,56 @@ describe('App top-right pill background (#113)', () => {
     const pill = screen.getByTitle('設定').closest('.backdrop-blur-md')!;
     expect(pill.className).toContain('bg-black/75');
     expect(pill.className).not.toContain('bg-black/50');
+  });
+});
+
+// #145: 地図サムネイル設定の配線（起動時の復元・設定画面からの変更 → OverlayUI）。
+describe('App map thumbnail setting wiring (#145)', () => {
+  const gpsImage = {
+    path: '/photos/a.jpg',
+    optimizedPath: null,
+    isVideo: false,
+    width: 10,
+    height: 10,
+    fileSize: 1,
+    exif: { dateTime: null, gpsLatitude: 35.68, gpsLongitude: 139.76, width: null, height: null },
+    displayCount: 1,
+    lastDisplayed: null,
+  };
+  const MAP_ALT = '位置情報の地図';
+  // 起動直後はバーが idle（非表示）なので、マウスを動かして表示させる
+  const wakeBar = () => act(() => void fireEvent.mouseMove(window));
+
+  it('shows the tile by default, and a saved "false" hides it from startup', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValue({ kind: 'found', data: gpsImage });
+    const { unmount } = render(<App />);
+    await waitFor(() => expect(screen.getByLabelText(MAP_ALT)).toBeTruthy());
+    wakeBar();
+    await waitFor(() => expect(screen.getByAltText(MAP_ALT)).toBeTruthy());
+    unmount();
+
+    getSetting.mockImplementation(async (key: string) =>
+      key === 'map_thumbnail_enabled' ? 'false' : null,
+    );
+    render(<App />);
+    await waitFor(() => expect(screen.getByLabelText(MAP_ALT)).toBeTruthy());
+    wakeBar();
+    expect(screen.queryByAltText(MAP_ALT)).toBeNull();
+  });
+
+  it('toggling from Settings updates the overlay immediately', async () => {
+    useRestoredStartupPath();
+    getNextImage.mockResolvedValue({ kind: 'found', data: gpsImage });
+    render(<App />);
+    await waitFor(() => expect(screen.getByLabelText(MAP_ALT)).toBeTruthy());
+    wakeBar();
+    await waitFor(() => expect(screen.getByAltText(MAP_ALT)).toBeTruthy());
+
+    fireEvent.click(screen.getByTitle('設定'));
+    fireEvent.click(await screen.findByTestId('stub-map-off'));
+    await waitFor(() => expect(screen.queryByAltText(MAP_ALT)).toBeNull());
+    fireEvent.click(screen.getByTestId('stub-map-on'));
+    await waitFor(() => expect(screen.getByAltText(MAP_ALT)).toBeTruthy());
   });
 });

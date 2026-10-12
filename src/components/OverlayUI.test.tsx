@@ -579,6 +579,26 @@ describe('OverlayUI map thumbnail privacy (#145)', () => {
     expect(screen.queryByAltText('位置情報の地図')).toBeNull();
   });
 
+  it('keeps fetching while idle if keyboard focus is inside the bar (the bar stays visible)', () => {
+    render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+    // jsdom は :focus-visible を評価できないため、キーボードフォーカス相当として真を返させる
+    const matches = vi.spyOn(Element.prototype, 'matches').mockReturnValue(true);
+    fireEvent.focus(screen.getByLabelText('位置情報の地図'));
+    expect(screen.getByAltText('位置情報の地図')).toBeTruthy();
+    fireEvent.blur(screen.getByLabelText('位置情報の地図'), { relatedTarget: document.body });
+    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+    matches.mockRestore();
+  });
+
+  it('exposes the full attribution in the tooltip and screen-reader text', () => {
+    const { container } = render(<OverlayUI image={gpsImage()} {...requiredProps} />);
+    expect(screen.getByLabelText('位置情報の地図').getAttribute('title')).toContain(
+      '© OpenStreetMap contributors',
+    );
+    expect(container.querySelector('.sr-only')?.textContent).toBe('© OpenStreetMap contributors');
+  });
+
   it('does not render the tile image or attribution when the setting is off', () => {
     const { container } = render(
       <OverlayUI image={gpsImage()} {...requiredProps} showMapThumbnail={false} />,

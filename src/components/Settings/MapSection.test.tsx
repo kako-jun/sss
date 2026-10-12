@@ -9,6 +9,11 @@ vi.mock('../../lib/tauri', () => ({
   saveSetting: (...args: unknown[]) => saveSetting(...args),
 }));
 
+const openUrl = vi.fn();
+vi.mock('@tauri-apps/plugin-opener', () => ({
+  openUrl: (...args: unknown[]) => openUrl(...args),
+}));
+
 import { MapSection } from './MapSection';
 
 const LABEL = '位置情報のある写真に地図サムネイルを表示する';
@@ -20,6 +25,7 @@ describe('MapSection (#145)', () => {
     saveSetting.mockReset();
     getSetting.mockResolvedValue(null);
     saveSetting.mockResolvedValue(undefined);
+    openUrl.mockReset().mockResolvedValue(undefined);
   });
 
   it('defaults to ON when nothing is saved', async () => {
@@ -59,5 +65,18 @@ describe('MapSection (#145)', () => {
     render(<MapSection />);
     await waitFor(() => expect(getSetting).toHaveBeenCalled());
     expect(screen.getByText(/tile\.openstreetmap\.org/)).toBeTruthy();
+  });
+
+  it('mentions standard HTTP headers in the description', async () => {
+    render(<MapSection />);
+    await waitFor(() => expect(getSetting).toHaveBeenCalled());
+    expect(screen.getByText(/User-Agent/)).toBeTruthy();
+  });
+
+  it('has a "© OpenStreetMap contributors" link that opens the OSM copyright page', async () => {
+    render(<MapSection />);
+    await waitFor(() => expect(getSetting).toHaveBeenCalled());
+    fireEvent.click(screen.getByText('© OpenStreetMap contributors'));
+    expect(openUrl).toHaveBeenCalledWith('https://www.openstreetmap.org/copyright');
   });
 });

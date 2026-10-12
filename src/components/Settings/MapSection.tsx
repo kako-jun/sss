@@ -1,4 +1,5 @@
 import { useState, useEffect, useId, useRef } from 'react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { getSetting, saveSetting } from '../../lib/tauri';
 import {
   DEFAULT_MAP_THUMBNAIL_ENABLED,
@@ -8,6 +9,8 @@ import {
 import { useT } from '../../lib/i18n';
 import { useRollbackSave } from '../../hooks/useRollbackSave';
 import { InlineError } from './SectionErrors';
+
+const OSM_COPYRIGHT_URL = 'https://www.openstreetmap.org/copyright';
 
 interface MapSectionProps {
   /** ON/OFFが変わった時に、操作バーへ即時反映するための通知（#145）。 */
@@ -91,6 +94,19 @@ export function MapSection({ onChange }: MapSectionProps) {
           </label>
           <p id={descId} className="text-xs text-white/50 mt-1">
             {t('mapThumbnailDescription')}
+          </p>
+          <p className="text-xs text-white/50 mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                openUrl(OSM_COPYRIGHT_URL).catch((err) =>
+                  console.error('Failed to open OSM copyright page:', err),
+                );
+              }}
+              className="underline hover:text-white/75 transition-colors"
+            >
+              © OpenStreetMap contributors
+            </button>
           </p>
         </div>
       </div>
