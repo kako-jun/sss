@@ -260,7 +260,7 @@ describe('OverlayUI fileName extraction handles POSIX paths (#66レビューmust
   });
 
   it('still shows only the basename for a Windows-style backslash path', () => {
-    const image = makeImage({ path: 'C:\\Users\\kako\\Pictures\\beach.jpg' });
+    const image = makeImage({ path: 'C:\\Users\\user\\Pictures\\beach.jpg' });
     render(<OverlayUI image={image} {...requiredProps} />);
 
     expect(screen.getByText('beach.jpg')).toBeTruthy();

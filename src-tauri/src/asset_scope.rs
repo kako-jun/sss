@@ -379,7 +379,7 @@ fn is_protected_root(canonical_root: &Path, home_dir: Option<&Path>) -> bool {
 /// - Unix の絶対パス（`/...`）→ `/`（Unix はルートが1種類しかないため常に `/` に還元）
 /// - それ以外（相対パス等）→ 元の文字列をそのまま返す
 ///
-/// `home_dir`（`C:\Users\kako` のようなフルパス）と、既にルートだけの `canonical_root`
+/// `home_dir`（`C:\Users\user` のようなフルパス）と、既にルートだけの `canonical_root`
 /// （`\\?\C:\` 等）の両方をこの関数に通すことで、`.ancestors()` のような OS 依存の
 /// パス分解を経由せずに「同じドライブ/共有を指しているか」を比較できる。
 fn normalize_root_for_comparison(path: &Path) -> String {
@@ -430,7 +430,7 @@ mod tests {
     fn fake_home(tag: &str) -> (PathBuf, PathBuf) {
         let base = std::env::temp_dir().join(format!("sss_share_{tag}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        let home = base.join("home").join("kako");
+        let home = base.join("home").join("user");
         std::fs::create_dir_all(&home).unwrap();
         (base, home)
     }
@@ -524,7 +524,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn share_directory_windows_drive_and_unc_roots_follow_protected_root_rule() {
-        let home = Path::new(r"C:\Users\kako");
+        let home = Path::new(r"C:\Users\user");
         assert!(is_acceptable_share_directory(Path::new(r"D:\"), Some(home)));
         assert!(is_acceptable_share_directory(
             Path::new(r"\\nas\photos\"),
@@ -546,7 +546,7 @@ mod tests {
 
     #[test]
     fn resolve_share_directory_defaults_to_pictures_sss_picked_when_unset() {
-        let pictures = Path::new("/home/kako/Pictures");
+        let pictures = Path::new("/home/user/Pictures");
         assert_eq!(
             resolve_share_directory(pictures, None),
             pictures.join("sss-picked")
@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn resolve_share_directory_defaults_when_saved_setting_is_empty_string() {
         // 境界値: 空文字は「未設定」と同じ扱い（保存時のバグ等で空文字が入っても暴走しない）
-        let pictures = Path::new("/home/kako/Pictures");
+        let pictures = Path::new("/home/user/Pictures");
         assert_eq!(
             resolve_share_directory(pictures, Some("")),
             pictures.join("sss-picked")
@@ -567,7 +567,7 @@ mod tests {
     fn resolve_share_directory_treats_whitespace_only_as_non_empty() {
         // 境界値+1: is_empty() はバイト長のみで判定するため、空白1文字は「空」ではない。
         // トリムしない現在の実装をそのまま固定する（事故防止の仕様確認）。
-        let pictures = Path::new("/home/kako/Pictures");
+        let pictures = Path::new("/home/user/Pictures");
         assert_eq!(
             resolve_share_directory(pictures, Some(" ")),
             PathBuf::from(" ")
@@ -576,7 +576,7 @@ mod tests {
 
     #[test]
     fn resolve_share_directory_uses_saved_absolute_path_verbatim() {
-        let pictures = Path::new("/home/kako/Pictures");
+        let pictures = Path::new("/home/user/Pictures");
         assert_eq!(
             resolve_share_directory(pictures, Some("/mnt/ssd/picked")),
             PathBuf::from("/mnt/ssd/picked")
@@ -587,7 +587,7 @@ mod tests {
     fn resolve_share_directory_uses_saved_relative_path_verbatim() {
         // 異常系寄りの同値分割: 相対パスが保存されていても pictures_dir とは結合しない
         // （呼び出し側が絶対パスを保存する前提だが、関数自体はそのまま通す仕様を固定）。
-        let pictures = Path::new("/home/kako/Pictures");
+        let pictures = Path::new("/home/user/Pictures");
         assert_eq!(
             resolve_share_directory(pictures, Some("relative/picked")),
             PathBuf::from("relative/picked")
@@ -612,8 +612,8 @@ mod tests {
     fn resolve_share_directory_preserves_windows_style_backslash_path_literally() {
         // 文字種: Windowsパス。実行OSに関わらず、設定値をそのまま PathBuf 化するだけの
         // 挙動を固定する（区切り文字の解釈はしない）。
-        let pictures = Path::new("/home/kako/Pictures");
-        let windows_path = "C:\\Users\\kako\\Pictures\\sss-picked";
+        let pictures = Path::new("/home/user/Pictures");
+        let windows_path = "C:\\Users\\user\\Pictures\\sss-picked";
         assert_eq!(
             resolve_share_directory(pictures, Some(windows_path)),
             PathBuf::from(windows_path)
@@ -715,7 +715,7 @@ mod tests {
     #[test]
     fn normalize_root_for_comparison_extracts_drive_from_plain_full_path() {
         assert_eq!(
-            normalize_root_for_comparison(Path::new(r"C:\Users\kako")),
+            normalize_root_for_comparison(Path::new(r"C:\Users\user")),
             "C:"
         );
         assert_eq!(normalize_root_for_comparison(Path::new(r"d:\photos")), "D:");
@@ -728,7 +728,7 @@ mod tests {
             r"\\SERVER\SHARE"
         );
         assert_eq!(
-            normalize_root_for_comparison(Path::new(r"\\server\share\Users\kako")),
+            normalize_root_for_comparison(Path::new(r"\\server\share\Users\user")),
             r"\\SERVER\SHARE"
         );
     }
@@ -737,7 +737,7 @@ mod tests {
     fn normalize_root_for_comparison_reduces_any_unix_absolute_path_to_root() {
         // Unix はルートが `/` の1種類しかないため、フルパスでもルートは常に `/` に還元する
         assert_eq!(normalize_root_for_comparison(Path::new("/")), "/");
-        assert_eq!(normalize_root_for_comparison(Path::new("/home/kako")), "/");
+        assert_eq!(normalize_root_for_comparison(Path::new("/home/user")), "/");
     }
 
     #[test]
@@ -759,7 +759,7 @@ mod tests {
     fn is_protected_root_rejects_unix_root_regardless_of_home_depth() {
         assert!(is_protected_root(
             Path::new("/"),
-            Some(Path::new("/home/kako"))
+            Some(Path::new("/home/user"))
         ));
     }
 
@@ -777,12 +777,12 @@ mod tests {
         // 一致し、ホームドライブが保護されることを確認する。
         assert!(is_protected_root(
             Path::new(r"\\?\C:\"),
-            Some(Path::new(r"C:\Users\kako"))
+            Some(Path::new(r"C:\Users\user"))
         ));
         // ドライブレターの大小表記ゆれも同一視する
         assert!(is_protected_root(
             Path::new(r"\\?\c:\"),
-            Some(Path::new(r"C:\Users\kako"))
+            Some(Path::new(r"C:\Users\user"))
         ));
     }
 
@@ -791,11 +791,11 @@ mod tests {
         // SDカード等の別ドライブ（例: D:\）はホームドライブと一致しないため保護しない
         assert!(!is_protected_root(
             Path::new(r"\\?\D:\"),
-            Some(Path::new(r"C:\Users\kako"))
+            Some(Path::new(r"C:\Users\user"))
         ));
         assert!(!is_protected_root(
             Path::new(r"D:\"),
-            Some(Path::new(r"C:\Users\kako"))
+            Some(Path::new(r"C:\Users\user"))
         ));
     }
 
@@ -804,7 +804,7 @@ mod tests {
         // ホームディレクトリがネットワーク共有上にある環境（企業ドメイン参加PC等）を想定
         assert!(is_protected_root(
             Path::new(r"\\?\UNC\fileserver\home\"),
-            Some(Path::new(r"\\fileserver\home\kako"))
+            Some(Path::new(r"\\fileserver\home\user"))
         ));
     }
 
@@ -812,7 +812,7 @@ mod tests {
     fn is_protected_root_allows_other_unc_share_different_from_home() {
         assert!(!is_protected_root(
             Path::new(r"\\?\UNC\fileserver\public\"),
-            Some(Path::new(r"\\fileserver\home\kako"))
+            Some(Path::new(r"\\fileserver\home\user"))
         ));
     }
 
@@ -968,7 +968,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn classify_missing_with_windows_boundaries() {
-        let home = PathBuf::from(r"C:\").join("Users").join("kako");
+        let home = PathBuf::from(r"C:\").join("Users").join("user");
         let removable = PathBuf::from(r"C:\").join("sss_test_removable");
         let pics = removable.join("pics");
         // ルートが存在しなければアクセス不能、存在すれば安全な未作成
@@ -1003,7 +1003,7 @@ mod tests {
         let Some(c) = drive else { return };
         let p = PathBuf::from(format!("{c}:\\x"));
         assert_eq!(
-            check_allow_dir_with_home(&p, Some(Path::new(r"C:\Users\kako"))),
+            check_allow_dir_with_home(&p, Some(Path::new(r"C:\Users\user"))),
             Err(AllowDirRejection::Inaccessible)
         );
     }
@@ -1050,7 +1050,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn check_allow_dir_windows_classification() {
-        let home = Path::new(r"C:\Users\kako");
+        let home = Path::new(r"C:\Users\user");
         assert_eq!(
             check_allow_dir_with_home(Path::new(r"C:\"), Some(home)),
             Err(AllowDirRejection::ProtectedRoot)
