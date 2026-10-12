@@ -579,16 +579,41 @@ describe('OverlayUI map thumbnail privacy (#145)', () => {
     expect(screen.queryByAltText('位置情報の地図')).toBeNull();
   });
 
-  it('keeps fetching while idle if keyboard focus is inside the bar (the bar stays visible)', () => {
-    render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
-    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
-    // jsdom は :focus-visible を評価できないため、キーボードフォーカス相当として真を返させる
-    const matches = vi.spyOn(Element.prototype, 'matches').mockReturnValue(true);
-    fireEvent.focus(screen.getByLabelText('位置情報の地図'));
-    expect(screen.getByAltText('位置情報の地図')).toBeTruthy();
-    fireEvent.blur(screen.getByLabelText('位置情報の地図'), { relatedTarget: document.body });
-    expect(screen.queryByAltText('位置情報の地図')).toBeNull();
-    matches.mockRestore();
+  describe('keyboard focus inside an idle bar', () => {
+    let matches: { mockRestore: () => void };
+    beforeEach(() => {
+      // jsdom は :focus-visible を評価できないため、キーボードフォーカス相当として真を返させる
+      matches = vi.spyOn(Element.prototype, 'matches').mockReturnValue(true);
+    });
+    afterEach(() => matches.mockRestore());
+
+    it('keeps fetching while the bar is visible through keyboard focus, and stops on blur', () => {
+      render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+      expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+      act(() => screen.getByLabelText('位置情報の地図').focus());
+      expect(screen.getByAltText('位置情報の地図')).toBeTruthy();
+      act(() => screen.getByLabelText('位置情報の地図').blur());
+      expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+    });
+
+    it('stays visible when focus moves to another element inside the bar', () => {
+      render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+      act(() => screen.getByLabelText('位置情報の地図').focus());
+      act(() => screen.getByTitle('次へ (→)').focus());
+      expect(screen.getByAltText('位置情報の地図')).toBeTruthy();
+    });
+
+    it('does not fetch for the next GPS image after the focused element was removed without blur', () => {
+      const { rerender } = render(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+      act(() => screen.getByLabelText('位置情報の地図').focus());
+      expect(screen.getByAltText('位置情報の地図')).toBeTruthy();
+      // GPS なしの画像へ: フォーカス中の地図ボタンが DOM から消える（blur は発火しない想定）
+      rerender(<OverlayUI image={makeImage()} {...requiredProps} isIdle />);
+      expect(document.activeElement).toBe(document.body);
+      // 次の GPS 画像でも、バーは隠れているので取得しない
+      rerender(<OverlayUI image={gpsImage()} {...requiredProps} isIdle />);
+      expect(screen.queryByAltText('位置情報の地図')).toBeNull();
+    });
   });
 
   it('exposes the full attribution in the tooltip and screen-reader text', () => {

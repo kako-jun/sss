@@ -141,7 +141,7 @@ A video advances after it plays to the end (or reaches the "Maximum video playba
 
 ## Network access
 
-SSS never uploads your photos. The only external connection is the **map thumbnail, and only while a photo with GPS data is shown and the control bar is visible**. In that case the [OpenStreetMap](https://www.openstreetmap.org/copyright) tile server (`tile.openstreetmap.org`) receives the map tile coordinates (roughly where the photo was taken) your IP address and standard HTTP headers such as User-Agent. While the bar is hidden, nothing is fetched.
+SSS never uploads your photos. The only external connection is the **map thumbnail, and only while a photo with GPS data is shown and the control bar is visible**. In that case the [OpenStreetMap](https://www.openstreetmap.org/copyright) tile server (`tile.openstreetmap.org`) receives the map tile coordinates (roughly where the photo was taken), your IP address and standard HTTP headers such as User-Agent. While the bar is hidden, nothing is fetched.
 
 Turn the thumbnail off in Settings → Options → Map; while it is off the app makes no external connections at all (clicking the thumbnail opens Google Maps in your browser only when you click). The thumbnail carries the "© OpenStreetMap contributors" attribution.
 

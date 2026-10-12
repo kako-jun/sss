@@ -38,7 +38,7 @@ import {
   resolvePickErrorMessage,
 } from '../lib/i18n/errors';
 import { idleFadeClassName } from '../constants';
-import { createButtonFocusGuard } from '../lib/keyboardShortcuts';
+import { createButtonFocusGuard, isFocusVisible } from '../lib/keyboardShortcuts';
 
 interface OverlayUIProps {
   image: ImageInfo | null;
@@ -397,7 +397,13 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   // img ごとアンマウントする。
   // バー自体は idle でも、キーボードの :focus-visible がバー内にある間は CSS
   // （IDLE_FADE_BASE の has-[:focus-visible]）で見え続ける。その実態に合わせて取得も続ける。
-  const [barKeyboardFocused, setBarKeyboardFocused] = useState(false);
+  // フォーカスの有無は状態に持たず、描画のたびに DOM から導出する（フォーカス中の要素が
+  // blur なしで DOM から消えても、次の描画で false に戻り、非表示のバーで取得し続けない）。
+  // 再描画のきっかけは idle/画像の変化と、下の focus/blur で進める `focusTick`。
+  const [, setFocusTick] = useState(0);
+  const active = typeof document === 'undefined' ? null : document.activeElement;
+  const barKeyboardFocused =
+    !!active && !!barContainerRef.current?.contains(active) && isFocusVisible(active);
   const mapVisible = showMapThumbnail && (!isIdle || barKeyboardFocused);
   const tileUrl = useMemo(() => {
     if (!mapVisible || !hasGps || !image?.exif?.gpsLatitude || !image?.exif?.gpsLongitude)
@@ -537,20 +543,8 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
           className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-[max(36rem,40vw)]"
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
-          onFocus={(e) => {
-            let visible = true;
-            try {
-              visible = e.target.matches(':focus-visible');
-            } catch {
-              // :focus-visible 非対応の環境では、フォーカス＝キーボード操作とみなす
-            }
-            if (visible) setBarKeyboardFocused(true);
-          }}
-          onBlur={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) {
-              setBarKeyboardFocused(false);
-            }
-          }}
+          onFocus={() => setFocusTick((n) => n + 1)}
+          onBlur={() => setFocusTick((n) => n + 1)}
         >
           <div className="flex items-center gap-1 bg-black/75 backdrop-blur-md rounded-2xl border border-white/10 pl-2 pr-1.5 py-1.5 shadow-2xl">
             {/* 左: 情報クラスタ（GPSサムネ[任意] + ファイル名 · 撮影日 · 位置n/N） */}
