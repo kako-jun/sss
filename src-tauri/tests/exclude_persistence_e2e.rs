@@ -17,10 +17,10 @@ use std::sync::Mutex;
 use sss_lib::cache_worker::CacheWorker;
 use sss_lib::commands::file_operations::exclude_image;
 use sss_lib::commands::image::get_next_image;
-use sss_lib::commands::scan::perform_scan;
 use sss_lib::commands::AppState;
 use sss_lib::database::Database;
 use sss_lib::playlist::Playlist;
+use sss_lib::scan_service::perform_scan;
 use tauri::Manager;
 
 fn workspace(tag: &str) -> PathBuf {

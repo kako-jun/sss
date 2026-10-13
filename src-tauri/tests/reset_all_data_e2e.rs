@@ -11,7 +11,7 @@
 //! の`MockRuntime`では直接呼び出せない（各e2eテストのコメント参照）ことに変わりは
 //! ないが、`reset_core`自体はTauri非依存のため直接呼べる。
 //! （`Database::reset_to_defaults`単体の詳細な網羅は`src/database.rs`のユニットテスト、
-//! スキャン中の排他は`src/commands/scan.rs`の`ScanGuard`ユニットテストが担う）
+//! スキャン中の排他は`src/shared.rs`の`ScanGuard`ユニットテストが担う）
 //!
 //! asset scope（`convertFileSrc` が読み込めるディレクトリ）の取り消しは、当初
 //! `forbid_directory`を`reset_all_data`内で呼ぶ設計だったが、実測で「一度
@@ -27,10 +27,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use sss_lib::cache_worker::CacheWorker;
-use sss_lib::commands::scan::perform_scan;
 use sss_lib::commands::system::reset_core;
 use sss_lib::database::Database;
 use sss_lib::playlist::Playlist;
+use sss_lib::scan_service::perform_scan;
 
 fn workspace(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(

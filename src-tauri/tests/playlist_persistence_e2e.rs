@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use sss_lib::commands::scan::perform_scan;
 use sss_lib::database::Database;
 use sss_lib::playlist::Playlist;
+use sss_lib::scan_service::perform_scan;
 
 fn workspace(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(

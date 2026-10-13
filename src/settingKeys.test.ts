@@ -3,15 +3,15 @@ import { URL, fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { BOOL_SETTING_DEFAULTS, SETTING_KEYS, parseBoolSetting } from './constants';
 
-// 設定キーと真偽値の既定値の正本は Rust 側（commands/settings.rs）。ソースを直接読んで照合する（#148）。
+// 設定キーと真偽値の既定値の正本は Rust 側（settings_store.rs）。ソースを直接読んで照合する（#148）。
 const rustSource = readFileSync(
-  fileURLToPath(new URL('../src-tauri/src/commands/settings.rs', import.meta.url)),
+  fileURLToPath(new URL('../src-tauri/src/settings_store.rs', import.meta.url)),
   'utf8',
 );
 
 function rustBlock(name: string): string {
   const m = rustSource.match(new RegExp(`pub const ${name}:[^=]*=\\s*&\\[([\\s\\S]*?)\\];`));
-  if (!m) throw new Error(`${name} not found in settings.rs`);
+  if (!m) throw new Error(`${name} not found in settings_store.rs`);
   // コメント内の文字列をキーと誤認しないよう除去する
   return m[1].replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }

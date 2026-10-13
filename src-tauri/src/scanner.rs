@@ -73,7 +73,7 @@ pub struct ScanResult {
     /// した」ものなのでプレイリストから外れてよいが、エラー由来の不明は一時的な
     /// 読み取り失敗の可能性が高く、除外ルールとは無関係にプレイリストの所属
     /// （シャッフル位置・履歴）を維持すべきという区別を、呼び出し元
-    /// （`commands::scan::perform_scan` Stage4）がプレイリスト反映時に使う。
+    /// （`scan_service::perform_scan` Stage4）がプレイリスト反映時に使う。
     pub error_unknown_files: Vec<String>,
     pub total_count: usize,
     pub new_count: usize,
@@ -97,7 +97,7 @@ pub struct ScanResult {
 /// ドットフォルダ配下が10万件規模で全部stat/EXIF読みされることを防ぐ）。刈られた
 /// 配下のうち前回追跡していたファイルは「削除」ではなく「不明」として扱う
 /// （`unknown_files`）。ファイル単位のglob/日付ルールの適用は、この結果を受け取った
-/// 呼び出し元（`commands/scan.rs`）が「プレイリストに含めるかどうか」を決める
+/// 呼び出し元（`scan_service.rs`）が「プレイリストに含めるかどうか」を決める
 /// 別の段階として行う。これにより、既存のファイルに新しい除外ルールが付いても
 /// 「削除」とは区別され、`image_stats`/`file_metadata` の履歴が消えない。
 pub struct ImageScanner;

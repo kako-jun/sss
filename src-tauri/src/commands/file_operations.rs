@@ -1,8 +1,9 @@
 use crate::asset_scope::{default_share_directory, resolve_validated_share_directory};
-use crate::commands::playlist_persistence;
 use crate::commands::types::{AppState, ExcludeOutcome};
 use crate::ignore::{glob_check_pattern, IgnoreFilter, IgnoreRule, RuleType};
 use crate::image_processor::{extract_date_only, get_exif_info};
+use crate::playlist_persistence;
+use crate::shared::home_pictures_dir;
 use globset::Glob;
 use std::collections::HashMap;
 use std::fs;
@@ -25,16 +26,6 @@ pub struct RecentImage {
 pub struct IgnoreRuleDto {
     pub pattern: String,
     pub rule_type: String,
-}
-
-/// ホームディレクトリ配下の Pictures フォルダを取得する（OS別に環境変数を切り替え）。
-pub(crate) fn home_pictures_dir() -> Result<PathBuf, String> {
-    if cfg!(windows) {
-        std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Pictures"))
-    } else {
-        std::env::var("HOME").map(|p| PathBuf::from(p).join("Pictures"))
-    }
-    .map_err(|_| "Failed to get home directory".to_string())
 }
 
 /// デフォルトのピック先ディレクトリパスを取得
@@ -559,8 +550,7 @@ pub async fn get_recent_images(state: State<'_, AppState>) -> Result<Vec<RecentI
     // バックする。現在アクティブなディレクトリ（`last_directory_path`）は刈り込みの
     // 影響を受けないよう候補に必ず含めることで、少なくとも直近スキャン分は保護する。
     let mut scan_roots = db.get_distinct_scan_directories().unwrap_or_default();
-    if let Ok(Some(last_directory)) = db.get_setting(crate::commands::settings::LAST_DIRECTORY_KEY)
-    {
+    if let Ok(Some(last_directory)) = db.get_setting(crate::settings_store::LAST_DIRECTORY_KEY) {
         if !scan_roots.contains(&last_directory) {
             scan_roots.push(last_directory);
         }
@@ -650,7 +640,7 @@ pub async fn get_thumbnail(
 /// ピック済みフォルダのパスを取得するヘルパー
 pub(crate) fn get_picked_directory(db: &crate::database::Database) -> Result<PathBuf, String> {
     let share_setting = db
-        .get_setting(crate::commands::settings::SHARE_DIRECTORY_KEY)
+        .get_setting(crate::settings_store::SHARE_DIRECTORY_KEY)
         .map_err(|e| e.to_string())?;
     // #87 M1: 保存値が不正（相対・ルート・ホーム等）なら既定にフォールバックする。
     Ok(resolve_validated_share_directory(

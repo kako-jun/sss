@@ -1,6 +1,6 @@
 //! #61 S-b 計測用ベンチマーク。撮影日除外ルールが1件以上ある状態でスキャンすると、
 //! `exif_cache` に未取得（または mtime 不一致で古い）画像だけを対象に、
-//! `commands::scan::resolve_captured_dates` が rayon で並列に EXIF `DateTimeOriginal` を
+//! `scan_service::resolve_captured_dates` が rayon で並列に EXIF `DateTimeOriginal` を
 //! 読み直す。この処理単体（DB/Tauri を挟まない）の所要時間を実測し、
 //! docs（architecture.md / user-guide.md）に載せる実測値の根拠にする。
 //!
@@ -17,9 +17,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use sss_lib::commands::scan::resolve_captured_dates;
 use sss_lib::database::ExifCacheRow;
 use sss_lib::ignore::IgnoreFilter;
+use sss_lib::scan_service::resolve_captured_dates;
 use sss_lib::scanner::FileMetadata;
 
 /// 件数。実運用（数万〜10万件規模）を模すには小さいが、CI/開発機のディスクと

@@ -134,7 +134,7 @@ fn insert_default_ignore_rules(conn: &Connection) -> Result<()> {
 type FileMetadataRow = (String, i64, i64);
 
 /// `exif_cache` の1行（path, captured_date, file_mtime）
-/// `pub`: `commands::scan::resolve_captured_dates`（pub、tests/exif_resolve_throughput.rs から
+/// `pub`: `scan_service::resolve_captured_dates`（pub、tests/exif_resolve_throughput.rs から
 /// 直接呼ぶ計測用ベンチ）の公開シグネチャに現れるため、private_interfaces lint を避ける必要がある。
 pub type ExifCacheRow = (String, Option<String>, i64);
 
