@@ -1,4 +1,4 @@
-export { t, type MessageKey } from './t';
+export { t, type MessageKey, type Translate } from './t';
 export { useT, useLocale } from './useT';
 export {
   getLocale,

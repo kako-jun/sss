@@ -17,7 +17,7 @@ interface ShortcutsOverlayProps {
 
 /**
  * キーボードショートカット一覧（#66 問題4）。`?` キー、または右上のショートカット
- * ボタンで開く。Escapeでの閉じ方は`App.tsx`のグローバルキーボードハンドラが担当する
+ * ボタンで開く。Escapeでの閉じ方は`hooks/useKeyboardShortcuts.ts`のグローバルキーボードハンドラが担当する
  * （設定モーダルと同じ方針で、ここでは扱わない）。
  */
 export function ShortcutsOverlay({

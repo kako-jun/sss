@@ -268,7 +268,7 @@ describe('OverlayUI fileName extraction handles POSIX paths (#66レビューmust
 });
 
 // #66レビューshould: 「…」メニュー・除外サブメニューにaria-haspopup/aria-expanded
-// を付け、App.tsxのグローバルESCハンドラがrefのisMenuOpen/closeMenuでメニューを
+// を付け、useKeyboardShortcuts.tsのグローバルESCハンドラがrefのisMenuOpen/closeMenuでメニューを
 // 閉じられるようにする命令的API。
 describe('OverlayUI "…" menu accessibility + imperative handle (#66レビューshould)', () => {
   it('exposes aria-haspopup/aria-expanded on the menu button, toggling with open state', () => {

@@ -1,8 +1,6 @@
 import type { SlideshowNotice } from '../hooks/useSlideshow';
-import type { MessageKey } from './i18n';
-
-/** 翻訳関数の型（`useT()` の戻り値 / `t` と同形）。純粋関数に注入して使う。 */
-export type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
+import type { Translate } from './i18n';
+import type { StartupFailureKind } from './startup';
 
 export type EmptyStateContent = {
   title: string;
@@ -11,10 +9,11 @@ export type EmptyStateContent = {
   canRetry?: boolean;
 };
 
-export type StartupFailureKind = 'lastDirectory' | 'initialize';
+/** 全画面の案内画面を出す起動失敗（'settings' は既定値で続行するので対象外） */
+export type StartupFailureScreen = Exclude<StartupFailureKind, 'settings'>;
 
 export type EmptyStateInput = {
-  startupFailure: StartupFailureKind | null;
+  startupFailure: StartupFailureScreen | null;
   hasDirectory: boolean;
   notice: SlideshowNotice | null;
   /** 起動時スキャン失敗の有無（文言ではなく有無だけを見る） */

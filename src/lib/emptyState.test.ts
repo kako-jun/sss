@@ -1,10 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import {
-  deriveEmptyStateContent,
-  deriveBottomNotice,
-  type EmptyStateInput,
-  type Translate,
-} from './emptyState';
+import { deriveEmptyStateContent, deriveBottomNotice, type EmptyStateInput } from './emptyState';
+import type { Translate } from './i18n';
 
 // 翻訳キーをそのまま返す（パラメータは JSON で添える）スタブ。文言の中身ではなく
 // 「どの状態でどのキーが選ばれるか」の優先順位だけを固定する。

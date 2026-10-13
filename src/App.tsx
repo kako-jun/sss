@@ -11,6 +11,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useWindowMode } from './hooks/useWindowMode';
 import { useLocaleSync } from './hooks/useLocaleSync';
 import { deriveEmptyStateContent, deriveBottomNotice } from './lib/emptyState';
+import type { StartupFailureScreen } from './lib/emptyState';
 import {
   getPlaylistInfo,
   getLastDirectoryPath,
@@ -94,7 +95,7 @@ function App() {
     null,
   );
   // #115: 起動時に続行できない失敗（前回フォルダの取得失敗など）。ようこそ画面に見せず、再試行できる案内にする。
-  const [startupFailure, setStartupFailure] = useState<'lastDirectory' | 'initialize' | null>(null);
+  const [startupFailure, setStartupFailure] = useState<StartupFailureScreen | null>(null);
   // 非同期コールバック/一度だけ登録するリスナーから、常に現在のロケールで文言を引くための参照。
   const tRef = useRef(t);
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Translate } from '../lib/emptyState';
+import type { Translate } from '../lib/i18n';
 
 /**
  * ウィンドウモード（フルスクリーン / ウィンドウ）の状態とその切替。

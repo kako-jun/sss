@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Translate } from '../lib/emptyState';
+import type { Translate } from '../lib/i18n';
 
 /**
  * #80: ロケール変更（起動時の初期化含む）に追従して html lang 属性とネイティブ

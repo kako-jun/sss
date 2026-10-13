@@ -4,6 +4,9 @@ import { getLocale, type Locale } from './store';
 
 export type MessageKey = keyof typeof en;
 
+/** 翻訳関数の型（`t` / `useT()` の戻り値と同形）。純粋関数やフックに注入して使う。 */
+export type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
+
 const dictionaries: Record<Locale, Record<MessageKey, string>> = { ja, en };
 
 /**
