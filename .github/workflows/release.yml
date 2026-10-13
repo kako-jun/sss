@@ -39,14 +39,12 @@ jobs:
             exit 1
           fi
 
+          # Release は draft で作り、全ジョブ成功後の publish ジョブで初めて公開する。draft の間は
+          # タグが作られないため、リモートにタグがある＝公開済み（または手動で作られた）バージョンとみなして拒否する。
+          # 前回失敗で残った draft Release は cleanup-draft ジョブが削除して作り直す。
           if git ls-remote --tags origin "refs/tags/$INPUT_VERSION" | grep -q .; then
-            # 同名タグだけがある状態での誤った再公開は拒否する。一方、既存Release
-            # への成果物添付が失敗した時は、このworkflowを安全に再試行できる。
-            if ! gh release view "$INPUT_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "::error::タグ $INPUT_VERSION は既に存在しますが、対応するGitHub Releaseがありません"
-              exit 1
-            fi
-            echo "既存Release $INPUT_VERSION への再試行です"
+            echo "::error::タグ $INPUT_VERSION は既に存在します。公開済みのバージョンは再実行できません（新しいバージョンを使うか、タグと Release を手動で整理してください）"
+            exit 1
           fi
 
       - name: Setup Node
@@ -116,8 +114,34 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
-  build:
+  cleanup-draft:
+    # 前回の実行が失敗して残った同名の draft Release を削除する（draft は未公開なので消しても影響しない）。
+    # 公開済みの同名 Release がある場合は失敗させる。draft はタグを作らないため、タグ有無では検出できない。
     needs: validate
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Remove leftover draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          releases=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$RELEASE_VERSION\") | \"\(.id) \(.draft)\"")
+          while read -r id draft; do
+            [ -n "$id" ] || continue
+            if [ "$draft" != "true" ]; then
+              echo "::error::$RELEASE_VERSION は既に公開済みの Release があります"
+              exit 1
+            fi
+            echo "前回の draft Release (id=$id) を削除します"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done <<<"$releases"
+
+  build:
+    needs: [validate, cleanup-draft]
     permissions:
       contents: write
     strategy:
@@ -166,7 +190,8 @@ jobs:
           tagName: ${{ github.event.inputs.version }}
           releaseName: 'Smart Slide Show ${{ github.event.inputs.version }}'
           releaseBody: 'See https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md#${{ needs.validate.outputs.changelog-anchor }} for details.'
-          releaseDraft: false
+          # 全資産の検証と Windows ZIP の添付が済むまで公開しない。公開は publish ジョブで行う
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
 
@@ -198,8 +223,8 @@ jobs:
           fi
 
   windows-portable:
-    # macOS/Linux の tauri-action が Release とタグを作成してから、Windows の
-    # portable ZIP を同じ Release へ追加する。NSIS/WiX installer は生成しない。
+    # macOS/Linux の tauri-action が作った draft Release へ、Windows の
+    # portable ZIP を追加する。NSIS/WiX installer は生成しない。
     needs: [validate, build]
     runs-on: windows-latest
     permissions:
@@ -248,3 +273,25 @@ jobs:
           RELEASE_VERSION: ${{ github.event.inputs.version }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
         run: gh release upload "$env:RELEASE_VERSION" "$env:ARCHIVE" --repo "$env:GITHUB_REPOSITORY" --clobber
+
+  publish:
+    # build（macOS 署名検証を含む）と windows-portable がすべて成功した後にだけ draft を外して公開する。
+    # 公開時にタグ（Release 作成時のコミット）が作られる。
+    needs: [validate, build, windows-portable]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$RELEASE_VERSION\" and .draft == true) | .id")
+          if [ -z "$id" ] || [ "$(wc -w <<<"$id")" -ne 1 ]; then
+            echo "::error::$RELEASE_VERSION の draft Release を 1 つに特定できません: '$id'"
+            exit 1
+          fi
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -F draft=false
