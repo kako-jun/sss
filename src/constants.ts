@@ -1,5 +1,5 @@
 // 設定キー（`app_settings`）の唯一の定義（#148）。
-// `save_setting` で書けるキーの集合は Rust の `WRITABLE_SETTING_KEYS`（commands/settings.rs）が正本で、
+// `save_setting` で書けるキーの集合は Rust の `WRITABLE_SETTING_KEYS`（settings_store.rs）が正本で、
 // `settingKeys.test.ts` が両者の一致を検証する。キーを足すときは Rust の許可リストと
 // ここ（`SETTING_KEYS`）の両方に足す。コンポーネント・テストで文字列リテラルを直書きしない。
 export const SETTING_DISPLAY_INTERVAL = 'display_interval';
@@ -20,7 +20,7 @@ export const SETTING_KEYS = [
 ] as const;
 
 /**
- * 真偽値設定の既定値。**正本は Rust の `BOOL_SETTING_DEFAULTS`**（commands/settings.rs）で、
+ * 真偽値設定の既定値。**正本は Rust の `BOOL_SETTING_DEFAULTS`**（settings_store.rs）で、
  * これはその写し（`settingKeys.test.ts` が一致を検証する）。
  */
 export const BOOL_SETTING_DEFAULTS = {
