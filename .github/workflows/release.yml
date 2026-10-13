@@ -185,9 +185,13 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           info=$(codesign -dv --verbose=4 "$app" 2>&1)
           echo "$info"
-          echo "$info" | grep -q 'Signature=adhoc' || { echo "::error::Signature=adhoc ではありません"; exit 1; }
-          echo "$info" | grep -q 'Sealed Resources' || { echo "::error::Sealed Resources がありません"; exit 1; }
-          if echo "$info" | grep -q 'Info.plist=not bound'; then
+          grep -q 'Signature=adhoc' <<<"$info" || { echo "::error::Signature=adhoc ではありません"; exit 1; }
+          grep -q 'Sealed Resources version=' <<<"$info" || { echo "::error::Sealed Resources が封印されていません"; exit 1; }
+          if grep -q 'linker-signed' <<<"$info"; then
+            echo "::error::リンカー署名のみです（linker-signed）"
+            exit 1
+          fi
+          if grep -q 'Info.plist=not bound' <<<"$info"; then
             echo "::error::Info.plist が束縛されていません"
             exit 1
           fi
