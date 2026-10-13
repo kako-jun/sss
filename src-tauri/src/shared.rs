@@ -52,6 +52,28 @@ impl Drop for ScanGuard<'_> {
     }
 }
 
+/// ダイアログ表示中フラグ（プロセス全体で1つ）。ダイアログはOS全体で同時に1つしか意味を
+/// 持たないためプロセス static とした（`AppState` のフィールドにすると、`AppState` を直接
+/// 構築する既存の結合テスト 8 ファイルすべてに波及するため見送り）。テストは
+/// `acquire_dialog_guard` に自前のフラグを渡すので、この static には干渉しない。WebView が `select_and_scan` /
+/// `select_share_directory` を連打してもダイアログが重ねて出ないようにする（#93レビュー）。
+pub static DIALOG_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+/// 選択ダイアログを開く前のガード（#93レビュー）。スキャンが実行中なら、ダイアログを出した後に
+/// `scanInProgress` になる無駄を避けるため先に弾く。別のダイアログが表示中なら `dialogInProgress`。
+/// 戻り値のガードはダイアログ表示〜スキャン完了まで保持する。
+/// `check_scan`: スキャンを伴う選択（`select_and_scan`）か。ピック先の選択は false。
+pub fn acquire_dialog_guard<'a>(
+    scan_in_progress: &AtomicBool,
+    dialog_flag: &'a AtomicBool,
+    check_scan: bool,
+) -> Result<ScanGuard<'a>, String> {
+    if check_scan && scan_in_progress.load(Ordering::SeqCst) {
+        return Err("scanInProgress".to_string());
+    }
+    ScanGuard::acquire_with_code(dialog_flag, "dialogInProgress")
+}
+
 #[cfg(test)]
 mod scan_guard_tests {
     use super::ScanGuard;
@@ -98,26 +120,4 @@ mod scan_guard_tests {
             "panic経由でもguardのDropでロックは解除されるはず"
         );
     }
-}
-
-/// ダイアログ表示中フラグ（プロセス全体で1つ）。ダイアログはOS全体で同時に1つしか意味を
-/// 持たないためプロセス static とした（`AppState` のフィールドにすると、`AppState` を直接
-/// 構築する既存の結合テスト 8 ファイルすべてに波及するため見送り）。テストは
-/// `acquire_dialog_guard` に自前のフラグを渡すので、この static には干渉しない。WebView が `select_and_scan` /
-/// `select_share_directory` を連打してもダイアログが重ねて出ないようにする（#93レビュー）。
-pub static DIALOG_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
-
-/// 選択ダイアログを開く前のガード（#93レビュー）。スキャンが実行中なら、ダイアログを出した後に
-/// `scanInProgress` になる無駄を避けるため先に弾く。別のダイアログが表示中なら `dialogInProgress`。
-/// 戻り値のガードはダイアログ表示〜スキャン完了まで保持する。
-/// `check_scan`: スキャンを伴う選択（`select_and_scan`）か。ピック先の選択は false。
-pub fn acquire_dialog_guard<'a>(
-    scan_in_progress: &AtomicBool,
-    dialog_flag: &'a AtomicBool,
-    check_scan: bool,
-) -> Result<ScanGuard<'a>, String> {
-    if check_scan && scan_in_progress.load(Ordering::SeqCst) {
-        return Err("scanInProgress".to_string());
-    }
-    ScanGuard::acquire_with_code(dialog_flag, "dialogInProgress")
 }
