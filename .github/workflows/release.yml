@@ -185,6 +185,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           info=$(codesign -dv --verbose=4 "$app" 2>&1)
           echo "$info"
+          # Signature=adhoc だけではリンカー署名のみの状態と区別できない。signingIdentity が誤って実証明書に変わった場合の検出用
           grep -q 'Signature=adhoc' <<<"$info" || { echo "::error::Signature=adhoc ではありません"; exit 1; }
           grep -q 'Sealed Resources version=' <<<"$info" || { echo "::error::Sealed Resources が封印されていません"; exit 1; }
           if grep -q 'linker-signed' <<<"$info"; then
