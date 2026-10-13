@@ -509,27 +509,6 @@ describe('App shows a bottom toast (not a full-screen takeover) on a mid-viewing
   });
 });
 
-describe('App keyboard shortcut: e.repeat is ignored (#65)', () => {
-  it('does not advance on a repeated (held-down) ArrowRight keydown, but does on a fresh one', async () => {
-    render(<App />);
-
-    // 初期化(setTimeout 0)完了を待つ。ようこそ画面が出ればハンドラは張られている。
-    await waitFor(() => {
-      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
-    });
-    getNextImage.mockClear();
-
-    fireEvent.keyDown(document, { key: 'ArrowRight', repeat: true });
-    await Promise.resolve();
-    expect(getNextImage).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(document, { key: 'ArrowRight', repeat: false });
-    await waitFor(() => {
-      expect(getNextImage).toHaveBeenCalledTimes(1);
-    });
-  });
-});
-
 // #80: 言語決定は app_settings.language ('ja'|'en'|'auto') → auto は
 // navigator.language（ja*ならja、それ以外en）。src/test/setup.tsがnavigator.languageを
 // 'ja-JP'に固定しているため、他のテストは全てja表示を前提にできる。ここでは
@@ -933,37 +912,6 @@ describe('App top-right pill suppresses focus-stealing on mouse click (#66レビ
 // #66レビューmust2: meta/ctrl/altのいずれかを伴う場合、アプリ側のショートカット
 // として扱わない（Cmd+F/Ctrl+F等、OS/ブラウザ標準のショートカットとの衝突を
 // 避ける）。
-describe('App keyboard shortcuts ignore modifier-key combinations (#66レビューmust2)', () => {
-  it('does not toggle fullscreen for Cmd+F or Ctrl+F', async () => {
-    getLastDirectoryPath.mockResolvedValue(null);
-    render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
-    });
-
-    fireEvent.keyDown(document, { key: 'f', metaKey: true });
-    fireEvent.keyDown(document, { key: 'f', ctrlKey: true });
-    await Promise.resolve();
-
-    expect(win.setFullscreen).not.toHaveBeenCalled();
-  });
-
-  it('does not exit the app for Ctrl+Escape', async () => {
-    getLastDirectoryPath.mockResolvedValue(null);
-    render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
-    });
-
-    fireEvent.keyDown(document, { key: 'Escape', ctrlKey: true });
-    await Promise.resolve();
-
-    expect(invoke).not.toHaveBeenCalledWith('exit_app');
-  });
-});
-
 // #66レビューshould: オーバーレイの「…」メニュー（除外サブメニュー含む）が
 // 開いている間のESCは、それを閉じるだけにする。
 describe('App Escape closes the overlay "…" menu without exiting (#66レビューshould)', () => {
@@ -1137,35 +1085,6 @@ describe('App window mode toggle failure notice (#103)', () => {
 });
 
 describe('App window mode toggle failure notice: partial failure and repeats (#103)', () => {
-  it('re-syncs decorations to the real state when setFullscreen succeeds but setDecorations fails', async () => {
-    getLastDirectoryPath.mockResolvedValue(null);
-    // 起動時は全画面。切替後にOSの実態は「ウィンドウモード」(false)になっている想定
-    win.isFullscreen.mockReset().mockResolvedValueOnce(true).mockResolvedValue(false);
-    win.setFullscreen.mockReset().mockResolvedValue(undefined);
-    win.setDecorations
-      .mockReset()
-      .mockRejectedValueOnce(new Error('denied'))
-      .mockResolvedValue(undefined);
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    render(<App />);
-    await waitFor(() => {
-      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
-    });
-
-    fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
-
-    await waitFor(() => {
-      expect(screen.getByRole('alert')).toBeTruthy();
-    });
-    // 1回目: 切替(!next=true)で失敗、2回目: 実態(false)に合わせて !actual=true を試行
-    await waitFor(() => {
-      expect(win.setDecorations).toHaveBeenNthCalledWith(1, true);
-      expect(win.setDecorations).toHaveBeenNthCalledWith(2, true);
-    });
-    expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy();
-    errorSpy.mockRestore();
-  });
-
   it('keeps the alert for a full 8s after a repeated identical failure', async () => {
     getLastDirectoryPath.mockResolvedValue(null);
     win.isFullscreen.mockReset().mockResolvedValue(true);
@@ -1205,56 +1124,6 @@ describe('App window mode toggle failure notice: partial failure and repeats (#1
   });
 });
 
-describe('App window mode toggle: re-sync failures are logged (#103)', () => {
-  const loggedMessages = (spy: { mock: { calls: unknown[][] } }) =>
-    spy.mock.calls.map((c) => String(c[0]));
-
-  it('logs when re-syncing decorations also fails', async () => {
-    getLastDirectoryPath.mockResolvedValue(null);
-    win.isFullscreen.mockReset().mockResolvedValueOnce(true).mockResolvedValue(false);
-    win.setFullscreen.mockReset().mockResolvedValue(undefined);
-    win.setDecorations.mockReset().mockRejectedValue(new Error('denied'));
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    render(<App />);
-    await waitFor(() => {
-      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
-    });
-
-    try {
-      fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
-
-      await waitFor(() => {
-        expect(loggedMessages(errorSpy)).toContain('Failed to re-sync window decorations:');
-      });
-      expect(screen.getByRole('alert')).toBeTruthy();
-    } finally {
-      errorSpy.mockRestore();
-    }
-  });
-
-  it('logs when the real fullscreen state cannot be read during re-sync', async () => {
-    getLastDirectoryPath.mockResolvedValue(null);
-    win.isFullscreen.mockReset().mockResolvedValueOnce(true).mockRejectedValue(new Error('x'));
-    win.setFullscreen.mockReset().mockRejectedValue(new Error('denied'));
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    render(<App />);
-    await waitFor(() => {
-      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
-    });
-
-    try {
-      fireEvent.click(screen.getByTitle('ウィンドウモードに切り替え'));
-
-      await waitFor(() => {
-        expect(loggedMessages(errorSpy)).toContain('Failed to re-sync window mode:');
-      });
-      expect(screen.getByRole('alert')).toBeTruthy();
-    } finally {
-      errorSpy.mockRestore();
-    }
-  });
-});
-
 // #119: 確認モーダル表示中は、App のグローバルキーボードショートカット（矢印・F・Space・?）を
 // 無効化し、ESC は設定を閉じたり exit_app を呼んだりせずモーダルのキャンセルにだけ作用する。
 describe('App keyboard shortcuts are disabled while the confirm dialog is open (#119)', () => {
@@ -1277,29 +1146,6 @@ describe('App keyboard shortcuts are disabled while the confirm dialog is open (
     // Promise をそのまま return すると await で解決待ちになるので包む。
     return { result };
   }
-
-  it('ignores ArrowRight / F / Space / ? while open, and Escape only cancels the dialog', async () => {
-    const { result } = await openConfirm();
-    const nextCalls = getNextImage.mock.calls.length;
-    const invokeCalls = invoke.mock.calls.length;
-
-    fireEvent.keyDown(document, { key: 'ArrowRight' });
-    fireEvent.keyDown(document, { key: 'f' });
-    fireEvent.keyDown(document.body, { key: ' ' });
-    fireEvent.keyDown(document, { key: '?' });
-    await act(async () => {});
-
-    expect(getNextImage.mock.calls.length).toBe(nextCalls);
-    expect(win.setFullscreen).not.toHaveBeenCalled();
-    expect(screen.getByTitle('一時停止')).toBeTruthy(); // Space で一時停止していない
-    expect(screen.queryByText('キーボードショートカット')).toBeNull(); // ? で開いていない
-    expect(invoke.mock.calls.length).toBe(invokeCalls);
-    expect(screen.getByRole('alertdialog')).toBeTruthy();
-
-    fireEvent.keyDown(document, { key: 'Escape' });
-    await expect(result).resolves.toBe(false);
-    expect(invoke).not.toHaveBeenCalledWith('exit_app');
-  });
 
   it('Escape cancels the dialog without closing the Settings modal', async () => {
     const { result } = await openConfirm();

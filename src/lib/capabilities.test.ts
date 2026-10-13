@@ -221,12 +221,12 @@ describe('scanWindowMethods (#103 スキャナ自体の検証)', () => {
 
 describe('ウィンドウ API の import 範囲ガード (#103)', () => {
   // 別ファイルへ window オブジェクトを渡す形はスキャナで追えないため、ウィンドウ API を
-  // import してよいファイルを App.tsx に限定する。増やす場合はスキャナ対象として確認すること。
-  it('only src/App.tsx imports the Tauri window API', () => {
+  // import してよいファイルを、App.tsx から切り出したウィンドウ系フックに限定する。増やす場合はスキャナ対象として確認すること。
+  it('only the window-mode hooks (extracted from App.tsx) import the Tauri window API', () => {
     const importers = sources
       .filter(({ text }) => WINDOW_MODULES.some((m) => text.includes(m)))
       .map(({ file }) => file.slice(SRC.length + 1));
-    expect(importers).toEqual(['App.tsx']);
+    expect(importers.sort()).toEqual(['hooks/useLocaleSync.ts', 'hooks/useWindowMode.ts']);
   });
 });
 

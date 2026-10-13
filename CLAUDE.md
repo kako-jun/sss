@@ -281,7 +281,7 @@
 - **失敗は「空」や成功に見せない（#115）**: 設定画面の取得は `src/hooks/useAsyncLoad.ts`（`loading | error | ready`）で受け、reject は「読み込みに失敗しました」＋再試行（`SectionErrors.tsx` の `LoadError`）にする。「〜はありません」の空状態は `ready` かつ 0 件のときだけ。設定の保存は `src/hooks/useRollbackSave.ts`（書き込みを直列化し、失敗したら最後に保存できた値へ巻き戻す。通知は対象名つきでセクションに1つ。アンマウント後は `src/lib/failureNotice.ts` 経由で App の上部トースト）。起動シーケンスの失敗は `onStartupFailure` で App に伝え、前回フォルダの取得失敗は「ようこそ」にせず再試行できる案内画面にする。ピック失敗の原因は Rust の `pick::pick_io_error_code`（書き込み側: `pickPermissionDenied`/`pickDiskFull`/`pickDestinationMissing`、その他 `pickCopyFailed`）/`pick_source_error_code`（読み取り側: `pickSourceUnreadable`/`imageFileNotFound`）。どちらも `std::io::ErrorKind` のみで分類し、OS の生コードは見ない。**洗い出し表（修正した箇所と、意図的に console のみにした箇所の理由）は `docs/architecture.md` §6-(i) が正本**。新しく `invoke` を呼ぶ箇所を足すときは、失敗を利用者に見せるか、見せない理由を同表に足す
 - **確定文言を状態に持たない**: `App.tsx`の`directoryError`、`ScanSection`の`error`、`ExcludeRulesSection`の`addError`、`InfoSection`の`resetMessage`は、変換済みの表示文言でなく生のエラーコード/辞書キーを状態として保持し、レンダーのたびに現在のロケールへ解決する。`setState`時点で文言に固定すると、表示中に言語を切り替えたときに旧言語のまま固まる（新旧混在）
 - **日付は原則、言語によらず常に `YYYY-MM-DD`**（ISO、スラッシュ不可）。例外はオーバーレイの撮影日で、ロケールに応じた表記（ja「2023年8月15日 12:34」/ en「Aug 15, 2023, 12:34 PM」、#114）。数値の桁区切りは `toLocaleString()` など言語に応じて変えてよい
-- **ウィンドウタイトル・`<html lang>`・ダイアログtitle**もロケールに追従する（`App.tsx`のロケール変更effect、`selectAndScan()`/`selectShareDirectory()`が渡す`t('selectDirectoryDialogTitle')`/`t('selectShareDirectoryDialogTitle')`）
+- **ウィンドウタイトル・`<html lang>`・ダイアログtitle**もロケールに追従する（`hooks/useLocaleSync.ts`のロケール変更effect、`selectAndScan()`/`selectShareDirectory()`が渡す`t('selectDirectoryDialogTitle')`/`t('selectShareDirectoryDialogTitle')`）
 
 ## データベーススキーマ
 
@@ -580,8 +580,9 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 ### src/App.tsx
 
-- メインアプリケーションコンポーネント（起動シーケンスは `lib/startup.ts`）
-- 再生可否（`isPlaying`）の導出・キーボードショートカット・写真上のクリック/ホイール・ウィンドウモード切替
+- メインアプリケーションコンポーネント（起動シーケンスは `lib/startup.ts`）。状態の組み立てと描画だけを担い、新しい副作用は足さない（#147）
+- 再生可否（`isPlaying`）の導出・写真上のクリック/ホイール
+- キーボードショートカットは `hooks/useKeyboardShortcuts.ts`、ウィンドウモード切替・OS実態との同期は `hooks/useWindowMode.ts`、`<html lang>`/ウィンドウタイトルのロケール追従は `hooks/useLocaleSync.ts`、案内画面・下部トーストの文言導出は純粋関数 `lib/emptyState.ts`
 - マウスアイドル検出（`useMouseIdle`）・右上の常設ボタン列・ようこそ/空/接続不可などの案内画面
 
 ### src/components/Slideshow.tsx
@@ -613,6 +614,11 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 - スライドショーロジック（現在画像・通知・進捗）
 - 表示間隔タイマー管理（`setTimeout` + 残り時間の保持。間隔は設定値5〜60秒、既定10秒。動画はタイマーでなく `Slideshow.tsx` の `ended`/最大再生時間で進む）
 - 再生/一時停止制御（`isPlaying` は `App.tsx` が導出して渡す）
+
+### src/hooks/useKeyboardShortcuts.ts / useWindowMode.ts / useLocaleSync.ts（#147）
+
+- `useKeyboardShortcuts`: 最新の値・コールバックを1つのrefへレンダー本体で代入し、keydownリスナーはマウント時に1度だけ登録（stale closure対策）
+- `useWindowMode`: `isFullscreen` をOS実態と同期し、切替失敗は通知コールバックで伝えて実態から再同期。ウィンドウAPIを触るのはこのフックと `useLocaleSync` だけ
 
 ### src/hooks/useMouseIdle.ts
 
