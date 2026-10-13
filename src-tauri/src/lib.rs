@@ -13,7 +13,10 @@ pub mod ignore;
 pub mod image_processor;
 pub mod pick;
 pub mod playlist;
+pub mod playlist_persistence;
+pub mod scan_service;
 pub mod scanner;
+pub mod shared;
 pub mod startup_error;
 pub mod startup_ui;
 pub mod thumbnail;
@@ -141,7 +144,7 @@ pub fn run() {
                 .map(PathBuf::from)
                 .collect();
             if let Some(last) = db
-                .get_setting(commands::settings::LAST_DIRECTORY_KEY)
+                .get_setting(scan_service::LAST_DIRECTORY_KEY)
                 .ok()
                 .flatten()
             {

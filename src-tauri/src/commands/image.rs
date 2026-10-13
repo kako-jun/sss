@@ -1,11 +1,11 @@
 use crate::cache_worker::CACHE_WAIT_TIMEOUT;
-use crate::commands::playlist_persistence;
 use crate::commands::types::AppState;
 use crate::image_processor::{
     extract_date_only, get_display_dimensions, get_exif_info, is_video_file, plan_cache_file,
     requires_synchronous_cache, ImageInfo,
 };
 use crate::playlist::Playlist;
+use crate::playlist_persistence;
 use std::path::Path;
 use tauri::State;
 

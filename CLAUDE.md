@@ -356,7 +356,7 @@ CREATE TABLE playlist_position (
     よう、独立した `restore_playlist` コマンドが起動直後にまずこの読み出しを行う
     （詳細は §3 コマンド一覧、`docs/architecture.md` §5③）。
   - **#62レビューS2**: ディレクトリの一致判定は生の文字列比較ではなく
-    `commands::playlist_persistence::normalize_directory_key`（`canonicalize`
+    `playlist_persistence::normalize_directory_key`（`canonicalize`
     優先、失敗時は末尾区切り除去）で行う。
   - 1行しか持たないため、フォルダA→B→Aと切り替えるとAの巡の途中経過は失われ、
     Bに切り替えた時点で上書きされる（複数フォルダの状態を同時に保持しない設計。
@@ -467,7 +467,7 @@ CREATE TABLE app_settings (
 - 永続化用アクセサ（`shuffled_list`/`next_index`/`history`/`history_position` の
   getterと `from_persisted` コンストラクタ）を提供するのみで、DB自体には触らない
   （実際の読み書きは `database.rs`（`save_playlist_full`/`save_playlist_position`/
-  `load_playlist_state`）と `commands/playlist_persistence.rs`/`commands/scan.rs`/
+  `load_playlist_state`）と `playlist_persistence.rs`/`scan_service.rs`/
   `commands/image.rs`/`commands/file_operations.rs` が行う。Tauri/DB非依存を保つ設計）
 
 ### src-tauri/src/image_processor.rs
@@ -485,6 +485,12 @@ CREATE TABLE app_settings (
 
 - 画像最適化キャッシュを作る単一ワーカースレッド（優先度/世代管理付きキュー、アトミック書込、サイズ上限LRU削除、`request_current_and_wait`同期待ち、失敗セット、panic保護）
 - 起動時/`reset_all_data`共通のキャッシュクリア（`clear_cache_dir`: 退避rename→再作成、古いtrash掃除）
+
+### src-tauri/src/scan_service.rs / shared.rs / playlist_persistence.rs（#146）
+
+- `scan_service.rs`: スキャン・復元のドメインロジック（`perform_scan`/`scan_chosen_directory`/`perform_rescan_last_directory`/`perform_restore`/`resolve_captured_dates`/`.sssignore` 移行、`ScanProgress`/`LAST_DIRECTORY_KEY`）。**`tauri` を import しない**。進捗は `FnMut(usize, usize)` コールバックで渡し、イベント送出・asset scope 許可は `commands/scan.rs` が行う
+- `shared.rs`: 複数コマンドが共有する部品（`ScanGuard`、`acquire_dialog_guard`/`DIALOG_IN_PROGRESS`、`home_pictures_dir`）。**`commands/*` 同士は互いを参照しない**。共有したいものはここ（または `scan_service`/`playlist_persistence` 等のドメインモジュール）へ置く
+- `playlist_persistence.rs`: プレイリスト永続化ヘルパー（`normalize_directory_key`/`save_full`/`save_position`）。旧 `commands/playlist_persistence.rs`
 
 ### src-tauri/src/commands/
 

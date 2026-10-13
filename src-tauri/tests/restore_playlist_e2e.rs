@@ -13,9 +13,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use sss_lib::commands::scan::{perform_restore, perform_scan, RestoreOutcome};
 use sss_lib::database::Database;
 use sss_lib::playlist::Playlist;
+use sss_lib::scan_service::{perform_restore, perform_scan, RestoreOutcome};
 
 fn workspace(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(

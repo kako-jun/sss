@@ -19,9 +19,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use sss_lib::commands::scan::perform_scan;
 use sss_lib::database::Database;
 use sss_lib::playlist::Playlist;
+use sss_lib::scan_service::perform_scan;
 
 /// #63の狙い（10万枚規模での差分スキャン）そのままの規模で計測する
 /// （PR#77レビューM4: 以前は1万件に縮小していたが、10万件の通しで計測すること）。

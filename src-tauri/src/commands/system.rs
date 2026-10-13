@@ -1,8 +1,8 @@
 use crate::cache_worker::{clear_cache_dir, CacheWorker};
-use crate::commands::scan::ScanGuard;
 use crate::commands::types::AppState;
 use crate::database::Database;
 use crate::playlist::Playlist;
+use crate::shared::ScanGuard;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, State};

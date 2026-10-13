@@ -1,8 +1,8 @@
 use crate::asset_scope::resolve_share_directory;
 use crate::commands::dialog::{pick_directory_blocking, DirectoryPicker, PrePicked};
-use crate::commands::file_operations::home_pictures_dir;
 use crate::commands::types::AppState;
 use crate::database::Database;
+use crate::shared::home_pictures_dir;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
@@ -10,7 +10,7 @@ use tauri::{AppHandle, Manager, State};
 /// `apply_exif_rotation` のキー（`image.rs` からも使う、#148）。
 pub const APPLY_EXIF_ROTATION_KEY: &str = "apply_exif_rotation";
 /// スキャン対象ディレクトリのキー（専用コマンド経由でのみ書かれる、許可リスト外）。
-pub const LAST_DIRECTORY_KEY: &str = "last_directory_path";
+pub use crate::scan_service::LAST_DIRECTORY_KEY;
 /// ピック先ディレクトリのキー（専用コマンド経由でのみ書かれる、許可リスト外）。
 pub const SHARE_DIRECTORY_KEY: &str = "share_directory_path";
 
@@ -126,9 +126,9 @@ pub async fn select_share_directory(
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
     let picked = {
-        let _dialog_guard = crate::commands::scan::acquire_dialog_guard(
+        let _dialog_guard = crate::shared::acquire_dialog_guard(
             &state.scan_in_progress,
-            &crate::commands::scan::DIALOG_IN_PROGRESS,
+            &crate::shared::DIALOG_IN_PROGRESS,
             false,
         )?;
         pick_directory_blocking(app.clone(), title).await?

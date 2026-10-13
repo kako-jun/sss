@@ -73,7 +73,7 @@ pub struct ScanResult {
     /// した」ものなのでプレイリストから外れてよいが、エラー由来の不明は一時的な
     /// 読み取り失敗の可能性が高く、除外ルールとは無関係にプレイリストの所属
     /// （シャッフル位置・履歴）を維持すべきという区別を、呼び出し元
-    /// （`commands::scan::perform_scan` Stage4）がプレイリスト反映時に使う。
+    /// （`scan_service::perform_scan` Stage4）がプレイリスト反映時に使う。
     pub error_unknown_files: Vec<String>,
     pub total_count: usize,
     pub new_count: usize,

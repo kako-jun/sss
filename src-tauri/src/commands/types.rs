@@ -17,7 +17,7 @@ pub struct AppState {
     /// スクリーンセーバー抑制ハンドル。初期化に失敗した環境（D-Bus 無し等）では `None`
     pub _keep_awake: Option<keepawake::KeepAwake>,
     /// スキャン（`select_and_scan`/`rescan_last_directory`）の二重実行防止フラグ（#61レビュー nit）。
-    /// `commands::scan::ScanGuard` が `compare_exchange` で操作する。
+    /// `scan_service::ScanGuard` が `compare_exchange` で操作する。
     pub scan_in_progress: AtomicBool,
     /// 直近に`increment_display_count`を実際に呼んだパス（#65レビューS1）。
     /// `undo_display_count`（`<img>`/`<video>`の`onError`から呼ばれる）は、
@@ -28,26 +28,7 @@ pub struct AppState {
     pub last_incremented_display: Mutex<Option<String>>,
 }
 
-/// スキャン進捗情報
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScanProgress {
-    /// プレイリストに含まれる件数（除外ルール適用後の「含める集合」の件数）。
-    /// #63 PR#77レビュー2巡目 nit: 今回のスキャンエラーが原因で「不明」になった
-    /// ファイル（`error_unknown_files`。一時的な読み取り失敗の可能性が高く、
-    /// プレイリスト所属を維持する対象）も、プレイリストに残り続ける以上ここに
-    /// 含まれる。ディレクトリ系除外の枝刈りによる「不明」（意図した除外なので
-    /// プレイリストから外れる）は含まれない。
-    pub total_files: usize,
-    pub new_files: usize,
-    pub deleted_files: usize,
-    pub duration_ms: u128,
-    /// 走査中に発生したエラーの件数（`WalkDir`読み取りエラー＋ファイル単位の
-    /// メタデータ/mtime取得エラー。1970年より前のmtimeを含む）。#63。
-    pub error_count: usize,
-    /// エラーの代表例（最大5件、`"{path}: {message}"`形式）。UIにそのまま表示する。#63。
-    pub error_examples: Vec<String>,
-}
+pub use crate::scan_service::ScanProgress;
 
 /// `exclude_image` の結果（#80）。以前は表示用に完成させた日本語文字列
 /// （`"除外パターン追加: {pattern}"`等）をそのまま返していたが、i18n対応のため
