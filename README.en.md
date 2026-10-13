@@ -36,11 +36,11 @@ Example of the real file names (v1.2.1): `Smart.Slide.Show_1.2.1_x64-portable.zi
 
 #### About the unsigned app warning
 
-The distributed files are not code-signed, so the OS shows a warning on first launch.
+Windows builds are not code-signed, and macOS builds are only ad-hoc signed (no Developer ID signature or notarization), so the OS shows a warning on first launch.
 
 - **Windows (SmartScreen)**: when "Windows protected your PC" appears, choose "More info" -> "Run anyway"
-- **macOS (Gatekeeper)**: the app is not notarized. It carries an ad-hoc signature, so move `Smart Slide Show.app` to `/Applications` and open it, dismiss the warning, then open System Settings -> Privacy & Security, scroll down, click "Open Anyway", and confirm in the dialog (on recent macOS, right-click -> "Open" no longer bypasses it)
-  - If you see "is damaged and can't be opened" with a download from before the ad-hoc signature (v1.2.1 or earlier) (no "Open" button, and no "Open Anyway" appears): run `xattr -dr com.apple.quarantine "/Applications/Smart Slide Show.app"` in Terminal, then open the app again (the quotes are required because of the spaces)
+- **macOS (Gatekeeper)**: the app is not notarized (ad-hoc signed only). On first launch, move `Smart Slide Show.app` to `/Applications` and open it, dismiss the warning, then open System Settings -> Privacy & Security, scroll down, click "Open Anyway", and confirm in the dialog (on recent macOS, right-click -> "Open" no longer bypasses it)
+  - Last resort, for v1.2.1 or earlier downloads, or if "is damaged and can't be opened" appears and no "Open Anyway" shows up: run `xattr -dr com.apple.quarantine "/Applications/Smart Slide Show.app"` in Terminal, then open the app again (the quotes are required because of the spaces)
 - **Linux**: no warning. Make an AppImage executable first with `chmod +x Smart.Slide.Show_*_amd64.AppImage`
 
 The Windows ZIP is portable: extract it anywhere and run `sss.exe`. The ZIP does not bundle the WebView2 Runtime, so install the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/consumer/) first (Windows 11 and up-to-date Windows 10 usually already have it; if the app does not start, get the Evergreen version from the official download page). No installation, shortcuts, or uninstall step is required. Settings, viewing history, and cache are stored in the Windows user app-data directory.
