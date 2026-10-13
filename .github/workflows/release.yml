@@ -1,6 +1,6 @@
 name: Release Build
 
-# 注意: このワークフローは成果物にコード署名をしない。macOS Gatekeeper /
+# 注意: このワークフローは成果物の公証・正式なコード署名をしない（macOS は ad-hoc 署名のみ）。macOS Gatekeeper /
 # Windows SmartScreen の警告が初回起動時に出るため、回避手順のユーザー向け案内は
 # README の「未署名アプリの警告について」に記載している。
 
