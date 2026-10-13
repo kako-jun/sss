@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Slideshow } from './components/Slideshow';
 import { OverlayUI } from './components/OverlayUI';
 import type { OverlayUIHandle } from './components/OverlayUI';
@@ -8,6 +7,11 @@ import { Settings } from './components/Settings';
 import type { TabType } from './components/Settings';
 import { useSlideshow } from './hooks/useSlideshow';
 import { useMouseIdle } from './hooks/useMouseIdle';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useWindowMode } from './hooks/useWindowMode';
+import { useLocaleSync } from './hooks/useLocaleSync';
+import { deriveEmptyStateContent, deriveBottomNotice } from './lib/emptyState';
+import type { StartupFailureScreen } from './lib/emptyState';
 import {
   getPlaylistInfo,
   getLastDirectoryPath,
@@ -18,7 +22,6 @@ import {
 } from './lib/tauri';
 import { runStartupSequence } from './lib/startup';
 import { subscribeFailureNotice } from './lib/failureNotice';
-import { invoke } from '@tauri-apps/api/core';
 import { exit } from '@tauri-apps/plugin-process';
 import { X, Settings as SettingsIcon, Minimize2, Maximize2, Keyboard } from 'lucide-react';
 import logoBg from './assets/logo-bg.webp';
@@ -32,16 +35,10 @@ import {
   idleFadeClassName,
   normalizeVideoMaxDuration,
 } from './constants';
-import {
-  isTypingTarget,
-  isFocusVisible,
-  hasModifierKey,
-  createButtonFocusGuard,
-} from './lib/keyboardShortcuts';
+import { createButtonFocusGuard } from './lib/keyboardShortcuts';
 import { useExcludeRescan } from './components/Settings/useExcludeRescan';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 import { ConfirmDialogHost } from './components/ConfirmDialog';
-import { isConfirmDialogOpen } from './lib/confirmDialog';
 import { createClickDebouncer, createWheelNavigator } from './lib/photoGestures';
 
 function App() {
@@ -80,7 +77,6 @@ function App() {
   } | null>(null);
   const [isOverlayHovered, setIsOverlayHovered] = useState(false); // オーバーレイにマウスオーバー中か
   const [isPausedByUser, setIsPausedByUser] = useState(false); // ユーザーが明示的に一時停止したか
-  const [isFullscreen, setIsFullscreen] = useState(true); // フルスクリーン状態（起動時の設定値に合わせた初期値）
   // #66 問題4: ショートカット一覧（`?`キー、または右上のヘルプボタン）の開閉状態。
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   // #65: ディレクトリが一度でも設定されたことがあるか。「本当に未設定」（ようこそ画面）と
@@ -99,7 +95,7 @@ function App() {
     null,
   );
   // #115: 起動時に続行できない失敗（前回フォルダの取得失敗など）。ようこそ画面に見せず、再試行できる案内にする。
-  const [startupFailure, setStartupFailure] = useState<'lastDirectory' | 'initialize' | null>(null);
+  const [startupFailure, setStartupFailure] = useState<StartupFailureScreen | null>(null);
   // 非同期コールバック/一度だけ登録するリスナーから、常に現在のロケールで文言を引くための参照。
   const tRef = useRef(t);
   useEffect(() => {
@@ -156,48 +152,14 @@ function App() {
     }
   };
 
-  // #80: ロケール変更（起動時の初期化含む）に追従してhtml lang属性とウィンドウ
-  // タイトルを更新する。切替の即時反映（ウィンドウタイトル・lang属性込み）を保証する。
-  useEffect(() => {
-    document.documentElement.lang = locale;
-    getCurrentWindow()
-      .setTitle(t('windowTitle'))
-      .catch((err) => console.error('Failed to set window title:', err));
-  }, [locale, t]);
+  useLocaleSync(locale, t);
 
-  // フルスクリーン状態をOSの実態と同期
-  useEffect(() => {
-    let cancelled = false;
-    const win = getCurrentWindow();
-    // 初期値を実態から取得
-    win
-      .isFullscreen()
-      .then((v) => {
-        if (!cancelled) setIsFullscreen(v);
-      })
-      .catch(() => {});
-    // OSによるフルスクリーン変化を検知して同期
-    // （Tauri v2 にフルスクリーン専用イベントがないため onResized で近似）
-    let cleanup: (() => void) | null = null;
-    const listenerPromise = win
-      .onResized(() => {
-        win
-          .isFullscreen()
-          .then((v) => {
-            if (!cancelled) setIsFullscreen(v);
-          })
-          .catch(() => {});
-      })
-      .then((fn) => {
-        cleanup = fn;
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      // 非同期登録が完了してからクリーンアップ（Strict Mode での漏れを防ぐ）
-      listenerPromise.finally(() => cleanup?.());
-    };
-  }, []);
+  // #103: ウィンドウモード切替の失敗通知は windowModeError に集約する。
+  const { isFullscreen, toggleWindowMode: handleToggleWindowMode } = useWindowMode(
+    t,
+    (text) => setWindowModeError((prev) => ({ text, seq: (prev?.seq ?? 0) + 1 })),
+    () => setWindowModeError(null),
+  );
 
   // 起動シーケンス（前回状態の復元→可能なら即表示、スキャンはバックグラウンド）を走らせる。
   // 初回の起動と、起動失敗の案内画面の「再試行」の両方から呼ぶ（#115）。
@@ -382,38 +344,6 @@ function App() {
     }
   };
 
-  const handleToggleWindowMode = async () => {
-    try {
-      const win = getCurrentWindow();
-      const next = !isFullscreen;
-      await win.setFullscreen(next);
-      // ウィンドウモード時はタイトルバーを表示してウィンドウを掴めるようにする
-      // フルスクリーン時は decorations を非表示に戻す
-      await win.setDecorations(!next);
-      setIsFullscreen(next);
-      setWindowModeError(null);
-    } catch (err) {
-      console.error('Failed to toggle window mode:', err);
-      setWindowModeError((prev) => ({
-        text: t('windowModeToggleFailed'),
-        seq: (prev?.seq ?? 0) + 1,
-      }));
-      // 片方だけ成功した場合に表示とOSの実態がずれないよう、実態から再同期する
-      try {
-        const win = getCurrentWindow();
-        const actual = await win.isFullscreen();
-        setIsFullscreen(actual);
-        // setFullscreen だけ成功した部分失敗に備え、装飾も実態に合わせる（失敗は握りつぶす）
-        await win.setDecorations(!actual).catch((decErr) => {
-          console.error('Failed to re-sync window decorations:', decErr);
-        });
-      } catch (syncErr) {
-        // 実態も取れなければ現状維持
-        console.error('Failed to re-sync window mode:', syncErr);
-      }
-    }
-  };
-
   // #103: 失敗通知は数秒で自動的に消す
   useEffect(() => {
     if (!windowModeError) return;
@@ -422,170 +352,29 @@ function App() {
     return () => clearTimeout(timer);
   }, [windowModeError]);
 
-  // #66レビューmust1: キーボードハンドラが参照する値
-  // （handlePrevious/handleNext/handleToggleWindowMode と、canGoBack/isSettingsOpen/
-  // isShortcutsOpen）を「最新のref」として保持する。以前はこれらの一部だけを
-  // effectのdeps配列に入れていたため、depsに無い値（handleToggleWindowMode、
-  // ひいてはその中で読むisFullscreen）が初回レンダー時点の値に固定されたまま
-  // 更新されず、Fキーが1回しか正しく切り替わらない不具合があった（実ブラウザで
-  // 再現確認済み）。ここで全てをrefにまとめ、キーボードリスナー自体は1回だけ
-  // 登録する（deps=[]）ことで、この種のstale closure問題を構造的に無くす。
-  const keydownHandlersRef = useRef({
+  useKeyboardShortcuts({
     canGoBack,
     isSettingsOpen,
     isShortcutsOpen,
-    handlePrevious,
-    handleNext,
-    handleToggleWindowMode,
+    overlayRef,
+    onPrevious: handlePrevious,
+    onNext: handleNext,
+    onToggleWindowMode: handleToggleWindowMode,
+    onCloseSettings: () => setIsSettingsOpen(false),
+    onCloseShortcuts: () => setIsShortcutsOpen(false),
+    onToggleShortcuts: () => {
+      // #66レビュー3巡目should: キーボードで開いた場合として扱う
+      // （useFocusTrapが閉じるボタンへ正しくフォーカスリングを出す）。
+      setShortcutsOpenedViaMouse(false);
+      setIsShortcutsOpen((prev) => !prev);
+    },
+    onTogglePause: () => setIsPausedByUser((prev) => !prev),
+    onExitFailed: () =>
+      setWindowModeError((prev) => ({
+        text: tRef.current('exitFailed'),
+        seq: (prev?.seq ?? 0) + 1,
+      })),
   });
-  // #66レビュー2巡目must2: 以前はこの代入を`useEffect(() => {...})`（deps無し、
-  // 毎レンダー後に走るpassive effect）で行っていたが、passive effectはReactの
-  // コミット後に非同期に（他の作業を挟んで）flushされるため、ある種のテスト
-  // 環境や高負荷なタイミングでは、実際のレンダー結果とrefの内容が一瞬ズレる
-  // 余地があった（CI限定のflakyの一因）。レンダー本体で直接代入すれば、
-  // このrefは常に「今まさにコミットされようとしているレンダー」の値と完全に
-  // 同期する（読み取り専用の同期用refであり、代入そのものが画面表示に影響
-  // しないため、レンダー中の副作用としても安全）。
-  keydownHandlersRef.current = {
-    canGoBack,
-    isSettingsOpen,
-    isShortcutsOpen,
-    handlePrevious,
-    handleNext,
-    handleToggleWindowMode,
-  };
-
-  // キーボードショートカット
-  useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      // #65: キーリピート(押しっぱなし)による多重発火を無視する（問題3関連）。
-      if (e.repeat) return;
-      // #66レビューmust2: meta/ctrl/altのいずれかを伴う場合は無視する
-      // （Cmd+F/Ctrl+F等、OS/ブラウザ標準のショートカットとの衝突を避ける。
-      // 実ブラウザで「Cmd+FがOSのフルスクリーンAPIも呼んでしまう」ことを確認）。
-      if (hasModifierKey(e)) return;
-
-      // #119: 確認モーダル表示中は全ショートカットを無効化する（ESC は ConfirmDialogHost が
-      // window の capture で先取りしてキャンセル扱いにする。ここへは届かない）。
-      if (isConfirmDialogOpen()) return;
-
-      const h = keydownHandlersRef.current;
-
-      // ESCキー（#66 問題1）: 設定を開いている間は「閉じる」、それ以外は終了。
-      // 自由テキストを打ち込める入力欄にフォーカスがある間はモーダルを閉じたり
-      // アプリを終了したりせず、代わりにフォーカスを外す（#66レビューshould:
-      // 編集を取り消す一般的なESCの挙動に寄せる。checkbox/range/number等の
-      // 非テキスト系inputはこの対象外＝通常通りモーダルを閉じる）。
-      if (e.key === 'Escape') {
-        if (isTypingTarget(e.target)) {
-          (e.target as HTMLElement).blur();
-          return;
-        }
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        if (h.isSettingsOpen) {
-          setIsSettingsOpen(false);
-          return;
-        }
-        if (h.isShortcutsOpen) {
-          setIsShortcutsOpen(false);
-          return;
-        }
-        // #66レビューshould: オーバーレイの「…」メニュー（除外サブメニュー含む）が
-        // 開いている間のESCは、それを閉じるだけにする。
-        if (overlayRef.current?.isMenuOpen()) {
-          overlayRef.current.closeMenu();
-          return;
-        }
-        try {
-          await invoke('exit_app');
-        } catch (err) {
-          console.error('Failed to exit app:', err);
-          // #115: Esc を押しても何も起きない無反応にせず、上部の通知（#103）で失敗を伝える。
-          setWindowModeError((prev) => ({
-            text: tRef.current('exitFailed'),
-            seq: (prev?.seq ?? 0) + 1,
-          }));
-        }
-        return;
-      }
-
-      // 以降のショートカットは、設定モーダルを開いている間は入力欄との衝突を
-      // 避けるため無効化する（矢印キーの既存挙動と同じ方針）。
-      if (h.isSettingsOpen) return;
-
-      // 左矢印キーで前の画像へ
-      if (e.key === 'ArrowLeft' && h.canGoBack) {
-        e.preventDefault();
-        await h.handlePrevious();
-        return;
-      }
-
-      // 右矢印キーで次の画像へ
-      if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        h.handleNext();
-        return;
-      }
-
-      // #66 問題4: `?` でショートカット一覧の表示を切り替える。
-      if (e.key === '?') {
-        e.preventDefault();
-        // #66レビュー3巡目should: キーボードで開いた場合として扱う
-        // （useFocusTrapが閉じるボタンへ正しくフォーカスリングを出す）。
-        setShortcutsOpenedViaMouse(false);
-        setIsShortcutsOpen((prev) => !prev);
-        return;
-      }
-
-      if (h.isShortcutsOpen) return;
-
-      // #66 問題4: Space で一時停止/再開をトグルする。
-      // #66レビューmust2(b)→2巡目must1: 以前は`e.target === document.body`のみを
-      // 見ていたが、実ブラウザ(Chromium/WebView2)では「前へ/次へ」等のボタンを
-      // マウスでクリックした後もそのボタンにフォーカスが残り続け、target が
-      // bodyではなくなる。その状態でSpaceを押すと、このガードに阻まれてアプリの
-      // 一時停止が発火しないばかりか、フォーカスが残ったボタン自身がネイティブな
-      // クリック相当の挙動（＝そのボタンを再度押す）を引き起こしていた。
-      // 一度は`:focus-visible`をフォーカス獲得の瞬間にスナップショットする方式
-      // （focusVisibleAtFocusTimeRef）で対処したが、根本原因である「マウス
-      // クリックでボタンにフォーカスが残ること」自体を、操作バー・右上ピルの
-      // コンテナに`onMouseDown={e => e.preventDefault()}`を付けて無くしたため
-      // （2巡目must1案a）、マウスクリック後は`document.activeElement`が
-      // 元々フォーカスされていた要素（通常はbody）のまま変わらなくなり、
-      // このスナップショット機構は不要になった。単純に、今
-      // `document.activeElement`が実際にキーボードで`:focus-visible`な状態か
-      // をその場で判定するだけでよい（Tabで意図的にボタンへフォーカスして
-      // いる場合は、そのボタンへネイティブなSpace起動を譲る）。
-      if (e.key === ' ' && !isTypingTarget(e.target)) {
-        const activeElement = document.activeElement;
-        const isKeyboardFocused =
-          !!activeElement && activeElement !== document.body && isFocusVisible(activeElement);
-        if (!isKeyboardFocused) {
-          e.preventDefault();
-          setIsPausedByUser((prev) => !prev);
-        }
-        return;
-      }
-
-      // #66 問題4: F / F11 でフルスクリーンとウィンドウモードを切り替える。
-      if (e.key === 'f' || e.key === 'F' || e.key === 'F11') {
-        e.preventDefault();
-        await h.handleToggleWindowMode();
-        return;
-      }
-    };
-
-    // captureフェーズで最優先でキャッチ。#66レビューmust1: ハンドラ内部は
-    // 全てkeydownHandlersRef経由で最新値を読むため、このeffect自体はマウント時に
-    // 1度だけ登録すればよい（isFullscreen等の変化のたびに張り直す必要が無い）。
-    document.addEventListener('keydown', handleKeyDown, true);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown, true);
-    };
-  }, []);
 
   // #66レビュー3巡目should: 設定モーダルを開いた操作がマウスクリックだったか
   // どうかをuseFocusTrapへ伝える（詳細はuseFocusTrap.tsのJSDoc参照）。
@@ -642,68 +431,10 @@ function App() {
     setVideoMaxDurationSec(normalizeVideoMaxDuration(sec));
   };
 
-  // #65: 「ようこそ」画面は本当に未設定（ディレクトリが一度も設定されていない）の
-  // 時だけ出す。設定済みだが空/接続不可/読込失敗の場合は専用の案内にする
-  // （問題1: 消えたファイル1枚でようこそ画面に落ちる、の根絶）。
-  const emptyStateContent = ((): {
-    title: string;
-    subtitle: string;
-    canContinue?: boolean;
-    canRetry?: boolean;
-  } | null => {
-    if (startupFailure !== null) {
-      return {
-        title:
-          startupFailure === 'lastDirectory'
-            ? t('errorLastDirectoryLoadFailed')
-            : t('startupInitFailedTitle'),
-        subtitle: t('startupFailedSubtitle'),
-        canRetry: true,
-      };
-    }
-    if (!hasDirectory) {
-      return { title: t('welcomeTitle'), subtitle: t('welcomeSubtitle') };
-    }
-    if (notice?.kind === 'emptyPlaylist') {
-      return { title: t('emptyPlaylistTitle'), subtitle: t('emptyPlaylistSubtitle') };
-    }
-    if (notice?.kind === 'rootUnavailable') {
-      return { title: t('rootUnavailable'), subtitle: '' };
-    }
-    if (notice?.kind === 'loadFailedGaveUp') {
-      return { title: t('loadFailedGaveUp'), subtitle: '' };
-    }
-    if (notice?.kind === 'noReadableImages') {
-      return {
-        title: t('noReadableImagesTitle'),
-        subtitle: t('noReadableImagesSubtitle'),
-        canContinue: true,
-      };
-    }
-    if (notice?.kind === 'mediaFailureStreak') {
-      return {
-        title: t('mediaFailureStreakTitle'),
-        subtitle: t('mediaFailureStreakSubtitle'),
-        canContinue: true,
-      };
-    }
-    if (notice?.kind === 'error') {
-      return { title: t('genericErrorTitle'), subtitle: notice.message };
-    }
-    // #65レビュー修正: restorePlaylist失敗→前景rescanLastDirectory自体が失敗した場合、
-    // initialize()（＝useSlideshowの最初のgetNextImage）が一度も呼ばれないため
-    // notice はずっと null のまま。旧実装はこの分岐が無く emptyStateContent が
-    // null になり、案内画面自体が描画されず directoryError も表示されなかった
-    // （テスト担当が発見）。hasDirectory は既に true（前回ディレクトリはあった）
-    // なので「ようこそ」ではなく専用の案内にする。
-    if (directoryError) {
-      return {
-        title: t('directoryUnreachableTitle'),
-        subtitle: t('directoryUnreachableSubtitle'),
-      };
-    }
-    return null; // 読込中（初回表示待ち）。ローディング画面はisInitializedの分岐が別途担当。
-  })();
+  const emptyStateContent = deriveEmptyStateContent(
+    { startupFailure, hasDirectory, notice, hasDirectoryError: directoryError !== null },
+    t,
+  );
 
   // #82レビューshould1: `directoryError`はraw文字列のまま保持しているため、
   // 表示文言への変換はレンダーのたびにここで行う（setState時点で固定しない）。
@@ -713,23 +444,9 @@ function App() {
     ? resolveStartupDirectoryError(directoryError.raw, directoryError.directory)
     : null;
 
-  // #65レビュー修正: 復元成功後のバックグラウンドスキャン失敗は、既に最初の画像を
-  // 表示できている（currentImage != null）ため上の全画面案内は出さない。写真を
-  // 邪魔しない控えめな通知（下部トースト、数秒で自動的に消える）で理由を出す。
-  // notice（rootUnavailable/loadFailedGaveUp/error）優先度を最優先にし、無ければ
-  // directoryError を出す（同時に出て重なるのを防ぐ）。
-  // #65レビューS3: 鑑賞中に invoke の reject（error通知）が起きた場合も同じ
-  // トーストで見せる（useSlideshow側が表示間隔ごとに自動再試行する）。
-  const bottomNotice: string | null =
-    notice?.kind === 'rootUnavailable'
-      ? t('rootUnavailable')
-      : notice?.kind === 'loadFailedGaveUp'
-        ? t('loadFailedGaveUp')
-        : notice?.kind === 'error'
-          ? notice.message
-          : mediaSkipToast
-            ? t('mediaSkipToast', { count: mediaSkipToast.count })
-            : directoryErrorMessage;
+  // #65レビュー修正: 復元成功後のバックグラウンドスキャン失敗など、画像表示中に出す
+  // 控えめな下部トーストの文言（優先順位は deriveBottomNotice 参照）。
+  const bottomNotice = deriveBottomNotice({ notice, mediaSkipToast, directoryErrorMessage }, t);
 
   // directoryError による下部トーストだけは数秒で自動的に消す（notice由来の通知は
   // 次の正常な画像取得時にnoticeがnullへ戻るため対象外。上の全画面案内側は

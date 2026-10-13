@@ -50,7 +50,7 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
  * そこに正しくリングが出る。
  *
  * `Settings`（設定モーダル）・`ShortcutsOverlay`（ショートカット一覧）の両方から
- * 使う共通ロジック。Escapeでの閉じ方は呼び出し元（`App.tsx`のキーボードハンドラ）
+ * 使う共通ロジック。Escapeでの閉じ方は呼び出し元（`hooks/useKeyboardShortcuts.ts`のキーボードハンドラ）
  * が担当するため、ここでは扱わない。
  */
 export function useFocusTrap(

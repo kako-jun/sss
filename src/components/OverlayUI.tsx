@@ -112,7 +112,7 @@ interface UndoToast {
 }
 
 /**
- * `App.tsx`のグローバルESCハンドラが、オーバーレイの「…」メニュー（または
+ * `hooks/useKeyboardShortcuts.ts`のグローバルESCハンドラが、オーバーレイの「…」メニュー（または
  * その中の除外サブメニュー）が開いている時はそれを閉じるだけにするための
  * 命令的API（#66レビューshould）。OverlayUIはApp.tsxから見て「開いている」
  * こと自体をReact状態としては公開していない（ローカルUI状態のため）ので、
@@ -183,7 +183,7 @@ export const OverlayUI = forwardRef<OverlayUIHandle, OverlayUIProps>(function Ov
   const metaRowRef = useRef<HTMLElement>(null);
   const guardButtonMouseDown = useMemo(() => createButtonFocusGuard(barContainerRef), []);
 
-  // #66レビューshould: App.tsxのグローバルESCハンドラが「…」メニュー（または
+  // #66レビューshould: hooks/useKeyboardShortcuts.tsのグローバルESCハンドラが「…」メニュー（または
   // 除外サブメニュー）を閉じられるようにする命令的API。
   useImperativeHandle(
     ref,

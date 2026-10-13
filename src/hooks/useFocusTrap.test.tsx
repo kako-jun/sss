@@ -73,7 +73,7 @@ describe('useFocusTrap opened-via-keyboard focus restoration (#66レビューmus
     await flushRaf();
 
     act(() => {
-      // モーダルを閉じる（App.tsxのESCハンドラがsetIsOpen(false)する代わり）。
+      // モーダルを閉じる（useKeyboardShortcuts.tsのESCハンドラがsetIsOpen(false)する代わり）。
       (getByTestId('close') as HTMLButtonElement).click();
     });
 
