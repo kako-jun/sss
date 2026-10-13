@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+# 同じ version の release を並行実行させない（draft の作成・削除・公開が競合するため）
+concurrency:
+  group: release-${{ github.event.inputs.version }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     runs-on: ubuntu-22.04
@@ -27,7 +32,6 @@ jobs:
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
           DISPATCH_REF: ${{ github.ref }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
             echo "::error::リリースは main ブランチから実行してください（現在: $DISPATCH_REF）"
@@ -39,14 +43,12 @@ jobs:
             exit 1
           fi
 
+          # Release は draft で作り、全ジョブ成功後の publish ジョブで初めて公開する。draft の間は
+          # タグが作られないため、リモートにタグがある＝公開済み（または手動で作られた）バージョンとみなして拒否する。
+          # 前回失敗で残った draft Release は create-release ジョブが削除して作り直す。
           if git ls-remote --tags origin "refs/tags/$INPUT_VERSION" | grep -q .; then
-            # 同名タグだけがある状態での誤った再公開は拒否する。一方、既存Release
-            # への成果物添付が失敗した時は、このworkflowを安全に再試行できる。
-            if ! gh release view "$INPUT_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "::error::タグ $INPUT_VERSION は既に存在しますが、対応するGitHub Releaseがありません"
-              exit 1
-            fi
-            echo "既存Release $INPUT_VERSION への再試行です"
+            echo "::error::タグ $INPUT_VERSION は既に存在します。公開済みのバージョンは再実行できません（新しいバージョンを使うか、タグと Release を手動で整理してください）"
+            exit 1
           fi
 
       - name: Setup Node
@@ -116,8 +118,48 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
-  build:
+  create-release:
+    # 前回の実行が失敗して残った同名の draft Release を削除し、draft Release を1つだけ作る。
+    # macOS/Linux の matrix ジョブが各自で作ると draft が2つできるため、ここで先に作って id を渡す。
+    # 公開済みの同名 Release がある場合は失敗させる（draft はタグを作らないため、タグ有無では検出できない）。
     needs: validate
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - name: Replace leftover draft and create a new draft release
+        id: create
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+          CHANGELOG_ANCHOR: ${{ needs.validate.outputs.changelog-anchor }}
+        run: |
+          set -euo pipefail
+          releases=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$RELEASE_VERSION\") | \"\(.id) \(.draft)\"")
+          while read -r id draft; do
+            [ -n "$id" ] || continue
+            if [ "$draft" != "true" ]; then
+              echo "::error::$RELEASE_VERSION は既に公開済みの Release があります"
+              exit 1
+            fi
+            echo "前回の draft Release (id=$id) を削除します"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done <<<"$releases"
+
+          # 全資産の検証と Windows ZIP の添付が済むまで公開しない。公開は publish ジョブで行う
+          release_id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$RELEASE_VERSION" \
+            -f name="Smart Slide Show $RELEASE_VERSION" \
+            -f body="See https://github.com/$GITHUB_REPOSITORY/blob/main/CHANGELOG.md#$CHANGELOG_ANCHOR for details." \
+            -f target_commitish="$GITHUB_SHA" \
+            -F draft=true -F prerelease=false --jq .id)
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -163,11 +205,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.event.inputs.version }}
-          releaseName: 'Smart Slide Show ${{ github.event.inputs.version }}'
-          releaseBody: 'See https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md#${{ needs.validate.outputs.changelog-anchor }} for details.'
-          releaseDraft: false
-          prerelease: false
+          # draft Release は create-release ジョブで作成済み。資産のアップロードだけを行う
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
       - name: Verify ad-hoc signature (macOS only)
@@ -198,9 +237,9 @@ jobs:
           fi
 
   windows-portable:
-    # macOS/Linux の tauri-action が Release とタグを作成してから、Windows の
-    # portable ZIP を同じ Release へ追加する。NSIS/WiX installer は生成しない。
-    needs: [validate, build]
+    # create-release が作った draft Release へ（id 指定で）、Windows の
+    # portable ZIP を追加する。NSIS/WiX installer は生成しない。
+    needs: [create-release, build]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -245,6 +284,29 @@ jobs:
       - name: Attach portable ZIP to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ github.event.inputs.version }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
-        run: gh release upload "$env:RELEASE_VERSION" "$env:ARCHIVE" --repo "$env:GITHUB_REPOSITORY" --clobber
+        run: |
+          # draft Release はタグ名では引けないため、release id を指定して API でアップロードする（draft は毎回新規作成なので同名資産は無い。失敗ジョブのみの再実行では 422 already_exists になりうる。全ジョブ再実行で draft ごと作り直す）
+          $name = [System.IO.Path]::GetFileName($env:ARCHIVE)
+          gh api -X POST "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=$name" -H "Content-Type: application/zip" --silent --input $env:ARCHIVE
+          if ($LASTEXITCODE -ne 0) { throw "ZIP のアップロードに失敗しました。全ジョブを再実行すれば draft は作り直されます" }
+
+  publish:
+    # build（macOS 署名検証を含む）と windows-portable がすべて成功した後にだけ draft を外して公開する。
+    # 公開時にタグ（Release 作成時のコミット）が作られる。
+    needs: [create-release, build, windows-portable]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          if ! gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false; then
+            echo "::error::Release の公開に失敗しました。全ジョブを再実行すれば draft は作り直されます"
+            exit 1
+          fi
