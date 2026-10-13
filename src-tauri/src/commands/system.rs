@@ -19,7 +19,7 @@ pub fn exit_app(app: AppHandle) {
 /// Tauri非依存にすることで、`reset_all_data`コマンド本体（下記）と
 /// `tests/reset_all_data_e2e.rs`の両方が同じ実装を呼べるようにする（#79レビュー
 /// should4: テストがロジック本体の変更に自動的に追従するように）。
-/// `perform_scan`/`perform_restore`（`commands/scan.rs`）と同じ理由で
+/// `perform_scan`/`perform_restore`（`scan_service.rs`）と同じ理由で
 /// `pub(crate)`ではなく`pub`にする必要がある: `tests/*.rs`はそれぞれ`sss_lib`を
 /// external crateとして読み込む別クレート扱いのため、`pub(crate)`だとテストから
 /// 呼べない。

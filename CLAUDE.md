@@ -269,7 +269,7 @@
 
 保存キー（`app_settings`）: `last_directory_path` / `display_interval`（ms） / `apply_exif_rotation` / `share_directory_path` / `language` / `video_audio_enabled` / `video_max_duration_sec` / `map_thumbnail_enabled` / `sssignore_migrated`。
 
-設定キーの定義は Rust の `WRITABLE_SETTING_KEYS`（`commands/settings.rs`）が正本で、フロントは `src/constants.ts` の `SETTING_*`/`SETTING_KEYS` を使い文字列リテラルを直書きしない（一致は `src/settingKeys.test.ts` が検証、#148）。真偽値設定は「`true`/`false` 以外は既定値」の1規則で、Rust は `parse_bool_setting`/`get_bool_setting`、フロントは `parseBoolSetting`。既定値の正本は Rust の `BOOL_SETTING_DEFAULTS`（フロントは写しでテスト検証）。詳細は `docs/architecture.md` §6-(j)。
+設定キーの定義は Rust の `WRITABLE_SETTING_KEYS`（`settings_store.rs`）が正本で、フロントは `src/constants.ts` の `SETTING_*`/`SETTING_KEYS` を使い文字列リテラルを直書きしない（一致は `src/settingKeys.test.ts` が検証、#148）。真偽値設定は「`true`/`false` 以外は既定値」の1規則で、Rust は `parse_bool_setting`/`get_bool_setting`、フロントは `parseBoolSetting`。既定値の正本は Rust の `BOOL_SETTING_DEFAULTS`（フロントは写しでテスト検証）。詳細は `docs/architecture.md` §6-(j)。
 
 ### 8. 国際化（i18n、#80）
 
@@ -489,13 +489,14 @@ CREATE TABLE app_settings (
 ### src-tauri/src/scan_service.rs / shared.rs / playlist_persistence.rs（#146）
 
 - `scan_service.rs`: スキャン・復元のドメインロジック（`perform_scan`/`scan_chosen_directory`/`perform_rescan_last_directory`/`perform_restore`/`resolve_captured_dates`/`.sssignore` 移行、`ScanProgress`/`LAST_DIRECTORY_KEY`）。**`tauri` を import しない**。進捗は `FnMut(usize, usize)` コールバックで渡し、イベント送出・asset scope 許可は `commands/scan.rs` が行う
-- `shared.rs`: 複数コマンドが共有する部品（`ScanGuard`、`acquire_dialog_guard`/`DIALOG_IN_PROGRESS`、`home_pictures_dir`）。**`commands/*` 同士は互いを参照しない**。共有したいものはここ（または `scan_service`/`playlist_persistence` 等のドメインモジュール）へ置く
+- `shared.rs`: 複数コマンドが共有する部品（`ScanGuard`、`acquire_dialog_guard`/`DIALOG_IN_PROGRESS`、`home_pictures_dir`）。**`commands/*` 同士は互いを参照しない**（例外は `commands/types.rs` の `AppState`/`ExcludeOutcome`＝コマンド層共通の状態型のみ）。共有したいものはここ（または `scan_service`/`playlist_persistence` 等のドメインモジュール）へ置く
+- `settings_store.rs`: 設定キー定数・`WRITABLE_SETTING_KEYS`・`BOOL_SETTING_DEFAULTS`・`parse_bool_setting`/`get_bool_setting`（キー集合の正本。vitest `settingKeys.test.ts` がこのファイルを直接読む）。`dialog.rs`: `DirectoryPicker` trait・`TauriDirectoryPicker`・`PrePicked`（コマンドではない）
 - `playlist_persistence.rs`: プレイリスト永続化ヘルパー（`normalize_directory_key`/`save_full`/`save_position`）。旧 `commands/playlist_persistence.rs`
 
 ### src-tauri/src/commands/
 
 - Tauriコマンドハンドラ（29個。`lib.rs` の `invoke_handler` 登録数と下の番号が一致する）
-  1. `select_and_scan`: **フォルダ選択ダイアログを Rust 側で開き**（`tauri-plugin-dialog` の Rust API。`commands::dialog::DirectoryPicker` trait 越しで、本番は `TauriDirectoryPicker`、テストは固定値スタブ）、選ばれたフォルダだけをスキャンする（#93）。JS から渡せるのはダイアログのタイトル文字列のみで、パス文字列を受け取る引数は無い。戻り値は `Some(ScanProgress)`／`None`（キャンセル。エラーにしない）。スキャン成功後に asset scope 許可と `last_directory_path` の保存を行う（本体は Tauri 非依存の `perform_select_and_scan`／共通部 `scan_chosen_directory`）。フォルダ不在は `directoryNotFound`、`sanitize_allow_dir` 拒否は `directoryUnsafe`、二重実行は `scanInProgress`（`ScanGuard`）。スキャン（リアルタイム進捗イベント付き）はプレイリストの新規作成/差分更新に加え、メモリ上にプレイリストが無い場合（`restore_playlist` が復元できなかった、またはまだ呼ばれていない）はDB保存済みのプレイリスト状態を読み、対象ディレクトリが一致すれば復元して差分適用する
+  1. `select_and_scan`: **フォルダ選択ダイアログを Rust 側で開き**（`tauri-plugin-dialog` の Rust API。`dialog::DirectoryPicker` trait 越しで、本番は `TauriDirectoryPicker`、テストは固定値スタブ）、選ばれたフォルダだけをスキャンする（#93）。JS から渡せるのはダイアログのタイトル文字列のみで、パス文字列を受け取る引数は無い。戻り値は `Some(ScanProgress)`／`None`（キャンセル。エラーにしない）。スキャン成功後に asset scope 許可と `last_directory_path` の保存を行う（本体は Tauri 非依存の `perform_select_and_scan`／共通部 `scan_chosen_directory`）。フォルダ不在は `directoryNotFound`、`sanitize_allow_dir` 拒否は `directoryUnsafe`、二重実行は `scanInProgress`（`ScanGuard`）。スキャン（リアルタイム進捗イベント付き）はプレイリストの新規作成/差分更新に加え、メモリ上にプレイリストが無い場合（`restore_playlist` が復元できなかった、またはまだ呼ばれていない）はDB保存済みのプレイリスト状態を読み、対象ディレクトリが一致すれば復元して差分適用する
   2. `restore_playlist`: 起動直後、DB保存済みのプレイリスト状態を**スキャン完了を
      待たずに**復元する（#62レビューS1）。**引数なし**で、対象は DB 保存済みの前回フォルダ（`last_directory_path`）のみ（#93）。フロントはまずこれを呼び、`true`（復元
      成功、または既に初期化済みで既存維持）ならスキャンをバックグラウンドへ回して

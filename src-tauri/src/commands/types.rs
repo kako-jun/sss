@@ -17,7 +17,7 @@ pub struct AppState {
     /// スクリーンセーバー抑制ハンドル。初期化に失敗した環境（D-Bus 無し等）では `None`
     pub _keep_awake: Option<keepawake::KeepAwake>,
     /// スキャン（`select_and_scan`/`rescan_last_directory`）の二重実行防止フラグ（#61レビュー nit）。
-    /// `scan_service::ScanGuard` が `compare_exchange` で操作する。
+    /// `shared::ScanGuard` が `compare_exchange` で操作する。
     pub scan_in_progress: AtomicBool,
     /// 直近に`increment_display_count`を実際に呼んだパス（#65レビューS1）。
     /// `undo_display_count`（`<img>`/`<video>`の`onError`から呼ばれる）は、
@@ -27,8 +27,6 @@ pub struct AppState {
     /// `onError`が起きても無関係な過去の加算を誤って減らすことがない。
     pub last_incremented_display: Mutex<Option<String>>,
 }
-
-pub use crate::scan_service::ScanProgress;
 
 /// `exclude_image` の結果（#80）。以前は表示用に完成させた日本語文字列
 /// （`"除外パターン追加: {pattern}"`等）をそのまま返していたが、i18n対応のため

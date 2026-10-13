@@ -22,7 +22,7 @@ pub fn home_pictures_dir() -> Result<PathBuf, String> {
 /// 場合のみ生成でき、生成に成功すると必ず1つの `Drop` で `false` に戻す
 /// （panic・早期`return`（`?`）・正常終了のいずれの経路でも解除される）。
 ///
-/// `pub(crate)`: `commands::system::reset_all_data`（#64）も同じ `AtomicBool` で
+/// `commands::system::reset_all_data`（#64）も同じ `AtomicBool` で
 /// 同じガードを取得し、スキャン中の初期化・初期化中のスキャン開始の両方を
 /// 一箇所のロジックで防ぐ。
 pub struct ScanGuard<'a> {

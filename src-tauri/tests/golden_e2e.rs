@@ -78,7 +78,7 @@ fn relative_set(root: &Path, paths: &[String]) -> BTreeSet<String> {
 }
 
 /// #61 レビュー M2/S1: `ImageScanner` はもう除外ルールを一切適用しない（ディスク上の
-/// 物理的な事実だけを集める）。除外フィルタの適用は呼び出し元（`commands/scan.rs`）が
+/// 物理的な事実だけを集める）。除外フィルタの適用は呼び出し元（`scan_service.rs`）が
 /// 別段階として行う設計になったため、テストでもその2段階を明示的に再現する。
 fn included_paths(
     files: &[sss_lib::scanner::FileMetadata],

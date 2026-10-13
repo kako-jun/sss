@@ -1,11 +1,12 @@
-use crate::commands::dialog::{pick_directory_blocking, DirectoryPicker, PrePicked};
-use crate::commands::types::{AppState, ScanProgress};
+use crate::commands::types::AppState;
 use crate::database::Database;
+use crate::dialog::{pick_directory_blocking, DirectoryPicker, PrePicked};
 use crate::playlist::Playlist;
 use crate::scan_service::{
     perform_rescan_last_directory, perform_restore, scan_chosen_directory, RestoreOutcome,
-    LAST_DIRECTORY_KEY,
+    ScanProgress,
 };
+use crate::settings_store::LAST_DIRECTORY_KEY;
 use crate::shared::{acquire_dialog_guard, DIALOG_IN_PROGRESS};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;

@@ -11,6 +11,7 @@ use crate::image_processor::{extract_date_only, get_exif_info, is_video_file};
 use crate::playlist::Playlist;
 use crate::playlist_persistence::{self, normalize_directory_key};
 use crate::scanner::{FileMetadata, ImageScanner};
+use crate::settings_store::LAST_DIRECTORY_KEY;
 use crate::shared::ScanGuard;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -18,11 +19,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-
-/// `last_directory_path`（前回スキャンしたフォルダ）を保存する `app_settings` のキー。
-/// #93: このキーは `save_setting`（WebView から呼べる）では書き込めない。書き込むのは
-/// ダイアログ経由で選ばれたパスのスキャン成功後（[`scan_chosen_directory`]）だけ。
-pub const LAST_DIRECTORY_KEY: &str = "last_directory_path";
 
 /// `.sssignore` 移行が完了済みかどうかを記録する `app_settings` のキー。
 /// 一度でも移行処理を試みた（ファイルの有無に関わらず）後は二度と実行しない
@@ -822,6 +818,7 @@ mod tests {
         })
         .unwrap();
 
+        assert!(progress_calls > 0, "進捗コールバックが呼ばれるはず");
         assert_eq!(progress.total_files, 3);
         assert_eq!(progress.new_files, 3);
         assert!(playlist

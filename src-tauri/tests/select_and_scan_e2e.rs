@@ -13,14 +13,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
-use sss_lib::commands::dialog::DirectoryPicker;
 use sss_lib::commands::scan::{perform_select_and_scan, SelectScanOutcome};
-use sss_lib::commands::settings::{
-    perform_save_setting, perform_select_share_directory, WRITABLE_SETTING_KEYS,
-};
+use sss_lib::commands::settings::{perform_save_setting, perform_select_share_directory};
 use sss_lib::database::Database;
+use sss_lib::dialog::DirectoryPicker;
 use sss_lib::playlist::Playlist;
-use sss_lib::scan_service::{perform_rescan_last_directory, LAST_DIRECTORY_KEY};
+use sss_lib::scan_service::perform_rescan_last_directory;
+use sss_lib::settings_store::{LAST_DIRECTORY_KEY, WRITABLE_SETTING_KEYS};
 use sss_lib::shared::acquire_dialog_guard;
 
 /// ダイアログの代わりに固定の結果を返すスタブ。`None` はキャンセル。
