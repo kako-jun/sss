@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       changelog-anchor: ${{ steps.changelog.outputs.anchor }}
+      prerelease: ${{ steps.prerelease.outputs.value }}
     steps:
       - uses: actions/checkout@v5
 
@@ -38,7 +39,7 @@ jobs:
             exit 1
           fi
 
-          if ! [[ "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+          if ! [[ "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::version の形式が不正です（例: v1.0.0, v1.0.0-beta.1）: $INPUT_VERSION"
             exit 1
           fi
@@ -49,6 +50,19 @@ jobs:
           if git ls-remote --tags origin "refs/tags/$INPUT_VERSION" | grep -q .; then
             echo "::error::タグ $INPUT_VERSION は既に存在します。公開済みのバージョンは再実行できません（新しいバージョンを使うか、タグと Release を手動で整理してください）"
             exit 1
+          fi
+
+      # プレリリース判定は唯一ここで行う（version に `-` を含むもの、例: v1.3.0-beta.1）。
+      # create-release の prerelease と publish の make_latest はこの出力を使う。
+      - name: Determine prerelease
+        id: prerelease
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [[ "$INPUT_VERSION" == *-* ]]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Node
@@ -135,6 +149,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ github.event.inputs.version }}
           CHANGELOG_ANCHOR: ${{ needs.validate.outputs.changelog-anchor }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
         run: |
           set -euo pipefail
           releases=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
@@ -155,7 +170,7 @@ jobs:
             -f name="Smart Slide Show $RELEASE_VERSION" \
             -f body="See https://github.com/$GITHUB_REPOSITORY/blob/main/CHANGELOG.md#$CHANGELOG_ANCHOR for details." \
             -f target_commitish="$GITHUB_SHA" \
-            -F draft=true -F prerelease=false --jq .id)
+            -F draft=true -F prerelease="$PRERELEASE" --jq .id)
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   build:
@@ -295,7 +310,7 @@ jobs:
   publish:
     # build（macOS 署名検証を含む）と windows-portable がすべて成功した後にだけ draft を外して公開する。
     # 公開時にタグ（Release 作成時のコミット）が作られる。
-    needs: [create-release, build, windows-portable]
+    needs: [validate, create-release, build, windows-portable]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -304,9 +319,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
         run: |
           set -euo pipefail
-          if ! gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false; then
+          # プレリリース版は Latest にしない。通常版は legacy（GitHub が作成日時と semver で Latest を決める）にして旧系列の修正版で Latest が巻き戻らないようにする。make_latest は文字列（"false"/"legacy"）で渡すため -f を使う
+          if [ "$PRERELEASE" = "true" ]; then MAKE_LATEST=false; else MAKE_LATEST=legacy; fi
+          if ! gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -f make_latest="$MAKE_LATEST"; then
             echo "::error::Release の公開に失敗しました。全ジョブを再実行すれば draft は作り直されます"
             exit 1
           fi
