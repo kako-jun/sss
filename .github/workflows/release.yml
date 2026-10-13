@@ -1,6 +1,6 @@
 name: Release Build
 
-# 注意: このワークフローは成果物にコード署名をしない。macOS Gatekeeper /
+# 注意: このワークフローは成果物の Developer ID による署名・公証をしない（macOS は ad-hoc 署名のみ）。macOS Gatekeeper /
 # Windows SmartScreen の警告が初回起動時に出るため、回避手順のユーザー向け案内は
 # README の「未署名アプリの警告について」に記載している。
 
@@ -169,6 +169,33 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Verify ad-hoc signature (macOS only)
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apps=(src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app)
+          if [ "${#apps[@]}" -ne 1 ]; then
+            echo "::error::.app が 1 つ見つかりません: ${apps[*]:-なし}"
+            exit 1
+          fi
+          app="${apps[0]}"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          info=$(codesign -dv --verbose=4 "$app" 2>&1)
+          echo "$info"
+          # Signature=adhoc だけではリンカー署名のみの状態と区別できない。signingIdentity が誤って実証明書に変わった場合の検出用
+          grep -q 'Signature=adhoc' <<<"$info" || { echo "::error::Signature=adhoc ではありません"; exit 1; }
+          grep -q 'Sealed Resources version=' <<<"$info" || { echo "::error::Sealed Resources が封印されていません"; exit 1; }
+          if grep -q 'linker-signed' <<<"$info"; then
+            echo "::error::リンカー署名のみです（linker-signed）"
+            exit 1
+          fi
+          if grep -q 'Info.plist=not bound' <<<"$info"; then
+            echo "::error::Info.plist が束縛されていません"
+            exit 1
+          fi
 
   windows-portable:
     # macOS/Linux の tauri-action が Release とタグを作成してから、Windows の

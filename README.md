@@ -36,12 +36,11 @@ _[Read this in English](README.en.md)_
 
 #### 未署名アプリの警告について
 
-配布物にコード署名はしていないため、初回起動時にOSが警告を出します。
+配布物は Windows は署名なし、macOS は ad-hoc 署名のみ（Developer ID による署名・公証なし）のため、初回起動時に OS が警告を出します。
 
 - **Windows（SmartScreen）**: 「Windows によって PC が保護されました」と表示されたら、「詳細情報」→「実行」を選びます
-- **macOS（Gatekeeper）**: `Smart Slide Show.app` を `/Applications` へ移して開き、表示された警告に応じて次のどちらかを行います（最近の macOS では右クリック →「開く」では回避できません）
-  - 「壊れているため開けません」と表示された場合（「開く」ボタンが無く、「このまま開く」も出ません）: ターミナルで `xattr -dr com.apple.quarantine "/Applications/Smart Slide Show.app"` を実行してから開き直します（パスにスペースを含むのでクォートが必要です）
-  - 「開発元を確認できません」「開けませんでした」などと表示された場合: 警告を閉じ、「システム設定 → プライバシーとセキュリティ」の下の方に出る「このまま開く」（Open Anyway）を押して、確認ダイアログで承認します
+- **macOS（Gatekeeper）**: 公証はしていません（ad-hoc 署名のみ）。初回は `Smart Slide Show.app` を `/Applications` へ移して開き、警告を閉じてから「システム設定 → プライバシーとセキュリティ」の下の方に出る「このまま開く」（Open Anyway）を押し、確認ダイアログで承認します（最近の macOS では右クリック →「開く」では回避できません）
+  - v1.2.1 以前の配布物、または「壊れているため開けません」と表示されて「このまま開く」も出ない場合の最後の手段: ターミナルで `xattr -dr com.apple.quarantine "/Applications/Smart Slide Show.app"` を実行してから開き直します（パスにスペースを含むのでクォートが必要です）
 - **Linux**: 警告はありません。AppImage は `chmod +x Smart.Slide.Show_*_amd64.AppImage` で実行権限を付けてから起動します
 
 Windows の ZIP は任意のフォルダへ展開して `sss.exe` を実行します。ZIP には WebView2 Runtime が含まれていないため、事前に [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/consumer/) をインストールしておく必要があります（Windows 11 と、更新済みの Windows 10 には通常すでに入っています）。起動しない場合は公式ダウンロードページから Evergreen 版を入れてください。インストール、ショートカット作成、アンインストール操作は不要です。設定・表示履歴・キャッシュは Windows のユーザーアプリデータ領域に保存されます。

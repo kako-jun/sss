@@ -10,7 +10,7 @@
 
 Windows・Linux・macOSのすべてで同じ操作感を提供します。ファイルマネージャーとの連携もOS別に実装されています（Windows: エクスプローラー、macOS: Finder、Linux: nautilus / dolphin / xdg-open）。
 
-配布物（[Releases](https://github.com/kako-jun/sss/releases)）にはコード署名をしていないため、初回起動時に Windows SmartScreen / macOS Gatekeeper の警告が出ます。回避手順（macOS の「壊れているため開けません」への対処を含む）は README を参照してください。
+配布物（[Releases](https://github.com/kako-jun/sss/releases)）は Windows は署名なし、macOS は ad-hoc 署名のみ（Developer ID による署名・公証なし）のため、初回起動時に Windows SmartScreen / macOS Gatekeeper の警告が出ます。回避手順（macOS の「壊れているため開けません」への対処を含む）は README を参照してください。
 
 ### Windows の前提: WebView2 Runtime
 
