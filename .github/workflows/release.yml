@@ -39,7 +39,7 @@ jobs:
             exit 1
           fi
 
-          if ! [[ "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+          if ! [[ "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::version の形式が不正です（例: v1.0.0, v1.0.0-beta.1）: $INPUT_VERSION"
             exit 1
           fi
@@ -322,8 +322,8 @@ jobs:
           PRERELEASE: ${{ needs.validate.outputs.prerelease }}
         run: |
           set -euo pipefail
-          # プレリリース版は Latest にしない。make_latest は文字列（"true"/"false"）で渡すため -f を使う
-          if [ "$PRERELEASE" = "true" ]; then MAKE_LATEST=false; else MAKE_LATEST=true; fi
+          # プレリリース版は Latest にしない。通常版は legacy（GitHub が作成日時と semver で Latest を決める）にして旧系列の修正版で Latest が巻き戻らないようにする。make_latest は文字列（"false"/"legacy"）で渡すため -f を使う
+          if [ "$PRERELEASE" = "true" ]; then MAKE_LATEST=false; else MAKE_LATEST=legacy; fi
           if ! gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -f make_latest="$MAKE_LATEST"; then
             echo "::error::Release の公開に失敗しました。全ジョブを再実行すれば draft は作り直されます"
             exit 1
