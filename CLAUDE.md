@@ -488,7 +488,7 @@ CREATE TABLE app_settings (
 
 ### src-tauri/src/scan_service.rs / shared.rs / playlist_persistence.rs（#146）
 
-- `scan_service.rs`: スキャン・復元のドメインロジック（`perform_scan`/`scan_chosen_directory`/`perform_rescan_last_directory`/`perform_restore`/`resolve_captured_dates`/`.sssignore` 移行、`ScanProgress`/`LAST_DIRECTORY_KEY`）。**`tauri` を import しない**。進捗は `FnMut(usize, usize)` コールバックで渡し、イベント送出・asset scope 許可は `commands/scan.rs` が行う
+- `scan_service.rs`: スキャン・復元のドメインロジック（`perform_scan`/`scan_chosen_directory`/`perform_rescan_last_directory`/`perform_restore`/`resolve_captured_dates`/`.sssignore` 移行、`ScanProgress`。`LAST_DIRECTORY_KEY` は `settings_store.rs`）。**`tauri` を import しない**。進捗は `FnMut(usize, usize)` コールバックで渡し、イベント送出・asset scope 許可は `commands/scan.rs` が行う
 - `shared.rs`: 複数コマンドが共有する部品（`ScanGuard`、`acquire_dialog_guard`/`DIALOG_IN_PROGRESS`、`home_pictures_dir`）。**`commands/*` 同士は互いを参照しない**（例外は `commands/types.rs` の `AppState`/`ExcludeOutcome`＝コマンド層共通の状態型のみ）。共有したいものはここ（または `scan_service`/`playlist_persistence` 等のドメインモジュール）へ置く
 - `settings_store.rs`: 設定キー定数・`WRITABLE_SETTING_KEYS`・`BOOL_SETTING_DEFAULTS`・`parse_bool_setting`/`get_bool_setting`（キー集合の正本。vitest `settingKeys.test.ts` がこのファイルを直接読む）。`dialog.rs`: `DirectoryPicker` trait・`TauriDirectoryPicker`・`PrePicked`（コマンドではない）
 - `playlist_persistence.rs`: プレイリスト永続化ヘルパー（`normalize_directory_key`/`save_full`/`save_position`）。旧 `commands/playlist_persistence.rs`
