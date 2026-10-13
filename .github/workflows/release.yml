@@ -237,7 +237,7 @@ jobs:
           fi
 
   windows-portable:
-    # macOS/Linux の tauri-action が作った draft Release へ、Windows の
+    # create-release が作った draft Release へ（id 指定で）、Windows の
     # portable ZIP を追加する。NSIS/WiX installer は生成しない。
     needs: [create-release, build]
     runs-on: windows-latest
@@ -287,9 +287,9 @@ jobs:
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
         run: |
-          # draft Release はタグ名では引けないため、release id を指定して API でアップロードする（draft は毎回新規作成なので同名資産は無い）
+          # draft Release はタグ名では引けないため、release id を指定して API でアップロードする（draft は毎回新規作成なので同名資産は無い。失敗ジョブのみの再実行では 422 already_exists になりうる。全ジョブ再実行で draft ごと作り直す）
           $name = [System.IO.Path]::GetFileName($env:ARCHIVE)
-          gh api -X POST "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=$name" -H "Content-Type: application/zip" --input $env:ARCHIVE
+          gh api -X POST "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=$name" -H "Content-Type: application/zip" --silent --input $env:ARCHIVE
           if ($LASTEXITCODE -ne 0) { throw "ZIP のアップロードに失敗しました。全ジョブを再実行すれば draft は作り直されます" }
 
   publish:
