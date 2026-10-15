@@ -6,7 +6,7 @@
 | ------- | --------------------------------------------------------------------------------------------- |
 | Windows | 対応（CI は windows-latest でビルド・テスト。配布物は portable ZIP。WebView2 Runtime が必要） |
 | Linux   | 対応（CI は Ubuntu 22.04 でビルド・テスト。WebKitGTK 4.1 が必要。AppImage / deb / rpm）       |
-| macOS   | 対応（CI は macos-latest でビルド・テスト。配布物は universal の `.dmg`）                     |
+| macOS   | Apple Silicon に対応（CI は macos-latest でビルド・テスト。配布物は aarch64 の `.dmg`）       |
 
 Windows・Linux・macOSのすべてで同じ操作感を提供します。ファイルマネージャーとの連携もOS別に実装されています（Windows: エクスプローラー、macOS: Finder、Linux: nautilus / dolphin / xdg-open）。
 

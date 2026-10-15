@@ -26,13 +26,13 @@ _[Read this in English](README.en.md)_
 
 [Releases](https://github.com/kako-jun/sss/releases) から、お使いのOS向けのファイルをダウンロードします。
 
-| OS      | ファイル                                                                                                       |
-| ------- | -------------------------------------------------------------------------------------------------------------- |
-| Windows | `Smart.Slide.Show_*_x64-portable.zip`（展開して `sss.exe` を実行。WebView2 Runtime が必要）                    |
-| macOS   | `Smart.Slide.Show_*_universal.dmg`（Apple Silicon / Intel 共通。開くと `Smart Slide Show.app` が入っています） |
-| Linux   | `Smart.Slide.Show_*_amd64.AppImage` / `Smart.Slide.Show_*_amd64.deb` / `Smart.Slide.Show-*.x86_64.rpm`         |
+| OS      | ファイル                                                                                               |
+| ------- | ------------------------------------------------------------------------------------------------------ |
+| Windows | `Smart.Slide.Show_*_x64-portable.zip`（展開して `sss.exe` を実行。WebView2 Runtime が必要）            |
+| macOS   | `Smart.Slide.Show_*_aarch64.dmg`（Apple Silicon 対応。開くと `Smart Slide Show.app` が入っています）   |
+| Linux   | `Smart.Slide.Show_*_amd64.AppImage` / `Smart.Slide.Show_*_amd64.deb` / `Smart.Slide.Show-*.x86_64.rpm` |
 
-実際のファイル名の例（v1.2.1）: `Smart.Slide.Show_1.2.1_x64-portable.zip` / `Smart.Slide.Show_1.2.1_universal.dmg` / `Smart.Slide.Show_1.2.1_amd64.AppImage` / `Smart.Slide.Show_1.2.1_amd64.deb` / `Smart.Slide.Show-1.2.1-1.x86_64.rpm`
+移行前の v1.2.1 の実際のファイル名: `Smart.Slide.Show_1.2.1_x64-portable.zip` / `Smart.Slide.Show_1.2.1_universal.dmg` / `Smart.Slide.Show_1.2.1_amd64.AppImage` / `Smart.Slide.Show_1.2.1_amd64.deb` / `Smart.Slide.Show-1.2.1-1.x86_64.rpm`
 
 #### 未署名アプリの警告について
 

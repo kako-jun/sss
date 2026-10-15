@@ -29,10 +29,10 @@ Download the file for your OS from [Releases](https://github.com/kako-jun/sss/re
 | OS      | File                                                                                                   |
 | ------- | ------------------------------------------------------------------------------------------------------ |
 | Windows | `Smart.Slide.Show_*_x64-portable.zip` (extract and run `sss.exe`; requires the WebView2 Runtime)       |
-| macOS   | `Smart.Slide.Show_*_universal.dmg` (Apple Silicon and Intel; contains `Smart Slide Show.app`)          |
+| macOS   | `Smart.Slide.Show_*_aarch64.dmg` (Apple Silicon; contains `Smart Slide Show.app`)                      |
 | Linux   | `Smart.Slide.Show_*_amd64.AppImage` / `Smart.Slide.Show_*_amd64.deb` / `Smart.Slide.Show-*.x86_64.rpm` |
 
-Example of the real file names (v1.2.1): `Smart.Slide.Show_1.2.1_x64-portable.zip` / `Smart.Slide.Show_1.2.1_universal.dmg` / `Smart.Slide.Show_1.2.1_amd64.AppImage` / `Smart.Slide.Show_1.2.1_amd64.deb` / `Smart.Slide.Show-1.2.1-1.x86_64.rpm`
+Actual file names from the pre-migration v1.2.1: `Smart.Slide.Show_1.2.1_x64-portable.zip` / `Smart.Slide.Show_1.2.1_universal.dmg` / `Smart.Slide.Show_1.2.1_amd64.AppImage` / `Smart.Slide.Show_1.2.1_amd64.deb` / `Smart.Slide.Show-1.2.1-1.x86_64.rpm`
 
 #### About the unsigned app warning
 

@@ -16,12 +16,13 @@
       "icons/icon.ico"
     ],
     "macOS": {
+      "minimumSystemVersion": "12.0",
       "signingIdentity": "-"
     }
   },
   "productName": "Smart Slide Show",
   "mainBinaryName": "sss",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "identifier": "com.kakojun.sss",
   "plugins": {},
   "app": {

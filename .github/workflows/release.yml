@@ -182,7 +182,7 @@ jobs:
       matrix:
         include:
           - platform: 'macos-latest'
-            args: '--target universal-apple-darwin'
+            args: '--target aarch64-apple-darwin'
           - platform: 'ubuntu-22.04'
             args: ''
 
@@ -199,7 +199,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -230,7 +230,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          apps=(src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app)
+          apps=(src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app)
           if [ "${#apps[@]}" -ne 1 ]; then
             echo "::error::.app が 1 つ見つかりません: ${apps[*]:-なし}"
             exit 1

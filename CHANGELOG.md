@@ -7,6 +7,12 @@ Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-15
+
+### Changed
+
+- デスクトップ配布の対象を Apple Silicon macOS（macOS 12.0以降）・Linux x64・Windows x64 に統一。macOS の universal（Intelを含む）ビルドを止め、Apple Silicon 用の `.dmg` を同じ draft→publish ゲートで Linux / Windows の成果物と揃えてから公開する (#163)
+
 ### Fixed
 
 - macOS のバンドルを ad-hoc 署名する（`bundle.macOS.signingIdentity: "-"`）。従来の `.app` はリンカーによる署名のみで Info.plist が束縛されず、隔離属性付きでダウンロードすると「壊れているため開けません」となり「このまま開く」も出なかった。リソースが封印された署名にすることで、標準の「システム設定 → プライバシーとセキュリティ → このまま開く」で開けるようにする。公証はしない。README の手順を追従 (#154)
