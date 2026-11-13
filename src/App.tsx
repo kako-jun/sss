@@ -155,7 +155,11 @@ function App() {
   useLocaleSync(locale, t);
 
   // #103: ウィンドウモード切替の失敗通知は windowModeError に集約する。
-  const { isFullscreen, toggleWindowMode: handleToggleWindowMode } = useWindowMode(
+  const {
+    isFullscreen,
+    needsDragRegion,
+    toggleWindowMode: handleToggleWindowMode,
+  } = useWindowMode(
     t,
     (text) => setWindowModeError((prev) => ({ text, seq: (prev?.seq ?? 0) + 1 })),
     () => setWindowModeError(null),
@@ -547,6 +551,17 @@ function App() {
             {windowModeError.text}
           </div>
         </div>
+      )}
+
+      {/* #164: ウィンドウモードなのに OS のタイトルバーが無い環境（Wayland で装飾を後付け
+          できない場合）向けのドラッグ領域。右上ピルを避け、細い帯で掴んで移動できる。
+          装飾がある環境（x11 / Windows / macOS）では出さない。 */}
+      {needsDragRegion && (
+        <div
+          data-tauri-drag-region
+          data-testid="window-drag-region"
+          className="fixed top-0 left-0 right-[11rem] h-6 z-40 cursor-grab"
+        />
       )}
 
       {/* 右上の常設ボタン（終了・ショートカット・ウィンドウモード・設定）。

@@ -300,9 +300,13 @@ describe('capability と src の Tauri API 呼び出しの整合 (#103)', () => 
   });
 
   it('does not grant window permissions that the app does not use (least privilege)', () => {
-    const neededByTable = new Set(
-      usedWindowMethods().map((u) => WINDOW_METHOD_PERMISSIONS[u.method]),
-    );
+    // メソッド呼び出しでなく HTML 属性で使う権限（#164: `data-tauri-drag-region` は
+    // 内部で start_dragging を呼ぶ）。属性が src にあるときだけ必要とみなす。
+    const usesDragRegion = sources.some(({ text }) => text.includes('data-tauri-drag-region'));
+    const neededByTable = new Set([
+      ...usedWindowMethods().map((u) => WINDOW_METHOD_PERMISSIONS[u.method]),
+      ...(usesDragRegion ? ['core:window:allow-start-dragging'] : []),
+    ]);
     const extra = [...granted].filter((p) => p.startsWith('core:window:') && !neededByTable.has(p));
     expect(extra).toEqual([]);
   });

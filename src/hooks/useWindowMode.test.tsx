@@ -4,6 +4,7 @@ import { renderHook, waitFor, act } from '@testing-library/react';
 
 const win = {
   isFullscreen: vi.fn(),
+  isDecorated: vi.fn(),
   onResized: vi.fn(),
   setFullscreen: vi.fn(),
   setDecorations: vi.fn(),
@@ -33,6 +34,7 @@ beforeEach(() => {
   });
   win.setFullscreen.mockReset().mockResolvedValue(undefined);
   win.setDecorations.mockReset().mockResolvedValue(undefined);
+  win.isDecorated.mockReset().mockResolvedValue(false);
 });
 
 function setup() {

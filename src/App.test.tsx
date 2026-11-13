@@ -42,6 +42,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 const win = {
   isFullscreen: vi.fn(),
+  isDecorated: vi.fn(),
   onResized: vi.fn(),
   setFullscreen: vi.fn(),
   setDecorations: vi.fn(),
@@ -134,6 +135,7 @@ beforeEach(() => {
   win.onResized.mockReset().mockResolvedValue(() => {});
   win.setFullscreen.mockReset().mockResolvedValue(undefined);
   win.setDecorations.mockReset().mockResolvedValue(undefined);
+  win.isDecorated.mockReset().mockResolvedValue(false);
   win.setTitle.mockReset().mockResolvedValue(undefined);
 });
 

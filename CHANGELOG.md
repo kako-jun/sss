@@ -7,6 +7,10 @@ Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Linux Wayland（COSMIC 等）でウィンドウモードに切り替えてもタイトルバーが出ずウィンドウを移動できない問題を修正。起動時に装飾なしで作ったウィンドウに Wayland では実行時に装飾を後付けできないため、`isDecorated()` で装飾の実態を読み、ウィンドウモードなのに装飾が無いときだけ画面上端にアプリ内のドラッグ領域（`data-tauri-drag-region`、`core:window:allow-start-dragging` 権限）を出して掴んで動かせるようにした。x11 / Windows / macOS（装飾が付く環境）と、起動時の全画面・装飾なしの挙動は変えない (#164)
+
 ## [1.2.2] - 2026-10-15
 
 ### Changed

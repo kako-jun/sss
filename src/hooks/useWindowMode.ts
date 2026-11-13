@@ -10,6 +10,11 @@ import type { Translate } from '../lib/i18n';
  * - 切替が失敗したら `notifyFailure` で通知し、片方だけ成功した場合に表示と OS の
  *   実態がずれないよう実態から再同期する（#103）。
  *
+ * - 装飾（タイトルバー）の実態も `isDecorated()` で同期する（#164）。Wayland では装飾なしで
+ *   作成したウィンドウに実行時 `setDecorations(true)` を呼んでも装飾が付かないことがある。
+ *   その場合 `needsDragRegion`（ウィンドウモードなのに装飾が無い）が true になり、呼び出し側が
+ *   アプリ内のドラッグ領域を出してウィンドウを移動できるようにする。
+ *
  * 返す `toggleWindowMode` は毎レンダー作り直される（`isFullscreen` を閉じ込めるため）。
  * 一度だけ登録するリスナーから呼ぶ側は ref 経由で最新を読むこと。
  */
@@ -17,14 +22,26 @@ export function useWindowMode(
   t: Translate,
   notifyFailure: (text: string) => void,
   notifyCleared: () => void,
-): { isFullscreen: boolean; toggleWindowMode: () => Promise<void> } {
+): { isFullscreen: boolean; needsDragRegion: boolean; toggleWindowMode: () => Promise<void> } {
   // 起動時の設定値（全画面）に合わせた初期値
   const [isFullscreen, setIsFullscreen] = useState(true);
+  // 起動時の設定値（装飾なし）に合わせた初期値。OS の実態は同期で上書きする（#164）
+  const [isDecorated, setIsDecorated] = useState(false);
 
   // フルスクリーン状態をOSの実態と同期
   useEffect(() => {
     let cancelled = false;
     const win = getCurrentWindow();
+    // 装飾の実態を取得（取得できなければ現状維持）
+    const syncDecorated = () => {
+      Promise.resolve()
+        .then(() => win.isDecorated())
+        .then((v) => {
+          if (!cancelled) setIsDecorated(v);
+        })
+        .catch(() => {});
+    };
+    syncDecorated();
     // 初期値を実態から取得
     win
       .isFullscreen()
@@ -36,6 +53,7 @@ export function useWindowMode(
     let cleanup: (() => void) | null = null;
     const listenerPromise = win
       .onResized(() => {
+        syncDecorated();
         win
           .isFullscreen()
           .then((v) => {
@@ -63,6 +81,8 @@ export function useWindowMode(
       // フルスクリーン時は decorations を非表示に戻す
       await win.setDecorations(!next);
       setIsFullscreen(next);
+      // Wayland では setDecorations(true) が効かないことがあるため、成否ではなく実態を読む（#164）
+      setIsDecorated(await win.isDecorated().catch(() => !next));
       notifyCleared();
     } catch (err) {
       console.error('Failed to toggle window mode:', err);
@@ -83,5 +103,5 @@ export function useWindowMode(
     }
   };
 
-  return { isFullscreen, toggleWindowMode };
+  return { isFullscreen, needsDragRegion: !isFullscreen && !isDecorated, toggleWindowMode };
 }
