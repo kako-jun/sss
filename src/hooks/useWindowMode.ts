@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Translate } from '../lib/i18n';
 
@@ -25,8 +25,11 @@ export function useWindowMode(
 ): { isFullscreen: boolean; needsDragRegion: boolean; toggleWindowMode: () => Promise<void> } {
   // 起動時の設定値（全画面）に合わせた初期値
   const [isFullscreen, setIsFullscreen] = useState(true);
-  // 起動時の設定値（装飾なし）に合わせた初期値。OS の実態は同期で上書きする（#164）
-  const [isDecorated, setIsDecorated] = useState(false);
+  // 装飾の実態。null = 未確定。確定するまで needsDragRegion を出さない（起動時の2つの非同期取得の
+  // 解決順で一瞬帯が出るのを防ぐ。取得できなければ未確定のまま = 帯なしの現状維持）（#164）
+  const [isDecorated, setIsDecorated] = useState<boolean | null>(null);
+  // isDecorated 応答の世代。古い応答が新しい応答を上書きしないよう、最新の世代だけ反映する
+  const decoratedSeq = useRef(0);
 
   // フルスクリーン状態をOSの実態と同期
   useEffect(() => {
@@ -34,10 +37,11 @@ export function useWindowMode(
     const win = getCurrentWindow();
     // 装飾の実態を取得（取得できなければ現状維持）
     const syncDecorated = () => {
+      const seq = ++decoratedSeq.current;
       Promise.resolve()
         .then(() => win.isDecorated())
         .then((v) => {
-          if (!cancelled) setIsDecorated(v);
+          if (!cancelled && seq === decoratedSeq.current) setIsDecorated(v);
         })
         .catch(() => {});
     };
@@ -82,7 +86,9 @@ export function useWindowMode(
       await win.setDecorations(!next);
       setIsFullscreen(next);
       // Wayland では setDecorations(true) が効かないことがあるため、成否ではなく実態を読む（#164）
-      setIsDecorated(await win.isDecorated().catch(() => !next));
+      const seq = ++decoratedSeq.current;
+      const decorated = await win.isDecorated().catch(() => !next);
+      if (seq === decoratedSeq.current) setIsDecorated(decorated);
       notifyCleared();
     } catch (err) {
       console.error('Failed to toggle window mode:', err);
@@ -96,6 +102,10 @@ export function useWindowMode(
         await win.setDecorations(!actual).catch((decErr) => {
           console.error('Failed to re-sync window decorations:', decErr);
         });
+        // 再試行で装飾の実態が変わりうるので読み直す。読めなければ未確定（帯なし）に戻す
+        const seq = ++decoratedSeq.current;
+        const decorated = await win.isDecorated().catch(() => null);
+        if (seq === decoratedSeq.current) setIsDecorated(decorated);
       } catch (syncErr) {
         // 実態も取れなければ現状維持
         console.error('Failed to re-sync window mode:', syncErr);
@@ -103,5 +113,9 @@ export function useWindowMode(
     }
   };
 
-  return { isFullscreen, needsDragRegion: !isFullscreen && !isDecorated, toggleWindowMode };
+  return {
+    isFullscreen,
+    needsDragRegion: !isFullscreen && isDecorated === false,
+    toggleWindowMode,
+  };
 }
