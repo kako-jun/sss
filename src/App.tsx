@@ -41,6 +41,11 @@ import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 import { ConfirmDialogHost } from './components/ConfirmDialog';
 import { createClickDebouncer, createWheelNavigator } from './lib/photoGestures';
 
+// 画面上端の要素が右上の常設ピル（約9rem幅 + 余白）と重ならないよう右端を空ける幅。
+// ウィンドウモード切替失敗の通知枠（#103）とドラッグ領域の帯（#164）で共有する。
+// Tailwind はソース中のクラス名文字列を走査するため、完全なクラス名のまま持つ。
+const CLEAR_TOP_RIGHT_PILL = 'right-[11rem]';
+
 function App() {
   const t = useT();
   const locale = useLocale();
@@ -511,16 +516,16 @@ function App() {
     );
   }
 
+  // #66 問題3: idle（3秒間マウス非操作）中はカーソルも隠す。写真が主役の
+  // 鑑賞アプリなので、操作UIだけでなくカーソル自体も消して邪魔しない。
+  // 設定モーダル・ショートカット一覧を開いている間はUIを操作中なので対象外
+  // にする（#66レビューshould: ショートカット一覧を読んでいる間にカーソルが
+  // 消えるのは不自然）。
+  const hideCursor = isIdle && !isSettingsOpen && !isShortcutsOpen;
+
   return (
     <div
-      // #66 問題3: idle（3秒間マウス非操作）中はカーソルも隠す。写真が主役の
-      // 鑑賞アプリなので、操作UIだけでなくカーソル自体も消して邪魔しない。
-      // 設定モーダル・ショートカット一覧を開いている間はUIを操作中なので対象外
-      // にする（#66レビューshould: ショートカット一覧を読んでいる間にカーソルが
-      // 消えるのは不自然）。
-      className={`w-screen h-screen bg-black overflow-hidden${
-        isIdle && !isSettingsOpen && !isShortcutsOpen ? ' cursor-none' : ''
-      }`}
+      className={`w-screen h-screen bg-black overflow-hidden${hideCursor ? ' cursor-none' : ''}`}
     >
       {/* スライドショー。#78: 写真上のクリック=一時停止/再開、ホイール/横スワイプ=前/次。
           `display: contents` のラッパーはレイアウトに影響せず、写真領域だけでイベントを拾う。 */}
@@ -542,7 +547,9 @@ function App() {
         // （約9rem幅）と重ならないよう、右端を空けた枠の中で中央寄せする（#103）。枠自体は
         // pointer-events-none で写真上のクリック/ホイールを吸わない。長い通知（フォールバックの旨など）は
         // 切り詰めず折り返して全文を見せる（狭幅でも読める）。通知本体だけ pointer-events-auto にする。
-        <div className="fixed top-4 left-4 right-[11rem] z-50 flex justify-center pointer-events-none">
+        <div
+          className={`fixed top-4 left-4 ${CLEAR_TOP_RIGHT_PILL} z-50 flex justify-center pointer-events-none`}
+        >
           <div
             role="alert"
             title={windowModeError.text}
@@ -553,14 +560,18 @@ function App() {
         </div>
       )}
 
-      {/* #164: ウィンドウモードなのに OS のタイトルバーが無い環境（Wayland で装飾を後付け
-          できない場合）向けのドラッグ領域。右上ピルを避け、細い帯で掴んで移動できる。
-          装飾がある環境（x11 / Windows / macOS）では出さない。 */}
+      {/* #164: ウィンドウモードなのに OS のタイトルバーが使えない環境（Wayland。装飾を後付け
+          しても空のタイトルバーのまま）向けのドラッグ領域。右上ピルを避け、細い帯で掴んで
+          移動できる。装飾がある環境（x11 / Windows / macOS）では出さない。
+          z-[45]: 案内画面の幕（fixed inset-0 z-40）より上に置き、初回起動・空・接続不可の
+          画面でも掴めるようにする。設定画面（z-50）には覆われてよい。
+          写真クリック（一時停止/再開）のラッパーの兄弟なので、帯のクリックは一時停止にならない。
+          idle 中は親の cursor-none を子の cursor-grab が上書きしないよう、掴み手カーソルを外す。 */}
       {needsDragRegion && (
         <div
           data-tauri-drag-region
           data-testid="window-drag-region"
-          className="fixed top-0 left-0 right-[11rem] h-6 z-40 cursor-grab"
+          className={`fixed top-0 left-0 ${CLEAR_TOP_RIGHT_PILL} h-6 z-[45]${hideCursor ? '' : ' cursor-grab'}`}
         />
       )}
 
