@@ -22,6 +22,7 @@ const getNextImage = vi.fn();
 const getPreviousImage = vi.fn();
 const undoDisplayCount = vi.fn();
 const getOsLocale = vi.fn();
+const isWaylandSession = vi.fn();
 
 vi.mock('./lib/tauri', () => ({
   getSetting: (...a: unknown[]) => getSetting(...a),
@@ -33,6 +34,7 @@ vi.mock('./lib/tauri', () => ({
   getPreviousImage: (...a: unknown[]) => getPreviousImage(...a),
   undoDisplayCount: (...a: unknown[]) => undoDisplayCount(...a),
   getOsLocale: (...a: unknown[]) => getOsLocale(...a),
+  isWaylandSession: (...a: unknown[]) => isWaylandSession(...a),
 }));
 
 const listen = vi.fn();
@@ -42,6 +44,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 const win = {
   isFullscreen: vi.fn(),
+  isDecorated: vi.fn(),
   onResized: vi.fn(),
   setFullscreen: vi.fn(),
   setDecorations: vi.fn(),
@@ -126,6 +129,7 @@ beforeEach(() => {
   getPreviousImage.mockReset().mockResolvedValue({ kind: 'noHistory' });
   undoDisplayCount.mockReset().mockResolvedValue(undefined);
   getOsLocale.mockReset().mockResolvedValue(null); // 既定: OSロケール取得不可 → navigator.languageにフォールバック
+  isWaylandSession.mockReset().mockResolvedValue(false); // 既定: 非 Wayland（#164）
   listen.mockReset().mockResolvedValue(() => {});
   invoke.mockReset().mockResolvedValue(undefined);
   exit.mockReset();
@@ -134,6 +138,7 @@ beforeEach(() => {
   win.onResized.mockReset().mockResolvedValue(() => {});
   win.setFullscreen.mockReset().mockResolvedValue(undefined);
   win.setDecorations.mockReset().mockResolvedValue(undefined);
+  win.isDecorated.mockReset().mockResolvedValue(false);
   win.setTitle.mockReset().mockResolvedValue(undefined);
 });
 
@@ -1324,5 +1329,128 @@ describe('App map thumbnail setting wiring (#145)', () => {
     await waitFor(() => expect(screen.queryByAltText(MAP_ALT)).toBeNull());
     fireEvent.click(screen.getByTestId('stub-map-on'));
     await waitFor(() => expect(screen.getByAltText(MAP_ALT)).toBeTruthy());
+  });
+});
+
+// #164: ウィンドウモードなのに OS のタイトルバーが無い環境（Wayland）向けのドラッグ領域。
+// 注: @testing-library/user-event は未導入のため、ボタン操作は fireEvent.click で確認する。
+describe('window drag region (#164)', () => {
+  const DRAG = 'window-drag-region';
+
+  async function renderWelcome() {
+    getLastDirectoryPath.mockResolvedValue(null);
+    const view = render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('ようこそ Smart Slide Show へ')).toBeTruthy();
+    });
+    return view;
+  }
+
+  it('does not render the band on signage startup (fullscreen, undecorated)', async () => {
+    win.isFullscreen.mockResolvedValue(true);
+    win.isDecorated.mockResolvedValue(false);
+    await renderWelcome();
+    await waitFor(() => expect(win.isDecorated).toHaveBeenCalled());
+    await waitFor(() => expect(win.isFullscreen).toHaveBeenCalled());
+    expect(screen.queryByTestId(DRAG)).toBeNull();
+  });
+
+  it('does not render the band in window mode when the window is decorated', async () => {
+    win.isFullscreen.mockResolvedValue(false);
+    win.isDecorated.mockResolvedValue(true);
+    await renderWelcome();
+    await waitFor(() => expect(screen.getByTitle('フルスクリーンに戻す')).toBeTruthy());
+    await waitFor(() => expect(win.isDecorated).toHaveBeenCalled());
+    expect(screen.queryByTestId(DRAG)).toBeNull();
+  });
+
+  it('renders the band with data-tauri-drag-region in window mode without decorations', async () => {
+    win.isFullscreen.mockResolvedValue(false);
+    win.isDecorated.mockResolvedValue(false);
+    await renderWelcome();
+    const band = await screen.findByTestId(DRAG);
+    expect(band.hasAttribute('data-tauri-drag-region')).toBe(true);
+  });
+
+  it('removes the band when returning to fullscreen', async () => {
+    win.isFullscreen.mockResolvedValue(false);
+    win.isDecorated.mockResolvedValue(false);
+    await renderWelcome();
+    await screen.findByTestId(DRAG);
+    fireEvent.click(screen.getByTitle('フルスクリーンに戻す'));
+    await waitFor(() => expect(win.setFullscreen).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(screen.queryByTestId(DRAG)).toBeNull());
+  });
+
+  it('keeps the band apart from the top-right pill so the pill buttons stay clickable', async () => {
+    win.isFullscreen.mockResolvedValue(false);
+    win.isDecorated.mockResolvedValue(false);
+    await renderWelcome();
+    const band = await screen.findByTestId(DRAG);
+    const pillButton = screen.getByTitle('フルスクリーンに戻す');
+    expect(band.contains(pillButton)).toBe(false);
+    expect(pillButton.closest('[data-tauri-drag-region]')).toBeNull();
+    const pill = pillButton.parentElement!.parentElement!;
+    expect(pill.contains(band)).toBe(false);
+    // ピルのボタンが実際に押せる（ウィンドウモード→フルスクリーンへ切替わる）
+    fireEvent.click(pillButton);
+    await waitFor(() => expect(win.setFullscreen).toHaveBeenCalledWith(true));
+  });
+
+  it('logs no unexpected console.error while the band toggles on and off', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    win.isFullscreen.mockResolvedValue(false);
+    win.isDecorated.mockResolvedValue(false);
+    await renderWelcome();
+    await screen.findByTestId(DRAG);
+    fireEvent.click(screen.getByTitle('フルスクリーンに戻す'));
+    await waitFor(() => expect(screen.queryByTestId(DRAG)).toBeNull());
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  // must M1: Wayland では装飾を後付けしても isDecorated() が true を返すが、見た目は空の
+  // タイトルバーのまま。バックエンド判定（isWaylandSession）で帯を出す。
+  it('renders the band on Wayland in window mode even when isDecorated() is true', async () => {
+    isWaylandSession.mockResolvedValue(true);
+    win.isFullscreen.mockResolvedValue(false);
+    win.isDecorated.mockResolvedValue(true);
+    await renderWelcome();
+    const band = await screen.findByTestId(DRAG);
+    expect(band.hasAttribute('data-tauri-drag-region')).toBe(true);
+  });
+
+  it('does not render the band on Wayland while fullscreen', async () => {
+    isWaylandSession.mockResolvedValue(true);
+    win.isFullscreen.mockResolvedValue(true);
+    win.isDecorated.mockResolvedValue(true);
+    await renderWelcome();
+    await waitFor(() => expect(isWaylandSession).toHaveBeenCalled());
+    await waitFor(() => expect(win.isFullscreen).toHaveBeenCalled());
+    expect(screen.queryByTestId(DRAG)).toBeNull();
+  });
+
+  // should S1: 案内画面の幕（fixed inset-0 z-40）が後ろの DOM 順で帯を覆わないよう、帯を一段上に置く
+  it('stacks the band above the empty-state overlay (z-40) and below the settings layer (z-50)', async () => {
+    win.isFullscreen.mockResolvedValue(false);
+    win.isDecorated.mockResolvedValue(false);
+    await renderWelcome();
+    const band = await screen.findByTestId(DRAG);
+    expect(band.className).toContain('z-[45]');
+    const overlay = screen.getByText('ようこそ Smart Slide Show へ').closest('.fixed.inset-0');
+    expect(overlay).not.toBeNull();
+    expect(overlay!.className).toContain('z-40');
+  });
+
+  // question: idle 中は親の cursor-none を帯の cursor-grab が上書きしてカーソルが残らないこと
+  it('drops the grab cursor while idle so the hidden cursor is not overridden', async () => {
+    win.isFullscreen.mockResolvedValue(false);
+    win.isDecorated.mockResolvedValue(false);
+    await renderWelcome();
+    const band = await screen.findByTestId(DRAG);
+    // useMouseIdle の初期状態は idle
+    expect(band.className).not.toContain('cursor-grab');
+    fireEvent.mouseMove(window);
+    await waitFor(() => expect(screen.getByTestId(DRAG).className).toContain('cursor-grab'));
   });
 });

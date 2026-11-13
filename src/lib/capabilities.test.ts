@@ -300,10 +300,24 @@ describe('capability と src の Tauri API 呼び出しの整合 (#103)', () => 
   });
 
   it('does not grant window permissions that the app does not use (least privilege)', () => {
-    const neededByTable = new Set(
-      usedWindowMethods().map((u) => WINDOW_METHOD_PERMISSIONS[u.method]),
-    );
+    // メソッド呼び出しでなく HTML 属性で使う権限（#164: `data-tauri-drag-region` は
+    // 内部で start_dragging を呼ぶ）。属性が src にあるときだけ必要とみなす。
+    const usesDragRegion = sources.some(({ text }) => text.includes('data-tauri-drag-region'));
+    const neededByTable = new Set([
+      ...usedWindowMethods().map((u) => WINDOW_METHOD_PERMISSIONS[u.method]),
+      ...(usesDragRegion ? ['core:window:allow-start-dragging'] : []),
+    ]);
     const extra = [...granted].filter((p) => p.startsWith('core:window:') && !neededByTable.has(p));
     expect(extra).toEqual([]);
+  });
+});
+
+describe('data-tauri-drag-region と start-dragging 権限 (#164)', () => {
+  it('grants core:window:allow-start-dragging when src uses data-tauri-drag-region', () => {
+    // 帯（App.tsx）が属性を使っている前提。条件分岐で守るとアサーション0件で通りうるため、
+    // 使用自体も明示的に確かめる（帯を消すならこのテストと権限も一緒に外す）。
+    const usesDragRegion = sources.some(({ text }) => text.includes('data-tauri-drag-region'));
+    expect(usesDragRegion).toBe(true);
+    expect(granted.has('core:window:allow-start-dragging')).toBe(true);
   });
 });

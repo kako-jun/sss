@@ -23,6 +23,7 @@
 - **ホーム/標準ディレクトリ解決**: dirs v7（ピック先の既定 `Pictures/sss-picked` やホーム判定）
 - **スクリーンセーバー抑制**: keepawake v0.6 (クロスプラットフォーム対応)
 - **OSロケール取得**: sys-locale v0.3（`get_os_locale`用。`tauri-plugin-os`は使わない）
+- **表示バックエンド判定**: gtk v0.18（Linux のみ。tauri/tao が既に依存している版。`is_wayland_session`用、#164）
 - **プラグイン**（`lib.rs` の `run()` で登録。`Cargo.toml` の下限は JS 側 `@tauri-apps/plugin-*` の minor に揃える）:
   - tauri-plugin-dialog 2.8 (フォルダ選択ダイアログ。Rust 側 API のみ使用し、JS 側の権限は付与しない #93)
   - tauri-plugin-opener 2.6 (URLを開く。capability は `https://*` のみ許可)
@@ -575,6 +576,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
   27. `get_os_locale`: OSのロケール（例: `ja-JP`）を返す（言語`auto`の決定用、#82）
   28. `rescan_last_directory`: DB保存済みの前回フォルダ（過去にダイアログで選ばれたパス）を再スキャンする。**引数なし**（#93）。起動時の自動スキャン・設定画面の「スキャン」ボタンが使う。保存が無ければ`noLastDirectory`（`restore_playlist` は前回フォルダ無しを正常系として`Ok(false)`で返す。ユーザーが明示操作するスキャンはエラーで知らせる、という意図的な非対称）。選択/再スキャンの失敗コードは拒否したパスを`directoryNotFound:{path}`/`directoryUnsafe:{path}`で返す。**`last_directory_path`は`to_string_lossy`で保存するため、非UTF-8のパス（主にLinux）は保存時に置換文字へ変わり、2回目以降の自動復元・再スキャンが`directoryNotFound`になる既知の制約**（ダイアログでの選択直後のスキャンは正しいパスで成功する）。検証・排他・進捗イベント・asset scope許可・保存は`select_and_scan`と共通（`scan_chosen_directory`）
   29. `select_share_directory`: ピック先をダイアログ（Rust側）で選んで保存する（#93）。検証は`is_acceptable_share_directory`（拒否は`shareDirectoryInvalid`）、保存後にasset scopeへ許可。戻り値は保存パス／`None`（キャンセル）。本体は`perform_select_share_directory`
+  30. `is_wayland_session`: 表示バックエンドが Linux の Wayland かを返す（#164。Linux 以外・判定不能は false）。Wayland では装飾を後付けしても空のタイトルバーのままなのに`isDecorated()`が true を返すため、`useWindowMode`はこれでウィンドウモード中のドラッグ帯を出す（`docs/architecture.md` §6(k)）
 
 ## Reactコンポーネント構成
 
@@ -657,7 +659,7 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 ## セキュリティ設計
 
-- **capability**（`src-tauri/capabilities/main.json`）: `core:default`・`core:window:allow-set-fullscreen`/`allow-set-decorations`/`allow-set-title`（ウィンドウモード切替とタイトル更新。`core:default` には含まれず、無いと呼び出しが黙って拒否されてボタンが無反応になる #103）・`opener:allow-open-url`（`https://*` のみ）・`process:allow-exit` だけ。ウィンドウ状態の保存復元（`tauri-plugin-window-state`）は Rust 側のみで JS から呼ばないため権限不要。`src/lib/capabilities.test.ts` が src 内のウィンドウ API/プラグイン import と main.json を突き合わせて権限の不足・過剰を検出する（新しいウィンドウ API を使う時は同ファイルの対応表と main.json を更新する）。切替失敗時は画面下に `role="alert"` の通知を出す。ファイル読み書きはすべて自前の Tauri コマンド経由で `plugin-fs` は使わない。フォルダ選択ダイアログは Rust 側で開くため `dialog:*` 権限は付与しない（#93。JS から `plugin:dialog|*` は呼べない）
+- **capability**（`src-tauri/capabilities/main.json`）: `core:default`・`core:window:allow-set-fullscreen`/`allow-set-decorations`/`allow-set-title`（ウィンドウモード切替とタイトル更新。`core:default` には含まれず、無いと呼び出しが黙って拒否されてボタンが無反応になる #103）・`core:window:allow-start-dragging`（Wayland で OS のタイトルバーが使えない時のアプリ内ドラッグ領域 `data-tauri-drag-region` 用 #164）・`opener:allow-open-url`（`https://*` のみ）・`process:allow-exit` だけ。ウィンドウ状態の保存復元（`tauri-plugin-window-state`）は Rust 側のみで JS から呼ばないため権限不要。`src/lib/capabilities.test.ts` が src 内のウィンドウ API/プラグイン import と main.json を突き合わせて権限の不足・過剰を検出する（新しいウィンドウ API を使う時は同ファイルの対応表と main.json を更新する）。切替失敗時は画面下に `role="alert"` の通知を出す。ファイル読み書きはすべて自前の Tauri コマンド経由で `plugin-fs` は使わない。フォルダ選択ダイアログは Rust 側で開くため `dialog:*` 権限は付与しない（#93。JS から `plugin:dialog|*` は呼べない）
 - **CSP**（`tauri.conf.json`）: `default-src 'self'`。`img-src` は `'self' asset: https://asset.localhost https://tile.openstreetmap.org data:`、`media-src` は `'self' asset: https://asset.localhost`、`connect-src` は `'self' ipc: http://ipc.localhost https://ipc.localhost`
 - **asset scope**: `tauri.conf.json` の静的 scope は空。キャッシュ・ピック先・スキャン履歴のフォルダ・スキャン対象を、起動時と `select_and_scan`/`rescan_last_directory`/`restore_playlist`/`select_share_directory`/`pick_image` で `sanitize_allow_dir`（相対パス・存在しないパス・ルート等を拒否）を通してから動的に許可する
 - **管理下パス**（#87・#92）: `pick_image`・`get_thumbnail`（静止画）・`open_in_explorer`・`exclude_image`・`undo_exclude` は、DB登録済み（またはピック先フォルダ内）のメディアファイルだけを対象にする。ピック先の設定値もルート・ホーム・システム領域などを拒否する

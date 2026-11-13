@@ -53,6 +53,11 @@ tauri-plugin-process = "2.4"
 # 保存先ディスプレイが外れていれば復元を諦める（プラグイン側で実在モニタとの交差を確認）。
 tauri-plugin-window-state = "2.4"
 
+# #164: 表示バックエンドが Wayland かを判定する（`commands/display.rs`）。tauri/tao が
+# 既に依存している gtk 0.18 系をそのまま使う（新しいクレートは増えない）。
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 # `test` フィーチャは resolver v2 (edition 2021) のため通常ビルドには混入しない。
 # get_next_image 等の #[tauri::command] を tauri::test::mock_app() 経由で
 # 直接呼ぶ結合テスト用（#60: 存在しないファイルで表示回数が加算されないことの検証）。

@@ -1,4 +1,5 @@
 // サブモジュール宣言
+pub mod display;
 pub mod file_operations;
 pub mod image;
 pub mod scan;

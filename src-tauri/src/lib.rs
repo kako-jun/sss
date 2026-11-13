@@ -225,6 +225,7 @@ pub fn run() {
             commands::file_operations::get_thumbnail,
             commands::file_operations::reset_all_display_counts,
             commands::settings::get_os_locale,
+            commands::display::is_wayland_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

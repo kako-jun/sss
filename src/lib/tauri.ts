@@ -149,6 +149,20 @@ export async function getOsLocale(): Promise<string | null> {
 }
 
 /**
+ * 表示バックエンドが Linux の Wayland かを返す（#164）。
+ *
+ * Wayland では装飾なしで作ったウィンドウに後から `setDecorations(true)` を呼んでも、
+ * tao が作成時に入れた空のカスタムタイトルバー（`set_titlebar(EventBox)`）が残るため
+ * OS のタイトルバーは出ないのに、`isDecorated()` は true を返す（GTK の decorated
+ * プロパティをそのまま返すため）。`isDecorated()` では判定できないので、バックエンド
+ * そのものを問い合わせる。Linux 以外は常に false。素の `#[tauri::command]` なので
+ * capability 許可は不要。
+ */
+export async function isWaylandSession(): Promise<boolean> {
+  return await invoke<boolean>('is_wayland_session');
+}
+
+/**
  * ピック：画像をPictures/sss-pickedフォルダにコピー
  */
 export async function pickImage(imagePath: string): Promise<string> {
