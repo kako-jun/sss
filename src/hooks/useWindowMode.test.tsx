@@ -12,6 +12,10 @@ const win = {
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => win,
 }));
+const isWaylandSession = vi.fn();
+vi.mock('../lib/tauri', () => ({
+  isWaylandSession: (...a: unknown[]) => isWaylandSession(...a),
+}));
 
 import { useWindowMode } from './useWindowMode';
 
@@ -35,6 +39,7 @@ beforeEach(() => {
   win.setFullscreen.mockReset().mockResolvedValue(undefined);
   win.setDecorations.mockReset().mockResolvedValue(undefined);
   win.isDecorated.mockReset().mockResolvedValue(false);
+  isWaylandSession.mockReset().mockResolvedValue(false);
 });
 
 function setup() {
@@ -444,5 +449,166 @@ describe('needsDragRegion (#164)', () => {
     await flush();
     expect(result.current.isFullscreen).toBe(state.fs);
     expect(result.current.needsDragRegion).toBe(!state.fs && !state.dec);
+  });
+
+  /** 描画ごとの needsDragRegion を記録するフック描画 */
+  function setupRecording() {
+    const seen: boolean[] = [];
+    const hook = renderHook(() => {
+      const r = useWindowMode(t, onFailure, onCleared);
+      seen.push(r.needsDragRegion);
+      return r;
+    });
+    return { ...hook, seen };
+  }
+
+  // should S2: 全画面→ウィンドウ切替で isFullscreen だけ先に false になると、装飾の読み直し前に
+  // 古い isDecorated(false) と組み合わさって、装飾が付く環境でも帯が一瞬描画されていた。
+  describe('no flash while toggling on a decorating backend (x11 / Windows / macOS)', () => {
+    it('never renders the band while switching fullscreen -> window', async () => {
+      installStatefulWindow({ honorDecorations: true, fullscreen: true });
+      const { result, seen } = setupRecording();
+      await flush();
+      expect(result.current.isFullscreen).toBe(true);
+      await act(async () => {
+        await result.current.toggleWindowMode();
+      });
+      await flush();
+      expect(result.current.isFullscreen).toBe(false);
+      expect(seen).not.toContain(true);
+    });
+
+    it('never renders the band when onResized fires in the middle of the switch', async () => {
+      const state = installStatefulWindow({ honorDecorations: true, fullscreen: true });
+      // 実機同様、setFullscreen の完了時に（装飾がまだ付く前に）onResized が飛ぶ
+      win.setFullscreen.mockImplementation(async (v: boolean) => {
+        await Promise.resolve();
+        state.fs = v;
+        resizeCb?.();
+      });
+      const { result, seen } = setupRecording();
+      await flush();
+      await act(async () => {
+        await result.current.toggleWindowMode();
+      });
+      await flush();
+      expect(result.current.isFullscreen).toBe(false);
+      expect(result.current.needsDragRegion).toBe(false);
+      expect(seen).not.toContain(true);
+    });
+
+    it('never renders the band while switching window -> fullscreen', async () => {
+      const state = installStatefulWindow({ honorDecorations: true, fullscreen: false });
+      state.dec = true;
+      const { result, seen } = setupRecording();
+      await flush();
+      expect(result.current.isFullscreen).toBe(false);
+      await act(async () => {
+        await result.current.toggleWindowMode();
+      });
+      await flush();
+      expect(result.current.isFullscreen).toBe(true);
+      expect(seen).not.toContain(true);
+    });
+  });
+
+  // must M1: tao は Wayland で装飾なしのウィンドウに空のカスタムタイトルバーを入れるため、
+  // setDecorations(true) 後は isDecorated() が true でも OS のタイトルバーは使えない。
+  // ここでは isDecorated() が true を返すモックで、Wayland 判定だけで帯が出ることを確かめる。
+  describe('Wayland (isWaylandSession() === true)', () => {
+    beforeEach(() => {
+      isWaylandSession.mockResolvedValue(true);
+    });
+
+    it('shows the band in window mode even when isDecorated() is true', async () => {
+      const { result } = await setupWith({ fullscreen: false, decorated: true });
+      expect(result.current.isFullscreen).toBe(false);
+      expect(result.current.needsDragRegion).toBe(true);
+    });
+
+    it('does not show the band while fullscreen', async () => {
+      const { result } = await setupWith({ fullscreen: true, decorated: true });
+      expect(result.current.needsDragRegion).toBe(false);
+    });
+
+    it('shows the band after switching to window mode and keeps it on every render until fullscreen again', async () => {
+      // setDecorations(true) が「成功」し isDecorated() も true になる = tao 0.37 の Wayland の実挙動
+      installStatefulWindow({ honorDecorations: true, fullscreen: true });
+      const { result, seen } = setupRecording();
+      await flush();
+      expect(result.current.needsDragRegion).toBe(false);
+      await act(async () => {
+        await result.current.toggleWindowMode();
+      });
+      await flush();
+      expect(result.current.isFullscreen).toBe(false);
+      expect(result.current.needsDragRegion).toBe(true);
+      // 一度出たら、次の全画面切替まで消えない（resize の再同期でも消えない）
+      const firstShown = seen.indexOf(true);
+      await act(async () => {
+        resizeCb!();
+      });
+      await flush();
+      expect(seen.slice(firstShown)).not.toContain(false);
+      await act(async () => {
+        await result.current.toggleWindowMode();
+      });
+      expect(result.current.isFullscreen).toBe(true);
+      expect(result.current.needsDragRegion).toBe(false);
+    });
+
+    it('asks the backend only once (at mount)', async () => {
+      const { result } = await setupWith({ fullscreen: false, decorated: true });
+      await act(async () => {
+        resizeCb!();
+      });
+      await flush();
+      expect(result.current.needsDragRegion).toBe(true);
+      expect(isWaylandSession).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('non-Wayland or unknown backend', () => {
+    it('does not show the band in window mode when decorated (isWaylandSession() === false)', async () => {
+      isWaylandSession.mockResolvedValue(false);
+      const { result } = await setupWith({ fullscreen: false, decorated: true });
+      expect(result.current.isFullscreen).toBe(false);
+      expect(result.current.needsDragRegion).toBe(false);
+    });
+
+    it('treats a failed isWaylandSession() as not Wayland (keeps the previous behavior)', async () => {
+      isWaylandSession.mockRejectedValue(new Error('no command'));
+      const { result } = await setupWith({ fullscreen: false, decorated: true });
+      expect(result.current.needsDragRegion).toBe(false);
+    });
+
+    it('treats a synchronously throwing isWaylandSession() as not Wayland', async () => {
+      isWaylandSession.mockImplementation(() => {
+        throw new Error('sync');
+      });
+      const { result } = await setupWith({ fullscreen: false, decorated: true });
+      expect(result.current.needsDragRegion).toBe(false);
+    });
+  });
+
+  it('does not update state when a toggle finishes after unmount', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    installStatefulWindow({ honorDecorations: true, fullscreen: true });
+    const dec = deferred<boolean>();
+    const { result, unmount } = setup();
+    await flush();
+    win.isDecorated.mockReturnValueOnce(dec.promise);
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.toggleWindowMode();
+    });
+    await flush();
+    unmount();
+    dec.resolve(true);
+    await act(async () => {
+      await pending;
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });
