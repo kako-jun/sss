@@ -311,3 +311,12 @@ describe('capability と src の Tauri API 呼び出しの整合 (#103)', () => 
     expect(extra).toEqual([]);
   });
 });
+
+describe('data-tauri-drag-region と start-dragging 権限 (#164)', () => {
+  it('grants core:window:allow-start-dragging when src uses data-tauri-drag-region', () => {
+    const usesDragRegion = sources.some(({ text }) => text.includes('data-tauri-drag-region'));
+    if (usesDragRegion) {
+      expect(granted.has('core:window:allow-start-dragging')).toBe(true);
+    }
+  });
+});
