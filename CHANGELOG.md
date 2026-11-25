@@ -7,6 +7,10 @@ Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+### Changed
+
+- デスクトップのアプリアイコンを透明背景にし、SSS マークの外周を字間と同じ幅の黒線で囲む。
+
 ## [1.2.2] - 2026-10-15
 
 ### Changed

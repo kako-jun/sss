@@ -667,6 +667,10 @@ reset_core`（Tauri非依存の`pub fn`。`reset_all_data`本体と
 
 ## クロスプラットフォーム対応
 
+デスクトップ用アプリアイコンの原本は [`src-tauri/app-icon.svg`](src-tauri/app-icon.svg)。
+透明な背景に、字間と同じ幅の黒い外枠を付けた SSS マークを置く。
+更新時はリポジトリのルートで `cargo tauri icon src-tauri/app-icon.svg` を実行し、`src-tauri/icons/` 内の既存の配布用ファイルを更新する。
+
 ### Windows
 
 - エクスプローラー連携: `explorer /select,<path>`
