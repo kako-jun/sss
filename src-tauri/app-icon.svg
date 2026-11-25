@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="-16 -16 288 288">
+  <!-- The 20-unit stroke extends 10 units out, matching the gap measured perpendicular to the chevron edges. -->
+  <path
+    fill="#000"
+    stroke="#000"
+    stroke-width="20"
+    stroke-linejoin="round"
+    d="M58 37 H249.194 L196.600 102.742 L248.720 154.862 L199.384 219 H8 L58 154 L6 102 Z"
+  />
+  <defs>
+    <path id="chevron" d="M58 37 H113.194 L60.600 102.742 L112.720 154.862 L63.384 219 H8 L58 154 L6 102 Z" />
+  </defs>
+  <g fill="#dcdcdc">
+    <use href="#chevron" />
+    <use href="#chevron" x="68" />
+    <use href="#chevron" x="136" />
+  </g>
+</svg>
