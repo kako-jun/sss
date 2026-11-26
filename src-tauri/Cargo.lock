@@ -3960,6 +3960,7 @@ version = "1.2.2"
 dependencies = [
  "dirs",
  "globset",
+ "gtk",
  "image",
  "kamadak-exif",
  "keepawake",

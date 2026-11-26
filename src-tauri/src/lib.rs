@@ -22,6 +22,7 @@ pub mod shared;
 pub mod startup_error;
 pub mod startup_ui;
 pub mod thumbnail;
+pub mod window_titlebar;
 
 use asset_scope::startup_allow_dirs;
 use cache_worker::CacheWorker;
@@ -60,6 +61,13 @@ pub fn run() {
             }
         }))
         .setup(|app| {
+            // #164: Wayland では装飾なしで作ったウィンドウに後から装飾を付けても空の帯しか
+            // 出ないため、ウィンドウモード用のネイティブなタイトルバー（GtkHeaderBar）を
+            // 先に入れておく。X11・Windows・macOS では何もしない（詳細は window_titlebar.rs）。
+            if let Some(window) = app.get_webview_window("main") {
+                window_titlebar::install_native_titlebar(&window);
+            }
+
             // スクリーンセーバーとディスプレイスリープを抑制（クロスプラットフォーム対応）
             // sleep(false)によりノートPC蓋閉じ時のシステムスリープは許可。
             // D-Bus が無い環境（一部のLinux等）では初期化に失敗しうるが、
