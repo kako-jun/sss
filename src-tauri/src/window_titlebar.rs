@@ -30,6 +30,12 @@ pub fn should_install_header_bar(is_wayland: bool, has_placeholder_titlebar: boo
     is_wayland && has_placeholder_titlebar
 }
 
+/// ウィンドウのカスタムタイトルバー（GType 名。無ければ `None`）が、tao の入れた空の
+/// `GtkEventBox` か。差し替え後は `GtkHeaderBar` になるので、2回呼んでも差し替えは1回だけ。
+pub fn is_tao_placeholder_titlebar(titlebar_type_name: Option<&str>) -> bool {
+    titlebar_type_name == Some("GtkEventBox")
+}
+
 /// 差し替えた直後のヘッダーバーを見せるか。GTK の `update_csd_visibility` と同じ条件
 /// （装飾あり かつ 全画面でない）。差し替えの時点では GTK はまだ再計算しないため、
 /// 全画面で起動した直後に帯が一瞬見えないよう、こちらで初期値を合わせる。
@@ -51,9 +57,8 @@ pub fn install_native_titlebar<R: tauri::Runtime>(window: &tauri::WebviewWindow<
         }
     };
     let is_wayland = gtk_window.display().backend().is_wayland();
-    let has_placeholder = gtk_window
-        .titlebar()
-        .is_some_and(|w| w.is::<gtk::EventBox>());
+    let titlebar_type = gtk_window.titlebar().map(|w| w.type_().name());
+    let has_placeholder = is_tao_placeholder_titlebar(titlebar_type);
     if !should_install_header_bar(is_wayland, has_placeholder) {
         return;
     }
@@ -91,44 +96,36 @@ mod tests {
     }
 
     #[test]
-    fn header_bar_shows_only_when_decorated_and_windowed() {
-        assert!(header_bar_visible(true, false));
-        assert!(!header_bar_visible(true, true));
-        assert!(!header_bar_visible(false, false));
-        assert!(!header_bar_visible(false, true));
+    fn only_gtk_event_box_counts_as_tao_placeholder() {
+        assert!(is_tao_placeholder_titlebar(Some("GtkEventBox")));
+        // タイトルバー無し（装飾ありで作った・X11）
+        assert!(!is_tao_placeholder_titlebar(None));
+        // 差し替え後（GtkHeaderBar）や他のウィジェット
+        assert!(!is_tao_placeholder_titlebar(Some("GtkHeaderBar")));
+        assert!(!is_tao_placeholder_titlebar(Some("GtkBox")));
     }
 
     #[test]
-    fn install_decision_truth_table_is_exactly_and() {
-        for is_wayland in [false, true] {
-            for has_placeholder in [false, true] {
-                assert_eq!(
-                    should_install_header_bar(is_wayland, has_placeholder),
-                    is_wayland && has_placeholder,
-                    "wayland={is_wayland} placeholder={has_placeholder}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn replacement_is_idempotent() {
-        // 1回目: Wayland で tao の空の帯 → 差し替える。差し替え後のタイトルバーは
-        // GtkEventBox ではないので、2回目の判定は常に「触らない」になる。
-        let first = should_install_header_bar(true, true);
-        assert!(first);
-        let has_placeholder_after_install = !first;
+    fn second_install_after_replacement_does_nothing() {
+        // 1回目: Wayland で tao の空の帯 → 差し替える
+        assert!(should_install_header_bar(
+            true,
+            is_tao_placeholder_titlebar(Some("GtkEventBox"))
+        ));
+        // 差し替え後のタイトルバーは GtkHeaderBar なので、もう一度呼んでも触らない
         assert!(!should_install_header_bar(
             true,
-            has_placeholder_after_install
+            is_tao_placeholder_titlebar(Some("GtkHeaderBar"))
         ));
     }
 
     #[test]
-    fn startup_fullscreen_hides_header_bar_even_when_decorated() {
-        // 全画面で起動した直後（装飾なし・全画面）は帯を見せない。
+    fn header_bar_shows_only_when_decorated_and_windowed() {
+        assert!(header_bar_visible(true, false));
+        // 全画面で起動した直後（装飾なし・全画面）は見せない
         assert!(!header_bar_visible(false, true));
-        // 装飾ありでも全画面なら見せない（GTK の update_csd_visibility と同じ）。
+        // 装飾ありでも全画面なら見せない（GTK の update_csd_visibility と同じ）
         assert!(!header_bar_visible(true, true));
+        assert!(!header_bar_visible(false, false));
     }
 }
