@@ -23,6 +23,7 @@
 - **ホーム/標準ディレクトリ解決**: dirs v7（ピック先の既定 `Pictures/sss-picked` やホーム判定）
 - **スクリーンセーバー抑制**: keepawake v0.6 (クロスプラットフォーム対応)
 - **OSロケール取得**: sys-locale v0.3（`get_os_locale`用。`tauri-plugin-os`は使わない）
+- **GTK**: gtk v0.18（Linux のみ。Tauri 本体と同じ版。Wayland でウィンドウモードのタイトルバーを `GtkHeaderBar` に差し替えるため、#164）
 - **プラグイン**（`lib.rs` の `run()` で登録。`Cargo.toml` の下限は JS 側 `@tauri-apps/plugin-*` の minor に揃える）:
   - tauri-plugin-dialog 2.8 (フォルダ選択ダイアログ。Rust 側 API のみ使用し、JS 側の権限は付与しない #93)
   - tauri-plugin-opener 2.6 (URLを開く。capability は `https://*` のみ許可)
@@ -100,7 +101,7 @@
 
 #### 通常表示
 
-- 初回起動は全画面（`tauri.conf.json`: `fullscreen: true` / `decorations: false` / 背景 `#000000`）。F / F11 や右上のボタンでウィンドウモードへ切り替えられ、以後は前回の状態を復元する（#78）
+- 初回起動は全画面（`tauri.conf.json`: `fullscreen: true` / `decorations: false` / 背景 `#000000`）。F / F11 や右上のボタンでウィンドウモードへ切り替えられ、以後は前回の状態を復元する（#78）。Linux の Wayland では tao が装飾なしのウィンドウに空のタイトルバーを入れるため、`window_titlebar.rs` が起動時にそれを `GtkHeaderBar` へ差し替え、ウィンドウモードでタイトルバー（移動・閉じる）が出るようにする（#164。X11・Windows・macOS は何もしない。詳細は `docs/architecture.md` §6-(k)）
 - **ウィンドウの最小サイズ**（#116）: `tauri.conf.json` の `minWidth: 480` / `minHeight: 420`。幅は「設定『フォルダ』タブの『選択』ボタン等が切れず、本文が横スクロールしない」最小値で選んだ（実測: 420px で「選択」が "Se" に切れ本文が横スクロール、440px も本文が横スクロール、460px は英語の『フォルダ』『オプション』タブ本文が 3px 横スクロール、480px で全タブ ja/en とも解消）。**設定のタブ行（`role="tablist"`）の横スクロールは意図した仕様で、最小サイズでも出る**（480 幅で scrollWidth/clientWidth は ja 556/358・en 519/358。720 以上でようやく収まる）ので判定基準にしていない。高さは「フォルダタブの主要操作（パス欄と『選択』ボタン）がスクロール無しで見え、除外ルールタブの追加欄が下端で切れず全体が収まる」最小値で選んだ（実測: 360 では本文領域が 97px でパス欄と『選択』が折り返しの下に隠れ、**360 は既に窮屈**。400 ではフォルダタブは見えるが除外ルールタブは本文 127px に対し内容 130px で追加欄の下端が約3px切れる。420 で本文 142px となり除外ルールタブが収まり、全7タブ ja/en とも最下部までスクロールした時に最後の入力欄/ボタンが切れない）。480x420 では設定の全タブ（ja/en）・確認モーダル・ようこそ/空/エラー案内・オーバーレイ・「…」メニューと除外サブメニューが崩れない。高さ 420 未満は非推奨・未確認。値を下げる場合は e2e の「layout holds at the minimum window size」（`tauri.conf.json` の値を読む）で確認する。`tauri-plugin-window-state` が保存済みの小さいサイズを復元しても、OS のウィンドウマネージャが最小サイズへ丸める想定（Windows の `WM_GETMINMAXINFO`・macOS の `contentMinSize`・GTK のサイズヒント）。Rust 側の補正は入れていない（実機確認項目。初回は `fullscreen: true` なので古い保存サイズからの復元経路を実機で確認する）
 - **ネイティブらしい振る舞い**（#116）: ブラウザのような挙動を出さない。`index.css` の `body` は `user-select: none`（Ctrl+A で画面全体が青くハイライトされず（入力欄の外の Ctrl+A はガードで抑止）、透明な隠しツールチップ等も選択されない）。選択が有用な箇所（コピーしたい文言）は `user-select: text` で許可する: `input`/`textarea`（CSS で全域）、オーバーレイのファイル名・日付・位置、設定の情報タブのバージョン、統計の数値、エラーメッセージ・読み取りエラー例・除外パターン・確認モーダル本文（Tailwind `select-text`）。新しく「コピーしたくなる文言」を足す時は `select-text` を付ける（`src/test/userSelect.test.ts` が「どのファイルのどの要素に付くか」を構文木で検証。e2e がオーバーレイのファイル名の computed style とドラッグ選択も検証）。右クリックメニューとブラウザ系ショートカットの抑止は `src/lib/webviewGuards.ts`（`main.tsx` で登録）:
 
@@ -480,6 +481,10 @@ CREATE TABLE app_settings (
 ### src-tauri/src/thumbnail.rs
 
 - 設定画面（履歴・ピック済み）用の長辺256pxのJPEGサムネイル生成（#67）。保存先は`<cache_dir>/thumbs/{md5(パス:更新日時:サイズ)}.jpg`（asset scope許可済み。起動・リセット時の`clear_cache_dir`で掃除され、次回は再生成）。EXIF Orientationは常に焼き込み、透過は黒背景に合成。巨大画像のデコードが並列で走らないよう静的Mutexで直列化し、`cache_worker::write_atomic`で原子的に書く。キャッシュキーの更新日時は**秒精度**（同一秒内の同サイズ差し替えは検出しない。実運用では無視できる仕様）。`thumbs/`は本体キャッシュの2GB上限（`cache_dir`直下のみ計上）の外なので、**専用上限`THUMBS_MAX_BYTES`(256MB)**で管理し、50枚生成ごとに`enforce_cache_limit`で古い順に削除する（直前に書いた1枚は残す）。キャッシュヒット時にサムネイルのmtimeを現在へ更新するので、この削除は実質LRU
+
+### src-tauri/src/window_titlebar.rs（#164）
+
+- Linux の Wayland セッションでだけ、tao が装飾なしのウィンドウに入れる空のタイトルバー（`GtkEventBox`）を `GtkHeaderBar`（タイトル・閉じるボタン付き）へ差し替える（`install_native_titlebar`。`setup` の先頭で呼ぶ）。表示/非表示は GTK が「装飾あり かつ 全画面でない」で切り替えるので、フロントの `setDecorations` と window-state の復元はそのまま効く。判定は純粋関数 `should_install_header_bar`/`header_bar_visible`（ユニットテストあり）。X11・Windows・macOS では何もしない
 
 ### src-tauri/src/cache_worker.rs
 
