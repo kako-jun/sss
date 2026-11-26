@@ -97,4 +97,38 @@ mod tests {
         assert!(!header_bar_visible(false, false));
         assert!(!header_bar_visible(false, true));
     }
+
+    #[test]
+    fn install_decision_truth_table_is_exactly_and() {
+        for is_wayland in [false, true] {
+            for has_placeholder in [false, true] {
+                assert_eq!(
+                    should_install_header_bar(is_wayland, has_placeholder),
+                    is_wayland && has_placeholder,
+                    "wayland={is_wayland} placeholder={has_placeholder}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn replacement_is_idempotent() {
+        // 1回目: Wayland で tao の空の帯 → 差し替える。差し替え後のタイトルバーは
+        // GtkEventBox ではないので、2回目の判定は常に「触らない」になる。
+        let first = should_install_header_bar(true, true);
+        assert!(first);
+        let has_placeholder_after_install = !first;
+        assert!(!should_install_header_bar(
+            true,
+            has_placeholder_after_install
+        ));
+    }
+
+    #[test]
+    fn startup_fullscreen_hides_header_bar_even_when_decorated() {
+        // 全画面で起動した直後（装飾なし・全画面）は帯を見せない。
+        assert!(!header_bar_visible(false, true));
+        // 装飾ありでも全画面なら見せない（GTK の update_csd_visibility と同じ）。
+        assert!(!header_bar_visible(true, true));
+    }
 }
